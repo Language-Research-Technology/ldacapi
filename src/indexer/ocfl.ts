@@ -18,11 +18,24 @@ const searchSettings = {
       "search.max_open_scroll_context": 5000
     }
   },
-  index: {
-    mapping: {
-      _source: {
-        excludes: ['_text']
-      },
+  create: {
+    settings: {
+      index: {
+        max_result_window: 100000,
+        highlight: {
+          max_analyzed_offset: 1000000
+        },
+        mapping: {
+          total_fields: {
+            limit: 1000
+          }
+        }
+      }
+    },
+    mappings: {
+      // _source: {
+      //   excludes: ['_text']
+      // },
       properties: {
         rocrateId: { type: 'keyword' },
         name: {
@@ -46,14 +59,7 @@ const searchSettings = {
         communicationMode: { type: 'keyword' },
         // createdAt: { type: 'date' },
         // updatedAt: { type: 'date' },
-      },
-      total_fields: {
-        limit: 1000
       }
-    },
-    max_result_window: 100000,
-    highlight: {
-      max_analyzer_offset: 1000000
     }
   },
   indexName: 'entities'
@@ -128,6 +134,7 @@ export async function createIndex(repository: OcflStorage, crateId?: string | Re
   logger.debug('Indexing finished');
 }
 
-export async function deleteIndex() {
-  await Promise.allSettled(Object.values(INDEXER).map(indexer => indexer.delete()));
+export async function deleteIndex(type?: string|string[], crateId?: string) {
+  const indexers = type ? ([] as string[]).concat(type).map(t => INDEXER[t]) : Object.values(INDEXER);
+  await Promise.allSettled(indexers.map(indexer => indexer.delete(crateId)));
 }

@@ -8,6 +8,7 @@ import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } f
 import ldacapi from './app.ts';
 import { Readable } from 'node:stream';
 import { init } from './indexer/ocfl.ts';
+import type { Options } from 'arocapi'
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
 const port = parseInt(process.env.LDACAPI_PORT || '8080');
@@ -15,13 +16,24 @@ export const prisma = new PrismaClient();
 const opensearch = new Client({ node: opensearchUrl });
 
 const fastify = Fastify({
-  logger: {level: 'debug', transport: { target: 'pino-pretty' }},
+  logger: { level: 'debug', transport: { target: 'pino-pretty' } },
 })
-const appOpt = {
+const appOpt: Options = {
   prisma,
   opensearch,
   accessTransformer: AllPublicAccessTransformer,
   fileAccessTransformer: AllPublicFileAccessTransformer,
+  entityTransformers: [
+    (entity, { fastify }) => {
+      entity.accessControl = 'Public';
+      entity.counts = {
+        collections: 0,
+        objects: 0,
+        files: 0
+      }
+      return entity;
+    }
+  ],
   fileHandler: {
     get: async (file) => {
       const fileUrl = `https://storage.example.com/${file.meta.storagePath}`;

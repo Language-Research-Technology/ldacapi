@@ -1,15 +1,9 @@
 import { logger, prisma } from "../index.ts";
-import { Indexer } from "./indexer.ts";
+import { Indexer, RecordType } from "./indexer.ts";
 import { join, relative } from "node:path";
 
 import type { OcflObject } from "@ocfl/ocfl";
 import { ROCrate } from "ro-crate";
-
-const RecordType = {
-  RepositoryCollection: 'RepositoryCollection',
-  RepositoryObject: 'RepositoryObject',
-  File: 'File'
-};
 
 export class StructuralIndexer extends Indexer {
   ocflPath: string;
@@ -34,8 +28,9 @@ export class StructuralIndexer extends Indexer {
     let count = 0;
     for (const entity of crate.entities()) {
       for (const t of entity['@type']) {
-        const entityType = RecordType[t as keyof typeof RecordType];
-        if (entityType) {
+        if (t in RecordType) {
+          const entityType = crate.getContextDefinition(t);
+          //const entityType = RecordType[t as keyof typeof RecordType];
           logger.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
           count++;
           await prisma.entity.create({

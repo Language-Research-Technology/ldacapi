@@ -4,7 +4,7 @@ import bearerAuthPlugin from '@fastify/bearer-auth';
 import { z } from 'zod/v4';
 import { getIndexerState, createIndex, deleteIndex } from '../indexer/ocfl.ts';
 
-export const admin: FastifyPluginAsync<{prefix: string; repository: any}> = async (fastify, opts) => {
+export const admin: FastifyPluginAsync<{ prefix: string; repository: any }> = async (fastify, opts) => {
   console.log(opts);
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   app.register(bearerAuthPlugin, { keys: ['abc'] });
@@ -32,7 +32,7 @@ export const admin: FastifyPluginAsync<{prefix: string; repository: any}> = asyn
           }
           if (!state.isIndexing) {
             app.log.debug(`running [${type}] indexer`);
-            createIndex(opts.repository, crateId ? new RegExp('^'+crateId) : undefined, type, force);
+            createIndex(opts.repository, crateId ? new RegExp('^' + crateId) : undefined, type, force);
           }
           return reply.status(202).send(state);
         } catch (e) {
@@ -52,6 +52,18 @@ export const admin: FastifyPluginAsync<{prefix: string; repository: any}> = asyn
 
   app.delete('/index', async (request, reply) => {
     deleteIndex();
+    return reply.send({ message: 'Deleting' });
+  });
+
+  app.delete('/index/:type', {
+    schema: {
+      params: z.object({
+        type: z.string().optional(),
+      })
+    }
+  }, async (request, reply) => {
+    const { type } = request.params;
+    deleteIndex(type);
     return reply.send({ message: 'Deleting' });
   });
 

@@ -1,8 +1,9 @@
 import { Client } from '@opensearch-project/opensearch';
-import { Indexer } from "./indexer.ts";
+import { Indexer, RecordType } from "./indexer.ts";
 import { logger } from "../index.ts";
 import type { Search_Request, Search_RequestBody, Bulk_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from "ro-crate";
+import { meta } from 'zod/v4/core';
 
 type searchParams = {
   index?: string;
@@ -62,12 +63,14 @@ export class SearchIndexer extends Indexer {
   async delete(crateId?: string) {
     try {
       if (crateId) {
-        await this.client.deleteByQuery({ index: this.conf.indexName, body: { query: { wildcard: { _id: {value: crateId} } } } });
+        await this.client.deleteByQuery({ index: this.conf.indexName, body: { query: { wildcard: { _id: { value: crateId } } } } });
       } else {
         await this.client.indices.delete({ index: this.conf.indexName });
       }
-    } catch (e) {
-      logger.error(e);
+    } catch (error) {
+      if ((error as any).meta?.statusCode !== 404) {
+        logger.error(error);
+      }
     }
   }
 
@@ -81,7 +84,7 @@ export class SearchIndexer extends Indexer {
     return 0;
   }
 
-  async search({ index = this.conf.index, searchBody, filterPath, explain }: searchParams) {
+  async search({ index = this.conf.indexName, searchBody, filterPath, explain }: searchParams) {
     try {
       logger.debug("----- searchBody ----");
       logger.debug(JSON.stringify(searchBody));
@@ -109,7 +112,7 @@ export class SearchIndexer extends Indexer {
     try {
       await this.client.indices.create({
         index: elastic.indexName,
-        body: elastic.index
+        body: elastic.create
       });
       // await this.client.indices.putSettings({
       //   index: elastic.indexName,
@@ -117,7 +120,9 @@ export class SearchIndexer extends Indexer {
       // });
     } catch (error) {
       //logger.debug('search index already exists, ignore');
-      //logger.debug(error);
+      if ((error as any).meta?.statusCode !== 400) {
+        logger.debug(error);
+      }
     }
     const operations: Bulk_RequestBody = [];
     for (const entity of crate.entities()) {
@@ -154,7 +159,7 @@ export class SearchIndexer extends Indexer {
       logger.error(`Skip indexing ${crateId} > ${entityId}, No License Found`);
       return;
     }
-    entity.licence = license;
+    entity.license = license;
 
     entity._crateId = crateId;
     const doc = crate.getTree({ root: entity, depth: 1, allowCycle: false });
@@ -179,13 +184,14 @@ export class SearchIndexer extends Indexer {
 }
 
 function createEntityIndex(elastic: any, crate: ROCrate, entity: Record<string, any>, defaultLicense: string) {
-  const { properties } = elastic.index.mapping;
+  const { properties } = elastic.create.mappings;
   const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
   const record: Record<string, any> = {
     rocrateRootId: crate.rootId,
-    rocrateId: entity['@id'], 
+    rocrateId: entity['@id'],
     entityId: entity['@id'],
-    entityType: entity['@type'],
+    entityType: entity['@type'].map((t:string) => crate.getContextDefinition(t)),
+    //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
     memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
     metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',

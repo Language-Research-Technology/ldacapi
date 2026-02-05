@@ -54,3 +54,9 @@ export class Indexer {
   }
 
 }
+
+export const RecordType = {
+  RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
+  RepositoryObject: 'https://w3id.org/ldac/profile#Object',
+  File: 'File'
+};
