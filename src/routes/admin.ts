@@ -2,17 +2,44 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import bearerAuthPlugin from '@fastify/bearer-auth';
 import { z } from 'zod/v4';
-import { getIndexerState, createIndex, deleteIndex } from '../indexer/ocfl.ts';
+//import { getIndexerState, createIndex, deleteIndex } from '../ocfl.ts';
+import { config } from '../configuration.ts';
+import type { Repository } from '../repository.ts';
 
-export const admin: FastifyPluginAsync<{ prefix: string; repository: any }> = async (fastify, opts) => {
-  console.log(opts);
+export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository }> = async (fastify, opts) => {
+  //console.log(opts);
+  const repo = opts.repository;
   const app = fastify.withTypeProvider<ZodTypeProvider>();
-  app.register(bearerAuthPlugin, { keys: ['abc'] });
+  app.register(bearerAuthPlugin, { keys: [config.tokenAdmin] });
+
+  app.get('/repository/', async (request, reply) => reply.redirect('../repository', 301));
+  app.get('/repository', async (request, reply) => {
+    const objects = [];
+    for await (const repoObject of repo.objects()) {
+      objects.push(repoObject);
+    }
+    return reply.send(objects);
+  });
+
+  app.get('/index/:crateId?', {
+    schema: {
+      summary: 'Get the state of the indexes for a given crate or all crates if no crateId is specified.',
+      params: z.object({
+        crateId: z.string().optional()
+      })
+    }
+  }, async (request, reply) => {
+    const { crateId } = request.params;
+    const state = await repo.getIndexerState(crateId);
+    return reply.send({ structural: [], opensearch: [] });
+  });
 
   app.post('/index', async (request, reply) => reply.redirect('index/', 301));
   app.post('/index/:crateId/:type?',
     {
       schema: {
+        summary: 'Index all creates or a specified crate from the OCFL repository.',
+        description: 'If the index already exists, it will not be re-indexed unless the "force" query parameter is set to true.',
         params: z.object({
           crateId: z.string().optional(),
           type: z.string().optional(),
@@ -22,7 +49,7 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: any }> = as
     }, async (request, reply) => {
       const { type, crateId } = request.params;
       const force = request.query.force != null;
-      const state = await getIndexerState(crateId, type);
+      const state = await repo.getIndexerState(crateId, type);
       if (state) {
         try {
           if (state.isIndexed && !crateId && !force) {
@@ -31,8 +58,7 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: any }> = as
             throw fastify.httpErrors.conflict('Deleting is in progress.');
           }
           if (!state.isIndexing) {
-            app.log.debug(`running [${type}] indexer`);
-            createIndex(opts.repository, crateId ? new RegExp('^' + crateId) : undefined, type, force);
+            repo.createIndex(crateId ? new RegExp('^' + crateId) : undefined, type, force);
           }
           return reply.status(202).send(state);
         } catch (e) {
@@ -46,24 +72,20 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: any }> = as
     }
   );
 
-  app.get('/index', async (request, reply) => {
-    return reply.send({ structural: [], opensearch: [] });
-  });
 
-  app.delete('/index', async (request, reply) => {
-    deleteIndex();
-    return reply.send({ message: 'Deleting' });
-  });
-
-  app.delete('/index/:type', {
+  app.delete('/index', async (request, reply) => reply.redirect('index/*', 301));
+  app.delete('/index/:crateId/:type?', {
     schema: {
+      summary: 'Delete the index of all creates or a specified crate.',
       params: z.object({
+        crateId: z.string().optional(),
         type: z.string().optional(),
       })
     }
   }, async (request, reply) => {
-    const { type } = request.params;
-    deleteIndex(type);
+    let { crateId, type } = request.params;
+    if (crateId === 'all' || crateId === '*') crateId = undefined;
+    repo.deleteIndex(crateId, type);
     return reply.send({ message: 'Deleting' });
   });
 

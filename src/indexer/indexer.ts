@@ -7,6 +7,11 @@ type BaseOptions = {
   defaultMetadataLicense?: string;
 };
 
+export interface CrateObject {
+  root: string;
+  text(path: string): Promise<string>;
+}
+
 export class Indexer {
   defaultLicense: string;
   defaultMetadataLicense: string;
@@ -24,7 +29,7 @@ export class Indexer {
 
   async init() {}
 
-  async _index(param: { ocflObject: OcflObject, crate: ROCrate }) {
+  async _index(param: { crateObject: CrateObject, crate: ROCrate }) {
     throw new Error('Not Implemented');
   }
 
@@ -32,24 +37,29 @@ export class Indexer {
     throw new Error('Not Implemented');
   }
 
+  /** 
+   * Delete the index for a given crateId or all index entries if a crateId is not specified. 
+   * All implementation of this method should ensure that when crateId is 
+   * null or undefined, the entire index (or all entries) is deleted.
+   */
   async delete(crateId?: string) {
     throw new Error('Not Implemented');
   }
 
-  async index({ ocflObject, crate }: { ocflObject: OcflObject, crate: ROCrate }) {
+  async index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
     if (!rootDataset) {
-      logger.warn(`${ocflObject.root}: Skipped: Does not contain an ROCrate with a valid root dataset.`);
+      logger.warn(`${crateObject.root}: Skipped: Does not contain an ROCrate with a valid root dataset.`);
     } else if (crateId === './') {
-      logger.warn(`${ocflObject.root}: Skipped: Cannot process a crate with invalid identifier ('./').`);
+      logger.warn(`${crateObject.root}: Skipped: Cannot process a crate with invalid identifier ('./').`);
     } else if (!license) {
-      logger.warn(`${ocflObject.root}: Skipped: No license found.`);
+      logger.warn(`${crateObject.root}: Skipped: No license found.`);
     } else {
       //logger.debug('index ' + ocflObject.root);
       //console.log(this.__state);
-      await this._index({ ocflObject, crate });
+      await this._index({ crateObject, crate });
     }
   }
 
@@ -58,5 +68,5 @@ export class Indexer {
 export const RecordType = {
   RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
   RepositoryObject: 'https://w3id.org/ldac/profile#Object',
-  File: 'File'
+  File: 'https://schema.org/MediaObject'
 };

@@ -1,0 +1,69 @@
+POST http://host.containers.internal:9200/entities/_search HTTP/1.1
+content-type: application/json
+
+{
+    "query": {
+      "bool": {
+        "must": [
+          {
+            "multi_match": {
+              "query": "",
+              "fields": [
+                "name^2",
+                "description"
+              ],
+              "type": "best_fields",
+              "fuzziness": "AUTO",
+              "zero_terms_query": "all"
+            }
+          }
+        ],
+        "filter": []
+      }
+    },
+    "aggs": {
+      "inLanguage": {
+        "terms": {
+          "field": "inLanguage.keyword",
+          "size": 20
+        }
+      },
+      "mediaType": {
+        "terms": {
+          "field": "mediaType.keyword",
+          "size": 20
+        }
+      },
+      "communicationMode": {
+        "terms": {
+          "field": "communicationMode.keyword",
+          "size": 20
+        }
+      },
+      "entityType": {
+        "terms": {
+          "field": "entityType",
+          "size": 20
+        }
+      }
+    },
+    "highlight": {
+      "fields": {
+        "name": {},
+        "description": {}
+      }
+    },
+    "from": 0,
+    "size": 10
+}
+
+###
+
+POST http://host.containers.internal:9200/entities/_search HTTP/1.1
+content-type: application/json
+
+{ "query" : { "prefix": { "rocrateRootId": { "value": "arcp://name,hdl10.26180~23961609" } } } }
+#{ "query" : { "match_all": {} } }
+
+###
+GET http://host.containers.internal:9200/entities/_mapping HTTP/1.1

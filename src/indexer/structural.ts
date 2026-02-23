@@ -1,9 +1,8 @@
 import { logger, prisma } from "../index.ts";
 import { Indexer, RecordType } from "./indexer.ts";
 import { join, relative } from "node:path";
-
-import type { OcflObject } from "@ocfl/ocfl";
 import { ROCrate } from "ro-crate";
+import type { CrateObject } from "./indexer.ts";
 
 export class StructuralIndexer extends Indexer {
   ocflPath: string;
@@ -17,22 +16,23 @@ export class StructuralIndexer extends Indexer {
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 
-  async _index({ ocflObject, crate }: { ocflObject: OcflObject, crate: ROCrate }) {
-    await ocflObject.load();
+  async _index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
+    //await ocflObject.load();
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
     //console.log(`${crateId} license: ${lic}`);
-    const objectRoot = ocflObject.root;
+    //const objectRoot = ocflObject.root;
     logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
     for (const entity of crate.entities()) {
       for (const t of entity['@type']) {
         if (t in RecordType) {
-          const entityType = crate.getContextDefinition(t);
+          const entityType = crate.getContextDefinition(t) || RecordType[t as keyof typeof RecordType];
           //const entityType = RecordType[t as keyof typeof RecordType];
           logger.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
           count++;
+          const rocrate = entityAsCrate(crate, entity);
           await prisma.entity.create({
             data: {
               rocrateId: entity['@id'],
@@ -42,8 +42,8 @@ export class StructuralIndexer extends Indexer {
               memberOf: entity['pcdm:memberOf']?.[0]['@id'] || entity.memberOf?.[0]['@id'] || entity['@reverse'].hasMember?.[0]?.['@id'] || null,
               rootCollection: crate.rootId,
               metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
-              contentLicenseId: entity.license[0]['@id'] || license,
-              rocrate: entityAsCrate(crate, entity)
+              contentLicenseId: entity.license?.[0]['@id'] || license,
+              meta: { rocrate}
             }
           });
         }
@@ -89,6 +89,7 @@ export class StructuralIndexer extends Indexer {
     const where = crateId ? { rocrateId: { startsWith: crateId } } : {};
     //const truncate = !crateId;
     await prisma.entity.deleteMany({ where });
+    logger.debug(`[structural] Index ${crateId || '<all>'} deleted`);
     //await File.destroy({ truncate, where });
   }
 

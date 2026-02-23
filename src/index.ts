@@ -7,7 +7,6 @@ import fastifySensible from '@fastify/sensible';
 import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } from 'arocapi';
 import ldacapi from './app.ts';
 import { Readable } from 'node:stream';
-import { init } from './indexer/ocfl.ts';
 import type { Options } from 'arocapi'
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
@@ -17,7 +16,12 @@ const opensearch = new Client({ node: opensearchUrl });
 
 const fastify = Fastify({
   logger: { level: 'debug', transport: { target: 'pino-pretty' } },
+  // routerOptions: {
+  //   ignoreTrailingSlash: true,
+  // }
 })
+export const logger = fastify.log;
+
 const appOpt: Options = {
   prisma,
   opensearch,
@@ -47,7 +51,7 @@ const appOpt: Options = {
   // Required: RO-Crate handler for serving RO-Crate metadata
   roCrateHandler: {
     get: async (entity) => {
-      const jsonString = JSON.stringify(entity.rocrate, null, 2);
+      const jsonString = JSON.stringify(entity.meta.rocrate, null, 2);
       return {
         type: 'stream' as 'stream',
         stream: Readable.from([jsonString]),
@@ -59,7 +63,7 @@ const appOpt: Options = {
     },
     head: async (entity) => ({
       contentType: 'application/ld+json',
-      contentLength: Buffer.byteLength(JSON.stringify(entity.rocrate)),
+      contentLength: Buffer.byteLength(JSON.stringify(entity.meta.rocrate)),
     }),
   }
 };
@@ -69,16 +73,14 @@ fastify.register(fastifyRoutes);
 fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
 
-await fastify.ready();
-
 // Run the server!
-try {
-  await fastify.listen({ port })
-} catch (err) {
-  fastify.log.error(err)
-  process.exit(1)
-}
+(async function() {
+  try {
+    await fastify.ready();
+    await fastify.listen({ port })
+  } catch (err) {
+    fastify.log.error(err)
+    process.exit(1)
+  }
+})();
 
-export const logger = fastify.log;
-
-init();

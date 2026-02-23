@@ -1,9 +1,10 @@
 import { Client } from '@opensearch-project/opensearch';
-import { Indexer, RecordType } from "./indexer.ts";
+import { Indexer } from "./indexer.ts";
+import type { CrateObject } from "./indexer.ts";
 import { logger } from "../index.ts";
 import type { Search_Request, Search_RequestBody, Bulk_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from "ro-crate";
-import { meta } from 'zod/v4/core';
+import { Readable } from 'stream';
 
 type searchParams = {
   index?: string;
@@ -16,20 +17,49 @@ function isText(entity: Record<string, any>) {
   return entity.encodingFormat?.some((ef: any) => (typeof ef === 'string') && ef.startsWith('text/'));
 }
 
-const typeIndexer: Record<string, Function> = {
-  RepositoryCollection: function (properties: Record<string, any>, entity: Record<string, any>, record: Record<string, any>) {
-    return record;
-  },
-  RepositoryObject: function (properties: Record<string, any>, entity: Record<string, any>, record: Record<string, any>) {
-    return record;
-  },
-  File: function (properties: Record<string, any>, entity: Record<string, any>, record: Record<string, any>) {
-    if (isText(entity)) {
-
-    }
-    return record;
-  }
+type MapperParams = {
+  properties?: Record<string, any>;
+  entity: Record<string, any>;
+  record: Record<string, any>;
+  crate?: ROCrate;
+  crateObject?: CrateObject;
 }
+
+/** The function mapped here may return an array of entities to be processed in batch  */
+const typeIndexer: Record<string, (params: MapperParams) => any[] | void> = {
+  RepositoryCollection: function () {
+    //return record;
+  },
+  RepositoryObject: function ({entity}) {
+    // console.log('entity.indexableText');
+    // console.log(entity.indexableText);
+    const results: any[] = [];
+    for (const indexables of [entity.indexableText, entity.mainText]) {
+      for (const e of (indexables || [])) {
+        results.push(e);
+      }
+    }
+    return results;
+  },
+  File: function () {
+  }
+};
+
+const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<any[] | void>> = {
+  File: async function ({entity, record, crateObject}) {
+    //todo: check licence if it allows indexing content
+    if (isText(entity)) {
+      try {
+        record._text = await crateObject?.text(record.entityId) || '';
+        logger.info(`[${record.rocrateRootId}] Indexing: ${record.entityId}`);
+      } catch (e) {
+        logger.error(`[${record.rocrateRootId}] Cannot read file: ${record.entityId}`);
+        logger.error(e);
+        record._error = 'file_not_found';
+      }
+    }
+  }
+};
 
 export class SearchIndexer extends Indexer {
   conf;
@@ -63,10 +93,11 @@ export class SearchIndexer extends Indexer {
   async delete(crateId?: string) {
     try {
       if (crateId) {
-        await this.client.deleteByQuery({ index: this.conf.indexName, body: { query: { wildcard: { _id: { value: crateId } } } } });
+        await this.client.deleteByQuery({ index: this.conf.indexName, body: { query: { prefix: { rocrateRootId: { value: crateId } } } } });
       } else {
         await this.client.indices.delete({ index: this.conf.indexName });
       }
+      logger.debug(`[search] Index ${crateId || '<all>'} deleted`);
     } catch (error) {
       if ((error as any).meta?.statusCode !== 404) {
         logger.error(error);
@@ -84,29 +115,7 @@ export class SearchIndexer extends Indexer {
     return 0;
   }
 
-  async search({ index = this.conf.indexName, searchBody, filterPath, explain }: searchParams) {
-    try {
-      logger.debug("----- searchBody ----");
-      logger.debug(JSON.stringify(searchBody));
-      logger.debug("----- searchBody ----");
-      const opts: Search_Request = {
-        index,
-        body: searchBody,
-        explain: explain,
-      }
-      if (filterPath) {
-        opts.filter_path = filterPath
-      }
-      logger.debug(JSON.stringify(opts));
-      const result = await this.client.search(opts);
-      return result.body;
-    } catch (e) {
-      logger.error(e);
-      throw e;
-    }
-  }
-
-  async _index({ ocflObject, crate }: Parameters<Indexer['_index']>[0]) {
+  async _index({ crateObject, crate }: Parameters<Indexer['_index']>[0]) {
     // create indices if not exists
     const elastic = this.conf;
     try {
@@ -124,14 +133,26 @@ export class SearchIndexer extends Indexer {
         logger.debug(error);
       }
     }
+    const { properties } = elastic.create.mappings;
     const operations: Bulk_RequestBody = [];
+    let batchedEntities: any[] = []; // for individual updates
+
     for (const entity of crate.entities()) {
-      if (entity['@type'].some(t => t in typeIndexer)) {
-        const indexRecord = createEntityIndex(elastic, crate, entity, this.defaultLicense);
-        const _id: string = indexRecord.rocrateRootId + '/' + indexRecord.entityId;
+      const entityTypes: string[] = entity['@type'];
+      const matchedIndexers = entityTypes.map(t => typeIndexer[t]).filter(fn => !!fn);
+      if (matchedIndexers.length) {
+        // create common index record
+        const record = createDoc(properties, crate, entity, this.defaultLicense);
+        const _id: string = record.rocrateRootId + '/' + record.entityId;
+        logger.debug(`[structural] Adding ${_id}`);
+        // add additional information to record based on type 
+        for (const indexType of matchedIndexers) {
+          const entities = indexType({properties, entity, record, crate, crateObject});
+          if (entities) batchedEntities = batchedEntities.concat(entities);
+        }
         operations.push(
           { update: { _index: elastic.indexName, _id } },
-          { doc: indexRecord, doc_as_upsert: true }
+          { doc: record, doc_as_upsert: true }
         );
       }
     }
@@ -140,13 +161,29 @@ export class SearchIndexer extends Indexer {
         body: operations,
         refresh: true, // setting this to true will update result immediately, but will degrade performance
       });
-      //console.log(result);
-      //if (result.statusCode) return true;
+      logger.debug(`[search] Bulk operation result errors: ${result.body.errors}`);
+      //console.log(JSON.stringify(, null, 2));
+      // index bigger data such as file content in a separate step to manage payload size
+      const batchedResults = Readable.from(batchedEntities).map(async entity => {
+        const entityTypes: string[] = entity['@type'];
+        const matchedIndexers = entityTypes.map(t => batchedTypeIndexer[t]).filter(fn => !!fn);
+        const doc = {};
+        for (const mapper of matchedIndexers) {
+          await mapper({properties, entity, record: doc, crate, crateObject});
+        }
+        return this.client.update({
+          index: elastic.indexName,
+          id: crate.rootId + '/' + entity['@id'],
+          body: { doc, doc_as_upsert: true }
+        });
+      }, { concurrency: 4 });
+      for await (const result of batchedResults) {
+        logger.debug(`[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
+      }
     } catch (error) {
       logger.error('Error indexing ' + crate.rootId);
       logger.error(error);
     }
-
   }
 
   async _indexEntity({ ocflObject, crate, entity, parents = [], root }) {
@@ -181,31 +218,82 @@ export class SearchIndexer extends Indexer {
 
   }
 
+  async search({ index = this.conf.indexName, searchBody, filterPath, explain }: searchParams) {
+    try {
+      logger.debug("----- searchBody ----");
+      logger.debug(JSON.stringify(searchBody));
+      logger.debug("----- searchBody ----");
+      const opts: Search_Request = {
+        index,
+        body: searchBody,
+        explain: explain,
+      }
+      if (filterPath) {
+        opts.filter_path = filterPath
+      }
+      logger.debug(JSON.stringify(opts));
+      const result = await this.client.search(opts);
+      return result.body;
+    } catch (e) {
+      logger.error(e);
+      throw e;
+    }
+  }
+
+
 }
 
-function createEntityIndex(elastic: any, crate: ROCrate, entity: Record<string, any>, defaultLicense: string) {
-  const { properties } = elastic.create.mappings;
+function mapDefaultProperties(value: any) {
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return { '@value': value };
+    case 'object':
+      if (value['@id']) {
+        const o = { '@id': value['@id'] } as any;
+        for (const prop of ['name', 'alternateName']) {
+          if (value[prop] && value[prop].length) o[prop] = value[prop].map(mapDefaultProperties);
+        }
+        return o;
+      } else {
+        return value;
+      }
+    case 'number':
+    default:
+      return { '@value': value.toString() };
+  }
+}
+
+/** Create entity basic record for bulk indexing */
+function createDoc(properties: any, crate: ROCrate, entity: Record<string, any>, defaultLicense: string) {
   const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
   const record: Record<string, any> = {
-    rocrateRootId: crate.rootId,
-    rocrateId: entity['@id'],
-    entityId: entity['@id'],
-    entityType: entity['@type'].map((t:string) => crate.getContextDefinition(t)),
+    rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
+    rocrateId: entity['@id'], // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
+    entityId: entity['@id'], // Original entity id
+    entityType: entity['@type'].map((t: string) => crate.getContextDefinition(t)),
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
     memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
     metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
     contentLicenseId: entity.license?.[0]?.['@id'] || license
   }
+  //handle hasPart
+  crate.addValues(entity, 'isPartOf', entity['@reverse'].hasPart);
+
   for (const propName in properties) {
     if (record[propName] == null && entity[propName] != null) {
       record[propName] = entity[propName];
     }
   }
-
-  for (const type of entity['@type'] as string[]) {
-    typeIndexer[type]?.(properties, entity, record);
+  for (const propName in entity) {
+    if (record[propName] == null && entity[propName] != null && entity[propName].length) {
+      //console.log(propName, entity[propName]);
+      record[propName] = entity[propName].map(mapDefaultProperties);
+      //console.log(propName, record[propName]);
+    }
   }
+
   return record;
 }
 
@@ -223,38 +311,16 @@ function pickBasic(obj) {
   return pick(['@id', '@type', 'name'], obj);
 }
 
-async function indexFile({ entity, doc, ocflObject }) {
-  const entityId = entity['@id'];
-  logger.debug(`Index File: ${entityId}`);
-  doc.partOf = pickBasic(doc.partOf);
-  if (entity.__$contentIndexable[0] && allowTextIndex(entity)) {
-    const isText = entity.encodingFormat?.some(ef => (typeof ef === 'string') && ef.startsWith('text/'));
-    if (!isText) return;
-    try {
-      doc._text = await ocflObject.getFile({ logicalPath: entityId }).asString();
-      logger.info(`[${doc._crateId}] Indexing: ${entityId}`);
-    } catch (e) {
-      logger.error(`[${doc._crateId}] Cannot read file: ${entityId}`);
-      logger.error(e.message);
-      doc._error = 'file_not_found';
-    }
-  }
-}
-
 function allowTextIndex(entity) {
   return entity.license?.some(l => allowTextIndex?.[0]);
 }
 /**
  * Find the license of an item with its id if not and id or undefined return a default license from
  * config, if passed an Id and not found it will also return a default license.
- * @param {object[]} licenses - Array of licences
- * @param {import('ro-crate').ROCrate} crate
- * @returns a license object
- *
  */
-function resolveLicense(licenses, crate, defaultLicense) {
+function resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
   for (const license of (licenses || [])) {
-    const id = typeof license === 'string' ? license : license?.['@id'];
+    const id = typeof license === 'string' ? license : license['@id'];
     const entity = crate.getEntity(id);
     if (entity) {
       return entity;
