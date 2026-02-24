@@ -27,6 +27,12 @@ export class Indexer {
     return indexer;
   }
 
+  deriveUniqueEntityId(crateRootId : string, entityId: string) {
+    if (entityId.startsWith(crateRootId)) return entityId;
+    else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
+    else return crateRootId + '/' + entityId;
+  }
+
   async init() {}
 
   async _index(param: { crateObject: CrateObject, crate: ROCrate }) {

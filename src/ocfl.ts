@@ -51,15 +51,22 @@ const searchSettings = {
       }
     },
     mappings: {
-      _source: {
-        excludes: ['_text']
-      },
+      // _source: {
+      //   excludes: ['_text']
+      // },
+      // _source: { enabled: false },
       dynamic: true,
       properties: {
         '@id': { type: 'keyword' },
         '@type': { type: 'keyword' },
         rocrateRootId: { type: 'keyword' },
         rocrateId: { type: 'keyword' },
+        entityId: { type: 'keyword' },
+        entityType: { type: 'keyword' },
+        memberOf: { type: 'keyword' },
+        rootCollection: { type: 'keyword' },
+        metadataLicenseId: { type: 'keyword' },
+        contentLicenseId: { type: 'keyword' },
         name: {
           type: 'text',
           fields: {
@@ -67,21 +74,17 @@ const searchSettings = {
           },
         },
         description: { type: 'text' },
-        entityType: { type: 'keyword' },
         conformsTo: {
           properties: {
             '@id': { type: 'keyword' },
           }
         },
         //recordType: { type: 'keyword' },
-        memberOf: { type: 'keyword' },
-        rootCollection: { type: 'keyword' },
         //root: { type: 'keyword' },
-        metadataLicenseId: { type: 'keyword' },
-        contentLicenseId: { type: 'keyword' },
         //inLanguage: { type: 'keyword' },
         location: { type: 'geo_point' },
         mediaType: { type: 'keyword' },
+        _text: { type: 'text' }
         //communicationMode: { type: 'keyword' },
         // createdAt: { type: 'date' },
         // updatedAt: { type: 'date' },
