@@ -22,6 +22,7 @@
   "dependencies": {
     "@biomejs/biome": "^2.2.5",
     "@fastify/bearer-auth": "^10.1.2",
+    "@fastify/cors": "^11.2.0",
     "@fastify/multipart": "^9.2.1",
     "@fastify/routes": "^6.0.2",
     "@fastify/sensible": "^6.0.4",

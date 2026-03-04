@@ -8,6 +8,7 @@ import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } f
 import ldacapi from './app.ts';
 import { Readable } from 'node:stream';
 import type { Options } from 'arocapi'
+import cors from '@fastify/cors';
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
 const port = parseInt(process.env.LDACAPI_PORT || '8080');
@@ -22,9 +23,16 @@ const fastify = Fastify({
 })
 export const logger = fastify.log;
 
+fastify.register(cors, {
+  origin: '*',
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type']
+});
+
 const appOpt: Options = {
   prisma,
   opensearch,
+  disableCors: true,
   accessTransformer: AllPublicAccessTransformer,
   fileAccessTransformer: AllPublicFileAccessTransformer,
   entityTransformers: [
