@@ -4,6 +4,7 @@ import { Client } from '@opensearch-project/opensearch';
 import Fastify from 'fastify';
 import fastifyRoutes from '@fastify/routes';
 import fastifySensible from '@fastify/sensible';
+import cors from '@fastify/cors';
 import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer, OpensearchQueryBuilder } from 'arocapi';
 import ldacapi from './app.ts';
 import { Readable } from 'node:stream';
@@ -26,6 +27,7 @@ export const logger = fastify.log;
 const appOpt: Options = {
   prisma,
   opensearch,
+  disableCors: true,
   queryBuilderOptions: { aggregations: config.search.aggregations },
   accessTransformer: AllPublicAccessTransformer,
   fileAccessTransformer: AllPublicFileAccessTransformer,
@@ -71,6 +73,9 @@ const appOpt: Options = {
 };
 
 //fastify.register(fastifySensible);
+fastify.register(cors, {
+  methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+});
 fastify.register(fastifyRoutes);
 fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
