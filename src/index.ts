@@ -4,10 +4,11 @@ import { Client } from '@opensearch-project/opensearch';
 import Fastify from 'fastify';
 import fastifyRoutes from '@fastify/routes';
 import fastifySensible from '@fastify/sensible';
-import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } from 'arocapi';
+import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer, OpensearchQueryBuilder } from 'arocapi';
 import ldacapi from './app.ts';
 import { Readable } from 'node:stream';
-import type { Options } from 'arocapi'
+import { config } from './configuration.ts';
+import type { Options } from 'arocapi';
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
 const port = parseInt(process.env.LDACAPI_PORT || '8080');
@@ -25,6 +26,7 @@ export const logger = fastify.log;
 const appOpt: Options = {
   prisma,
   opensearch,
+  queryBuilderOptions: { aggregations: config.search.aggregations },
   accessTransformer: AllPublicAccessTransformer,
   fileAccessTransformer: AllPublicFileAccessTransformer,
   entityTransformers: [
@@ -74,7 +76,7 @@ fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
 
 // Run the server!
-(async function() {
+(async function () {
   try {
     await fastify.ready();
     await fastify.listen({ port })

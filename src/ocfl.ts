@@ -6,6 +6,7 @@ import { SearchIndexer } from "./indexer/search.ts";
 import { Indexer } from "./indexer/indexer.ts";
 import type { CrateObject } from "./indexer/indexer.ts";
 import ocfl from "@ocfl/ocfl-fs";
+import { config } from './configuration.ts';
 
 const ocflConf = {
   ocflPath: '/opt/storage/oni/ocfl',
@@ -27,83 +28,18 @@ const defaultLicense = 'https://opensource.org/licenses/MIT';
 const defaultMetadataLicense = 'https://opensource.org/licenses/MIT';
 const ocflPath = '/opt/storage/oni/ocfl';
 const ocflPathInternal = 'ocfl';
-const searchSettings = {
-  cluster: {
-    persistent: {
-      "search.max_open_scroll_context": 5000
-    },
-    transient: {
-      "search.max_open_scroll_context": 5000
-    }
-  },
-  create: {
-    settings: {
-      index: {
-        max_result_window: 100000,
-        highlight: {
-          max_analyzed_offset: 1000000
-        },
-        mapping: {
-          total_fields: {
-            limit: 1000
-          }
-        }
-      }
-    },
-    mappings: {
-      // _source: {
-      //   excludes: ['_text']
-      // },
-      // _source: { enabled: false },
-      dynamic: true,
-      properties: {
-        '@id': { type: 'keyword' },
-        '@type': { type: 'keyword' },
-        rocrateRootId: { type: 'keyword' },
-        rocrateId: { type: 'keyword' },
-        entityId: { type: 'keyword' },
-        entityType: { type: 'keyword' },
-        memberOf: { type: 'keyword' },
-        rootCollection: { type: 'keyword' },
-        metadataLicenseId: { type: 'keyword' },
-        contentLicenseId: { type: 'keyword' },
-        name: {
-          type: 'text',
-          fields: {
-            keyword: { type: 'keyword' },
-          },
-        },
-        description: { type: 'text' },
-        conformsTo: {
-          properties: {
-            '@id': { type: 'keyword' },
-          }
-        },
-        //recordType: { type: 'keyword' },
-        //root: { type: 'keyword' },
-        //inLanguage: { type: 'keyword' },
-        location: { type: 'geo_point' },
-        mediaType: { type: 'keyword' },
-        _text: { type: 'text' }
-        //communicationMode: { type: 'keyword' },
-        // createdAt: { type: 'date' },
-        // updatedAt: { type: 'date' },
-      }
-    }
-  },
-  indexName: 'entities'
-};
+
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 
-export async function init() {
+export async function init(opts: any) {
   logger.info('Initializing OCFL repository and indexers');
   INDEXER = {
     structural: await StructuralIndexer.create({
       defaultLicense, defaultMetadataLicense, ocflPath, ocflPathInternal
     }),
     search: await SearchIndexer.create({
-      defaultLicense, defaultMetadataLicense, searchSettings
+      defaultLicense, defaultMetadataLicense, searchSettings: config.search, client: opts.opensearchClient
     })
   };
   repository = ocfl.storage({

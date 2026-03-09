@@ -17,8 +17,8 @@ export type Options = {
 };
 
 const app: FastifyPluginAsync<Options> = async (fastify, options) => {
-  const repository = await initRepository('ocfl');
-
+  const repository = await initRepository('ocfl', { opensearchClient: options.opensearch });
+  
   // Declare a route
   fastify.get('/', async function handler(request, reply) {
     const routes = fastify.routes.keys().toArray();

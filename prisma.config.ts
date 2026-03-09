@@ -1,9 +1,11 @@
-import { defineConfig, env } from "prisma/config";
-import { loadEnvFile } from 'node:process';
+import { defineConfig } from "prisma/config";
+import { loadEnvFile, env } from 'node:process';
 try {
-  loadEnvFile();
-} catch (error) {  
-  process.env.DATABASE_URL = 'postgresql://ldacapi:ldacapi@localhost:5432/ldacapi?schema=public';
+  const prefix = env.NODE_ENV ? `.${env.NODE_ENV}` : '';
+  loadEnvFile(`./.env${prefix}`);
+} catch (error) {
+  console.log(error);  
+  env.DATABASE_URL = 'postgresql://ldacapi:ldacapi@localhost:5432/ldacapi?schema=public';
 }
 export default defineConfig({
   schema: "prisma",
@@ -11,6 +13,6 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: env("DATABASE_URL"),
+    url: env.DATABASE_URL || '',
   },
 });

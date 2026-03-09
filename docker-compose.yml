@@ -1,0 +1,38 @@
+volumes:
+  postgres_data:
+  opensearch_data:
+
+services:
+  db:
+    restart: always
+    image: postgres:18-alpine
+    hostname: db
+    container_name: db
+    tty: true
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+      PGDATA: /postgresql/data
+    volumes:
+      - postgres_data:/postgresql
+    ports:
+      - "5432:5432"
+
+  opensearch:
+    restart: always
+    image: opensearchproject/opensearch:3.5.0
+    hostname: opensearch
+    container_name: opensearch
+    tty: true
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - _JAVA_OPTIONS=-XX:UseSVE=0 #this fixes Mac M4 bug
+      #- xpack.security.enabled=false # for elasticsearch
+      - plugins.security.disabled=true # for opensearch
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=ABCDE1234!
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"

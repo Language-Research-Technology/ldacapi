@@ -27,21 +27,26 @@ type MapperParams = {
   deferredEntities?: Record<string, any>[];
 }
 
-type PropertyMapperFn = (value: any, deferredEntities: Record<string, any>[]) => any;
-function mapPropIndexableText(value: any, deferredEntities: Record<string, any>[]): any {
-  if (value['@id']) {
+type PropertyMapperFn = (value: any, deferredEntities?: Record<string, any>[]) => any;
+function mapPropIndexableText(value: any, deferredEntities?: Record<string, any>[]): any {
+  if (value['@id'] && deferredEntities) {
     deferredEntities.push(value);
   }
 }
-function mapPropDefaultText(value: any, deferredEntities: Record<string, any>[]): any {
+function mapPropDefaultText(value: any): any {
   return value['@value'] || value;
 }
+function mapPropDefaultEntityName(value: any): any {
+  return value.name?.map(mapPropDefaultText)[0] || value['@value'] || value;
+}
+
 const propertyMapper: Record<string, PropertyMapperFn> = {
   indexableText: mapPropIndexableText,
   mainText: mapPropIndexableText,
   name: mapPropDefaultText,
   description: mapPropDefaultText,
-  '@type': mapPropDefaultText
+  '@type': mapPropDefaultText,
+  inLanguage: mapPropDefaultEntityName,
 };
 
 /** The function mapped here may return an array of entities to be processed in batch  */
@@ -82,7 +87,7 @@ export class SearchIndexer extends Indexer {
   constructor(opt: any) {
     super(opt);
     this.conf = opt.searchSettings;
-    this.client = new Client({ node: process.env.OPENSEARCH_URL });
+    this.client = opt.client || new Client({ node: process.env.OPENSEARCH_URL });
     // this.conformsTo = {
     //   [configuration.api.conformsTo.collection]: mapCollection,
     //   [configuration.api.conformsTo.object]: mapObject
@@ -107,9 +112,9 @@ export class SearchIndexer extends Indexer {
   async delete(crateId?: string) {
     try {
       if (crateId) {
-        await this.client.deleteByQuery({ index: this.conf.indexName, body: { query: { prefix: { rocrateRootId: { value: crateId } } } } });
+        await this.client.deleteByQuery({ index: this.conf.entityIndex, body: { query: { prefix: { rocrateRootId: { value: crateId } } } } });
       } else {
-        await this.client.indices.delete({ index: this.conf.indexName });
+        await this.client.indices.delete({ index: this.conf.entityIndex });
       }
       logger.debug(`[search] Index ${crateId || '<all>'} deleted`);
     } catch (error) {
@@ -121,7 +126,7 @@ export class SearchIndexer extends Indexer {
 
   async count() {
     try {
-      const res = await this.client.count({ index: this.conf.indexName });
+      const res = await this.client.count({ index: this.conf.entityIndex });
       return res.body.count;
     } catch (e) {
       logger.error(e);
@@ -134,11 +139,11 @@ export class SearchIndexer extends Indexer {
     const elastic = this.conf;
     try {
       await this.client.indices.create({
-        index: elastic.indexName,
+        index: elastic.entityIndex,
         body: elastic.create
       });
       // await this.client.indices.putSettings({
-      //   index: elastic.indexName,
+      //   index: elastic.entityIndex,
       //   body: elastic.index
       // });
     } catch (error) {
@@ -163,8 +168,9 @@ export class SearchIndexer extends Indexer {
         for (const mapType of matchedMappers) {
           record = mapType({ properties, entity, record, crate, crateObject });
         }
+        console.log(record);
         operations.push(
-          { update: { _index: elastic.indexName, _id } },
+          { update: { _index: elastic.entityIndex, _id } },
           { doc: record, doc_as_upsert: true }
         );
       }
@@ -175,7 +181,7 @@ export class SearchIndexer extends Indexer {
         refresh: true, // setting this to true will update result immediately, but will degrade performance
       });
       logger.debug(`[search] Bulk operation result errors: ${result.body.errors}`);
-      //console.log(JSON.stringify(, null, 2));
+      console.log(JSON.stringify(result, null, 2));
       // index bigger data such as file content in a separate step to manage payload size
       const batchedResults = Readable.from(deferredEntities).map(async entity => {
         const entityTypes: string[] = entity['@type'];
@@ -184,18 +190,18 @@ export class SearchIndexer extends Indexer {
         for (const mapper of matchedIndexers) {
           doc = await mapper({ properties, entity, record: doc, crate, crateObject });
         }
-        console.log(doc);
+        //console.log(doc);
         return this.client.update({
-          index: elastic.indexName,
+          index: elastic.entityIndex,
           id: this.deriveUniqueEntityId(crate.rootId, entity['@id']),
           body: { doc, doc_as_upsert: true },
         });
       }, { concurrency: 4 });
       for await (const result of batchedResults) {
-        console.log(result);
+        //console.log(result);
         logger.debug(`[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
       }
-      await this.client.indices.refresh({ index: elastic.indexName });      
+      await this.client.indices.refresh({ index: elastic.entityIndex });      
     } catch (error) {
       logger.error('Error indexing ' + crate.rootId);
       logger.error(error);
@@ -234,7 +240,7 @@ export class SearchIndexer extends Indexer {
 
   }
 
-  async search({ index = this.conf.indexName, searchBody, filterPath, explain }: searchParams) {
+  async search({ index = this.conf.entityIndex, searchBody, filterPath, explain }: searchParams) {
     try {
       logger.debug("----- searchBody ----");
       logger.debug(JSON.stringify(searchBody));

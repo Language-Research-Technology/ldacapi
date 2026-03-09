@@ -72,9 +72,16 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository 
     }
   );
 
-
-  app.delete('/index', async (request, reply) => reply.redirect('index/*', 301));
+  const deleteConfig = {
+    config: {
+      cors: {
+        methods: ['GET', 'HEAD', 'POST', 'DELETE'], // Allow all origins for this route
+      },
+    }
+  };
+  app.delete('/index', deleteConfig, async (request, reply) => reply.redirect('index/*', 301));
   app.delete('/index/:crateId/:type?', {
+    config: deleteConfig.config,
     schema: {
       summary: 'Delete the index of all creates or a specified crate.',
       params: z.object({
