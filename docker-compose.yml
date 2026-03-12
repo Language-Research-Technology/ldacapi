@@ -1,3 +1,8 @@
+networks:
+  ldacapi:
+    name: ldacapi
+    driver: bridge
+
 volumes:
   postgres_data:
   opensearch_data:
@@ -7,26 +12,31 @@ services:
     restart: always
     image: postgres:18-alpine
     hostname: db
-    container_name: db
+    container_name: ldacapi_db
     tty: true
     environment:
+      POSTGRES_DB: "${DB_NAME}"
+      POSTGRES_USER: "${DB_USER}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
       POSTGRES_HOST_AUTH_METHOD: "trust"
       PGDATA: /postgresql/data
     volumes:
       - postgres_data:/postgresql
     ports:
       - "5432:5432"
+    networks:
+      - ldacapi
 
   opensearch:
     restart: always
     image: opensearchproject/opensearch:3.5.0
     hostname: opensearch
-    container_name: opensearch
+    container_name: ldacapi_opensearch
     tty: true
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
-      - _JAVA_OPTIONS=-XX:UseSVE=0 #this fixes Mac M4 bug
+      - _JAVA_OPTIONS=${OPENSEARCH_JAVA_OPTIONS} #this fixes Mac M4 bug -XX:UseSVE=0 and WSL2 bug should be empty
       #- xpack.security.enabled=false # for elasticsearch
       - plugins.security.disabled=true # for opensearch
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=ABCDE1234!
@@ -36,3 +46,5 @@ services:
     ports:
       - "9200:9200"
       - "9300:9300"
+    networks:
+      - ldacapi

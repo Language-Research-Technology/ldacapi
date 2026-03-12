@@ -5,7 +5,7 @@ Implementation of Arocapi for Language Data Commons
 ```
 npm install
 docker compose up
-npm run syncdb
+npm run db:sync
 npm run dev
 ```
 
