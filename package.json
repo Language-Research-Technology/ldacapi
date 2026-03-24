@@ -29,7 +29,7 @@
     "@ocfl/ocfl-fs": "^0.3.0",
     "@opensearch-project/opensearch": "^3.5.1",
     "@prisma/client": "^6.19.0",
-    "arocapi": "Language-Research-Technology/arocapi#customsearch",
+    "arocapi": "2.1.0",
     "fastify": "^5.6.1",
     "fastify-cli": "^7.4.0",
     "fastify-plugin": "^5.1.0",

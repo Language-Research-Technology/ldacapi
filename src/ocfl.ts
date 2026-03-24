@@ -1,12 +1,13 @@
-import type { OcflObject } from "@ocfl/ocfl";
-import { ROCrate } from "ro-crate";
-import { logger } from "./index.ts";
-import { StructuralIndexer } from "./indexer/structural.ts";
-import { SearchIndexer } from "./indexer/search.ts";
-import { Indexer } from "./indexer/indexer.ts";
-import type { CrateObject } from "./indexer/indexer.ts";
-import ocfl from "@ocfl/ocfl-fs";
+import type { OcflObject } from '@ocfl/ocfl';
+import { ROCrate } from 'ro-crate';
+import { logger } from './index.ts';
+import { StructuralIndexer } from './indexer/structural.ts';
+import { SearchIndexer } from './indexer/search.ts';
+import { Indexer } from './indexer/indexer.ts';
+import type { CrateObject } from './indexer/indexer.ts';
+import ocfl from '@ocfl/ocfl-fs';
 import { config } from './configuration.ts';
+import { Readable } from 'node:stream';
 
 const ocflConf = {
   ocflPath: '/opt/storage/oni/ocfl',
@@ -36,11 +37,17 @@ export async function init(opts: any) {
   logger.info('Initializing OCFL repository and indexers');
   INDEXER = {
     structural: await StructuralIndexer.create({
-      defaultLicense, defaultMetadataLicense, ocflPath, ocflPathInternal
+      defaultLicense,
+      defaultMetadataLicense,
+      ocflPath,
+      ocflPathInternal,
     }),
     search: await SearchIndexer.create({
-      defaultLicense, defaultMetadataLicense, searchSettings: config.search, client: opts.opensearchClient
-    })
+      defaultLicense,
+      defaultMetadataLicense,
+      searchSettings: config.search,
+      client: opts.opensearchClient,
+    }),
   };
   repository = ocfl.storage({
     root: ocflConf.ocflPath,
@@ -48,8 +55,8 @@ export async function init(opts: any) {
     ocflVersion: '1.1',
     fixityAlgorithms: ['crc32'],
     layout: {
-      extensionName: '000N-path-direct-storage-layout'
-    }
+      extensionName: '000N-path-direct-storage-layout',
+    },
   });
   try {
     await repository.load();
@@ -68,16 +75,16 @@ function wrap(ocflObject: OcflObject): CrateObject {
     root: ocflObject.root,
     text: async (path: string) => {
       return await ocflObject.getFile({ logicalPath: path }).text();
-    }
-  }
+    },
+  };
 }
 
 export async function getIndexerState(crateId?: string, type?: string) {
   return {
     isIndexed: false,
     isIndexing: false,
-    isDeleting: false
-  }
+    isDeleting: false,
+  };
 }
 
 async function indexObject(ocflObject: OcflObject, types: string[], force?: boolean) {
@@ -109,30 +116,32 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
 export async function createIndex(crateId?: string | RegExp, type?: string, force?: boolean) {
   logger.debug('Indexing started');
   const types = type ? [type] : ['structural', 'search'];
-  if (crateId) {
-    if (typeof crateId === 'string') {
-      await indexObject(repository.object(crateId), types, force);
-    } else {
-      for await (const ocflObject of repository) {
-        const inv = await ocflObject.getInventory();
+  if (typeof crateId === 'string') {
+    await indexObject(repository.object(crateId), types, force);
+  } else {
+    // process IO in parallel
+    const batchedResults = Readable.from(repository).map(
+      async (ocflObject) =>
         // if crateId is specified, index just the object and the subcollections and child objects
         // by checking just the structure implied in the crate id
-        if (!crateId || (crateId instanceof RegExp && inv.id.match(crateId))) {
-          await indexObject(ocflObject, types, force);
-        }
-      }
-    }
-  } else {
-    for await (const ocflObject of repository) {
-      await indexObject(ocflObject, types, force);
-    }
+        !(crateId instanceof RegExp) || (await ocflObject.getInventory())?.id.match(crateId)
+          ? indexObject(ocflObject, types, force)
+          : undefined,
+      { concurrency: 4 },
+    );
+    for await (const result of batchedResults) {}
   }
   logger.debug('Indexing finished');
 }
 
 export async function deleteIndex(crateId?: string, type?: string | string[]) {
-  const indexers = type ? ([] as string[]).concat(type).map(t => INDEXER[t]).filter(i => !!i) : Object.values(INDEXER);
-  await Promise.allSettled(indexers.map(indexer => indexer.delete(crateId)));
+  const indexers = type
+    ? ([] as string[])
+        .concat(type)
+        .map((t) => INDEXER[t])
+        .filter((i) => !!i)
+    : Object.values(INDEXER);
+  await Promise.allSettled(indexers.map((indexer) => indexer.delete(crateId)));
 }
 
 export async function* objects(base: string) {

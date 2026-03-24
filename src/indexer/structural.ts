@@ -35,7 +35,7 @@ export class StructuralIndexer extends Indexer {
           const rocrate = entityAsCrate(crate, entity);
           await prisma.entity.create({
             data: {
-              rocrateId: entity['@id'],
+              rocrateId: this.deriveUniqueEntityId(crateId, entity['@id']),
               name: entity.name?.join('; ') || '',
               description: entity.description?.join('; ') || '',
               entityType,

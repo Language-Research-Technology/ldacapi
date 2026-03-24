@@ -31,6 +31,7 @@ export default {
         // },
         // _source: { enabled: false },
         dynamic: true,
+        date_detection: false,
         properties: {
           '@id': { type: 'keyword' },
           '@type': { type: 'keyword' },
@@ -59,6 +60,8 @@ export default {
           inLanguage: { type: 'keyword' },
           location: { type: 'geo_point' },
           mediaType: { type: 'keyword' },
+          datePublished: { type: 'date_range' },
+          dateCreated: { type: 'date_range' },
           _text: { type: 'text' }
           //communicationMode: { type: 'keyword' },
           // createdAt: { type: 'date' },

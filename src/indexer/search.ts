@@ -4,8 +4,12 @@ import type { CrateObject } from "./indexer.ts";
 import { logger } from "../index.ts";
 import type { Search_Request, Search_RequestBody, Bulk_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from "ro-crate";
-import { Readable } from 'stream';
-
+import { Readable } from 'node:stream';
+/**
+ * Notes:
+ * Index properties:
+ * - rocrateId must exists be the same as the rocrateId used in postgres
+ */
 type searchParams = {
   index?: string;
   searchBody: Search_RequestBody;
@@ -39,6 +43,17 @@ function mapPropDefaultText(value: any): any {
 function mapPropDefaultEntityName(value: any): any {
   return value.name?.map(mapPropDefaultText)[0] || value['@value'] || value;
 }
+function mapPropDate(value: any): any {
+  const datestr = typeof value !== 'string' ? '' + value : value;
+  let [gte, lte] = datestr.split('/').map(d => (new Date(d)).valueOf());
+  if (lte == null) lte = gte; 
+  else return {gte, lte};
+}
+
+const defaultDataTypeMapper: Record<string, PropertyMapperFn> = {
+  date: mapPropDate,
+  date_range: mapPropDate,
+};
 
 const propertyMapper: Record<string, PropertyMapperFn> = {
   indexableText: mapPropIndexableText,
@@ -83,6 +98,7 @@ const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Recor
 export class SearchIndexer extends Indexer {
   conf;
   client: Client;
+  propertyMapper: Record<string, PropertyMapperFn>;
   //  conformsTo;
   constructor(opt: any) {
     super(opt);
@@ -92,6 +108,14 @@ export class SearchIndexer extends Indexer {
     //   [configuration.api.conformsTo.collection]: mapCollection,
     //   [configuration.api.conformsTo.object]: mapObject
     //};
+    this.propertyMapper = {...propertyMapper};
+    const { properties } = this.conf.create.mappings;
+    for (const name in properties) {
+      const mapper = defaultDataTypeMapper[properties[name].type];
+      if (mapper && !this.propertyMapper[name]) {
+        this.propertyMapper[name] = mapper;
+      }
+    }
   }
 
   async init() {
@@ -154,15 +178,15 @@ export class SearchIndexer extends Indexer {
     }
     const { properties } = elastic.create.mappings;
     const operations: Bulk_RequestBody = [];
-    let deferredEntities: any[] = []; // for individual updates
+    const deferredEntities: any[] = []; // for individual updates
 
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
       const matchedMappers = entityTypes.map(t => typeMapper[t]).filter(fn => !!fn);
       if (matchedMappers.length) {
         // create common index record
-        let record = createDoc(crate, entity, this.defaultLicense, deferredEntities);
-        const _id = this.deriveUniqueEntityId(record.rocrateRootId, record.entityId);
+        let record = createDoc(crate, entity, this.defaultLicense, deferredEntities, this.propertyMapper);
+        const _id = record.rocrateId = this.deriveUniqueEntityId(record.rocrateRootId, record.entityId);
         logger.debug(`[structural] Adding ${_id}`);
         // add additional information to record based on type 
         for (const mapType of matchedMappers) {
@@ -180,8 +204,12 @@ export class SearchIndexer extends Indexer {
         body: operations,
         refresh: true, // setting this to true will update result immediately, but will degrade performance
       });
-      logger.debug(`[search] Bulk operation result errors: ${result.body.errors}`);
-      console.log(JSON.stringify(result, null, 2));
+      if (result.body.errors) {
+        logger.error(`[search] Bulk operation result errors:=`);
+        const items = result.body.items.filter(item => item.update.error).
+          map(item => item.update.error?.reason);
+        logger.error(items.join('\n'));
+      }
       // index bigger data such as file content in a separate step to manage payload size
       const batchedResults = Readable.from(deferredEntities).map(async entity => {
         const entityTypes: string[] = entity['@type'];
@@ -288,7 +316,7 @@ function mapDefaultProperties(value: any) {
 
 /** Create entity basic record for bulk indexing */
 function createDoc(crate: ROCrate, entity: Record<string, any>,
-  defaultLicense: string, deferredEntities: any[]) {
+  defaultLicense: string, deferredEntities: any[], propertyMapper: Record<string, PropertyMapperFn> = {}) {
   const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
   const record: Record<string, any> = {
     rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
@@ -296,12 +324,17 @@ function createDoc(crate: ROCrate, entity: Record<string, any>,
     entityId: entity['@id'], // Original entity id
     entityType: entity['@type'].map((t: string) => crate.getContextDefinition(t)),
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
-    memberOf: entity['pcdm:memberOf'] || entity.memberOf,
+    //memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
     metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
     contentLicenseId: entity.license?.[0]?.['@id'] || license,
     '@id': entity['@id']
   }
+  //handle inverse relations
+  crate.addValues(entity, 'isPartOf', entity['@reverse'].hasPart);
+  crate.addValues(entity, 'hasPart', entity['@reverse'].isPartOf);
+  crate.addValues(entity, 'pcdm:memberOf', entity['@reverse']['pcdm:hasMember']);
+  crate.addValues(entity, 'pcdm:hasMember', entity['@reverse']['pcdm:memberOf']);
 
   for (const propName in entity) {
     if (record[propName] == null && entity[propName] != null && entity[propName].length) {
@@ -312,10 +345,6 @@ function createDoc(crate: ROCrate, entity: Record<string, any>,
       //console.log(propName, record[propName]);
     }
   }
-
-  //handle hasPart
-  crate.addValues(entity, 'isPartOf', entity['@reverse'].hasPart);
-
   return record;
 }
 

@@ -10,4 +10,7 @@ npm run dev
 ```
 
 index the data
-curl -L -v -X POST -H "Authorization: Bearer abc"  http://localhost:8080/admin/index/
+curl -L -v -X POST -H "Authorization: Bearer <api_token>"  http://localhost:8080/admin/index/
+
+
+LDACAPI_PORT default 8080
