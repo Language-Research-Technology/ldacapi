@@ -1,14 +1,20 @@
+import { Indexer, RecordType } from './indexer.ts';
+import type { CrateObject } from './indexer.ts';
+import { logger } from '../index.ts';
+import type {
+  Search_Request,
+  Search_RequestBody,
+  Bulk_RequestBody,
+} from '@opensearch-project/opensearch/api/index.d.ts';
 import { Client } from '@opensearch-project/opensearch';
-import { Indexer } from "./indexer.ts";
-import type { CrateObject } from "./indexer.ts";
-import { logger } from "../index.ts";
-import type { Search_Request, Search_RequestBody, Bulk_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
-import type { ROCrate } from "ro-crate";
+import type { ROCrate } from 'ro-crate';
 import { Readable } from 'node:stream';
+import { propertyMapper, dataTypeMapper } from './search_mapper.ts';
+
 /**
  * Notes:
  * Index properties:
- * - rocrateId must exists be the same as the rocrateId used in postgres
+ * - id must exists and be the same as the id used in postgres
  */
 type searchParams = {
   index?: string;
@@ -17,8 +23,9 @@ type searchParams = {
   explain?: boolean;
 };
 
+
 function isText(entity: Record<string, any>) {
-  return entity.encodingFormat?.some((ef: any) => (typeof ef === 'string') && ef.startsWith('text/'));
+  return entity.encodingFormat?.some((ef: any) => typeof ef === 'string' && ef.startsWith('text/'));
 }
 
 type MapperParams = {
@@ -29,53 +36,12 @@ type MapperParams = {
   crateObject?: CrateObject;
   /** An entity queue to be indexed one-by-one separately */
   deferredEntities?: Record<string, any>[];
-}
-
-type PropertyMapperFn = (value: any, deferredEntities?: Record<string, any>[]) => any;
-function mapPropIndexableText(value: any, deferredEntities?: Record<string, any>[]): any {
-  if (value['@id'] && deferredEntities) {
-    deferredEntities.push(value);
-  }
-}
-function mapPropDefaultText(value: any): any {
-  return value['@value'] || value;
-}
-function mapPropDefaultEntityName(value: any): any {
-  return value.name?.map(mapPropDefaultText)[0] || value['@value'] || value;
-}
-function mapPropDate(value: any): any {
-  const datestr = typeof value !== 'string' ? '' + value : value;
-  let [gte, lte] = datestr.split('/').map(d => (new Date(d)).valueOf());
-  if (lte == null) lte = gte; 
-  else return {gte, lte};
-}
-
-const defaultDataTypeMapper: Record<string, PropertyMapperFn> = {
-  date: mapPropDate,
-  date_range: mapPropDate,
-};
-
-const propertyMapper: Record<string, PropertyMapperFn> = {
-  indexableText: mapPropIndexableText,
-  mainText: mapPropIndexableText,
-  name: mapPropDefaultText,
-  description: mapPropDefaultText,
-  '@type': mapPropDefaultText,
-  inLanguage: mapPropDefaultEntityName,
 };
 
 /** The function mapped here may return an array of entities to be processed in batch  */
-const typeMapper: Record<string, (params: MapperParams) => Record<string, any>> = {
-  RepositoryCollection: function ({ record }) {
-    return record;
-  },
-  RepositoryObject: function ({ record }) {
-    return record;
-  },
-  File: function ({ record }) {
-    return record;
-  }
-};
+const typeMapper: Record<string, (params: MapperParams) => Record<string, any>> = Object.fromEntries(
+  Object.entries(RecordType).map(([k, v]) => [k, ({ record }) => record]),
+);
 
 const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Record<string, any>>> = {
   File: async function ({ entity, record, crate, crateObject }) {
@@ -83,7 +49,7 @@ const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Recor
     if (isText(entity)) {
       const entityId = entity['@id'];
       try {
-        record._text = await crateObject?.text(entityId) || '';
+        record._text = (await crateObject?.text(entityId)) || '';
         logger.info(`[search] Indexing File: ${entityId}`);
       } catch (e) {
         logger.error(`[search] Cannot read file: ${entityId}`);
@@ -92,13 +58,13 @@ const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Recor
       }
     }
     return record;
-  }
+  },
 };
 
 export class SearchIndexer extends Indexer {
   conf;
   client: Client;
-  propertyMapper: Record<string, PropertyMapperFn>;
+  propertyMapper = { ...propertyMapper };
   //  conformsTo;
   constructor(opt: any) {
     super(opt);
@@ -108,10 +74,9 @@ export class SearchIndexer extends Indexer {
     //   [configuration.api.conformsTo.collection]: mapCollection,
     //   [configuration.api.conformsTo.object]: mapObject
     //};
-    this.propertyMapper = {...propertyMapper};
     const { properties } = this.conf.create.mappings;
     for (const name in properties) {
-      const mapper = defaultDataTypeMapper[properties[name].type];
+      const mapper = dataTypeMapper[properties[name].type];
       if (mapper && !this.propertyMapper[name]) {
         this.propertyMapper[name] = mapper;
       }
@@ -136,7 +101,10 @@ export class SearchIndexer extends Indexer {
   async delete(crateId?: string) {
     try {
       if (crateId) {
-        await this.client.deleteByQuery({ index: this.conf.entityIndex, body: { query: { prefix: { rocrateRootId: { value: crateId } } } } });
+        await this.client.deleteByQuery({
+          index: this.conf.entityIndex,
+          body: { query: { prefix: { rocrateRootId: { value: crateId } } } },
+        });
       } else {
         await this.client.indices.delete({ index: this.conf.entityIndex });
       }
@@ -164,7 +132,7 @@ export class SearchIndexer extends Indexer {
     try {
       await this.client.indices.create({
         index: elastic.entityIndex,
-        body: elastic.create
+        body: elastic.create,
       });
       // await this.client.indices.putSettings({
       //   index: elastic.entityIndex,
@@ -179,24 +147,22 @@ export class SearchIndexer extends Indexer {
     const { properties } = elastic.create.mappings;
     const operations: Bulk_RequestBody = [];
     const deferredEntities: any[] = []; // for individual updates
+    const deriveId = (entityId: string) => this.deriveUniqueEntityId(crate.rootId, entityId);
 
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
-      const matchedMappers = entityTypes.map(t => typeMapper[t]).filter(fn => !!fn);
+      const matchedMappers = entityTypes.map((t) => typeMapper[t]).filter((fn) => !!fn);
       if (matchedMappers.length) {
         // create common index record
-        let record = createDoc(crate, entity, this.defaultLicense, deferredEntities, this.propertyMapper);
-        const _id = record.rocrateId = this.deriveUniqueEntityId(record.rocrateRootId, record.entityId);
+        const _id = deriveId(entity['@id']);
+        let record = createDoc(crate, entity, _id, this.defaultLicense, deferredEntities, this.propertyMapper);
         logger.debug(`[structural] Adding ${_id}`);
-        // add additional information to record based on type 
+        // add additional information to record based on type
         for (const mapType of matchedMappers) {
           record = mapType({ properties, entity, record, crate, crateObject });
         }
         console.log(record);
-        operations.push(
-          { update: { _index: elastic.entityIndex, _id } },
-          { doc: record, doc_as_upsert: true }
-        );
+        operations.push({ update: { _index: elastic.entityIndex, _id } }, { doc: record, doc_as_upsert: true });
       }
     }
     try {
@@ -206,30 +172,34 @@ export class SearchIndexer extends Indexer {
       });
       if (result.body.errors) {
         logger.error(`[search] Bulk operation result errors:=`);
-        const items = result.body.items.filter(item => item.update.error).
-          map(item => item.update.error?.reason);
+        const items = result.body.items.filter((item) => item.update.error).map((item) => item.update.error?.reason);
         logger.error(items.join('\n'));
       }
       // index bigger data such as file content in a separate step to manage payload size
-      const batchedResults = Readable.from(deferredEntities).map(async entity => {
-        const entityTypes: string[] = entity['@type'];
-        const matchedIndexers = entityTypes.map(t => batchedTypeIndexer[t]).filter(fn => !!fn);
-        let doc = {};
-        for (const mapper of matchedIndexers) {
-          doc = await mapper({ properties, entity, record: doc, crate, crateObject });
-        }
-        //console.log(doc);
-        return this.client.update({
-          index: elastic.entityIndex,
-          id: this.deriveUniqueEntityId(crate.rootId, entity['@id']),
-          body: { doc, doc_as_upsert: true },
-        });
-      }, { concurrency: 4 });
+      const batchedResults = Readable.from(deferredEntities).map(
+        async (entity) => {
+          const entityTypes: string[] = entity['@type'];
+          const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
+          let doc = {};
+          for (const mapper of matchedIndexers) {
+            doc = await mapper({ properties, entity, record: doc, crate, crateObject });
+          }
+          //console.log(doc);
+          return this.client.update({
+            index: elastic.entityIndex,
+            id: deriveId(entity['@id']),
+            body: { doc, doc_as_upsert: true },
+          });
+        },
+        { concurrency: 4 },
+      );
       for await (const result of batchedResults) {
         //console.log(result);
-        logger.debug(`[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
+        logger.debug(
+          `[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`,
+        );
       }
-      await this.client.indices.refresh({ index: elastic.entityIndex });      
+      await this.client.indices.refresh({ index: elastic.entityIndex });
     } catch (error) {
       logger.error('Error indexing ' + crate.rootId);
       logger.error(error);
@@ -253,11 +223,11 @@ export class SearchIndexer extends Indexer {
     if (doc.memberOf && doc.memberOf.length) {
       doc._memberOf = doc.memberOf = pickBasic(doc.memberOf);
     } else {
-      doc._isTopLevel = "true";
+      doc._isTopLevel = 'true';
     }
     doc._root = root;
     if (parent) doc._parent = pickBasic(parent);
-    doc._collectionStack = parents.map(e => ({ '@id': e['@id'] })); //todo: filter by collection
+    doc._collectionStack = parents.map((e) => ({ '@id': e['@id'] })); //todo: filter by collection
     const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
     doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
     doc._metadataLicense = metadataLicense;
@@ -265,21 +235,20 @@ export class SearchIndexer extends Indexer {
     if (isFile) {
       indexFile({ entity, doc, ocflObject });
     }
-
   }
 
   async search({ index = this.conf.entityIndex, searchBody, filterPath, explain }: searchParams) {
     try {
-      logger.debug("----- searchBody ----");
+      logger.debug('----- searchBody ----');
       logger.debug(JSON.stringify(searchBody));
-      logger.debug("----- searchBody ----");
+      logger.debug('----- searchBody ----');
       const opts: Search_Request = {
         index,
         body: searchBody,
         explain: explain,
-      }
+      };
       if (filterPath) {
-        opts.filter_path = filterPath
+        opts.filter_path = filterPath;
       }
       logger.debug(JSON.stringify(opts));
       const result = await this.client.search(opts);
@@ -289,8 +258,6 @@ export class SearchIndexer extends Indexer {
       throw e;
     }
   }
-
-
 }
 
 function mapDefaultProperties(value: any) {
@@ -315,12 +282,18 @@ function mapDefaultProperties(value: any) {
 }
 
 /** Create entity basic record for bulk indexing */
-function createDoc(crate: ROCrate, entity: Record<string, any>,
-  defaultLicense: string, deferredEntities: any[], propertyMapper: Record<string, PropertyMapperFn> = {}) {
+function createDoc(
+  crate: ROCrate,
+  entity: Record<string, any>,
+  _id: string,
+  defaultLicense: string,
+  deferredEntities: any[],
+  propMapper: typeof propertyMapper = {},
+) {
   const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
   const record: Record<string, any> = {
     rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
-    rocrateId: entity['@id'], // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
+    id: _id, // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
     entityId: entity['@id'], // Original entity id
     entityType: entity['@type'].map((t: string) => crate.getContextDefinition(t)),
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
@@ -328,8 +301,8 @@ function createDoc(crate: ROCrate, entity: Record<string, any>,
     rootCollection: crate.rootId,
     metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
     contentLicenseId: entity.license?.[0]?.['@id'] || license,
-    '@id': entity['@id']
-  }
+    '@id': entity['@id'],
+  };
   //handle inverse relations
   crate.addValues(entity, 'isPartOf', entity['@reverse'].hasPart);
   crate.addValues(entity, 'hasPart', entity['@reverse'].isPartOf);
@@ -339,8 +312,8 @@ function createDoc(crate: ROCrate, entity: Record<string, any>,
   for (const propName in entity) {
     if (record[propName] == null && entity[propName] != null && entity[propName].length) {
       //console.log(propName, entity[propName]);
-      const pm = propertyMapper[propName] || mapDefaultProperties;
-      const values = entity[propName].map((value: any) => pm(value, deferredEntities)).filter((v:any) => !!v);
+      const pm = propMapper[propName] || mapDefaultProperties;
+      const values = entity[propName].map((value: any) => pm(value, deferredEntities)).filter((v: any) => !!v);
       if (values.length) record[propName] = values;
       //console.log(propName, record[propName]);
     }
@@ -352,10 +325,10 @@ function createDoc(crate: ROCrate, entity: Record<string, any>,
  * Copy one or more properties from exisiting object
  * @param {string[]} props An array of prop names
  * @param {object} obj Object to copy from
- * @returns {object} 
+ * @returns {object}
  */
 function pick(props, obj = {}) {
-  return Object.fromEntries(props.filter(k => k in obj).map(k => [k, obj[k]]));
+  return Object.fromEntries(props.filter((k) => k in obj).map((k) => [k, obj[k]]));
 }
 
 function pickBasic(obj) {
@@ -363,14 +336,14 @@ function pickBasic(obj) {
 }
 
 function allowTextIndex(entity) {
-  return entity.license?.some(l => allowTextIndex?.[0]);
+  return entity.license?.some((l) => allowTextIndex?.[0]);
 }
 /**
  * Find the license of an item with its id if not and id or undefined return a default license from
  * config, if passed an Id and not found it will also return a default license.
  */
 function resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
-  for (const license of (licenses || [])) {
+  for (const license of licenses || []) {
     const id = typeof license === 'string' ? license : license['@id'];
     const entity = crate.getEntity(id);
     if (entity) {
@@ -389,8 +362,8 @@ function resolveMetadataLicense(crate, defaultMetadataLicense) {
       metadataIsPublic: license.metadataIsPublic?.[0] || false,
       name: license.name?.[0],
       id: license['@id'],
-      description: license.description?.[0]
-    }
+      description: license.description?.[0],
+    };
   } else {
     //default to cc-by-4
     return defaultMetadataLicense;
@@ -398,20 +371,27 @@ function resolveMetadataLicense(crate, defaultMetadataLicense) {
 }
 
 function indexGeoLocation({ entity, doc }) {
-  var geolocation = doc._geolocation = ['contentLocation', 'spatialCoverage'].flatMap(prop => {
+  var geolocation = (doc._geolocation = ['contentLocation', 'spatialCoverage'].flatMap((prop) => {
     let result = [];
     if (entity[prop]) {
-      result = doc['_' + prop] = entity[prop].flatMap(place => place.geo.flatMap(g => g.asWKT));
+      result = doc['_' + prop] = entity[prop].flatMap((place) => place.geo.flatMap((g) => g.asWKT));
     }
     return result;
-  });
+  }));
   doc._centroid = geolocation.map(calculateCentroid);
 }
 
 function calculateCentroid(wkt = []) {
   // extract all coordinates from wkt string into a flat array
-  var coordinates = wkt.replace(/(^\w+\s+)|[()]/g, '').split(',').
-    map(e => e.trim().split(/\s+/).map(n => +n));
+  var coordinates = wkt
+    .replace(/(^\w+\s+)|[()]/g, '')
+    .split(',')
+    .map((e) =>
+      e
+        .trim()
+        .split(/\s+/)
+        .map((n) => +n),
+    );
   var len = coordinates.length;
   if (len) {
     var [sumLng, sumLat] = coordinates.reduce((sum, point) => sum.map((n, i) => n + point[i]), [0, 0]);

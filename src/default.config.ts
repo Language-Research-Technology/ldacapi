@@ -2,6 +2,13 @@ import packageJson from '../package.json' with { type: 'json' };
 export default {
   package: packageJson,
   tokenAdmin: process.env.TOKEN_ADMIN || '1234-1234-1234-1234',
+  indexType: {
+    RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
+    RepositoryObject: 'https://w3id.org/ldac/profile#Object',
+    File: 'https://schema.org/MediaObject',
+    // Person: 'https://schema.org/Person',
+    // Organization: 'https://schema.org/Organization'
+  },
   search: {
     cluster: {
       persistent: {
@@ -36,7 +43,7 @@ export default {
           '@id': { type: 'keyword' },
           '@type': { type: 'keyword' },
           rocrateRootId: { type: 'keyword' },
-          rocrateId: { type: 'keyword' },
+          id: { type: 'keyword' },
           entityId: { type: 'keyword' },
           entityType: { type: 'keyword' },
           memberOf: { type: 'keyword' },

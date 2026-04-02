@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "target": "esnext",
+    "module": "NodeNext",
+    "moduleResolution": "nodenext",
+    //"strict": true,
+    //"esModuleInterop": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "typeAcquisition": {
+    "enable": true
+  }
+}

@@ -14,3 +14,4 @@ curl -L -v -X POST -H "Authorization: Bearer <api_token>"  http://localhost:8080
 
 
 LDACAPI_PORT default 8080
+OPENSEARCH_URL http://localhost:9200

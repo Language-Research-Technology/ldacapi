@@ -1,5 +1,6 @@
 //import config from '../prisma.config.ts';
 import { PrismaClient } from './generated/prisma/client.ts';
+import { PrismaPg } from "@prisma/adapter-pg";
 import { Client } from '@opensearch-project/opensearch';
 import Fastify from 'fastify';
 import fastifyRoutes from '@fastify/routes';
@@ -13,10 +14,13 @@ import type { Options } from 'arocapi';
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
 const port = parseInt(process.env.LDACAPI_PORT || '8080');
-export const prisma = new PrismaClient();
+export const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL })
+});
 const opensearch = new Client({ node: opensearchUrl });
 
 const fastify = Fastify({
+  //logger: { level: 'debug' },
   logger: { level: 'debug', transport: { target: 'pino-pretty' } },
   // routerOptions: {
   //   ignoreTrailingSlash: true,

@@ -1,4 +1,5 @@
 import { logger } from "../index.ts";
+import { config } from "../configuration.ts";
 import type { OcflObject } from "@ocfl/ocfl";
 import type { ROCrate } from "ro-crate";
 
@@ -71,8 +72,4 @@ export class Indexer {
 
 }
 
-export const RecordType = {
-  RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
-  RepositoryObject: 'https://w3id.org/ldac/profile#Object',
-  File: 'https://schema.org/MediaObject'
-};
+export const RecordType = config.indexType;
