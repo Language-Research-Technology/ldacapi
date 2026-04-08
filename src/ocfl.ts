@@ -1,13 +1,12 @@
 import type { OcflObject } from '@ocfl/ocfl';
-import { ROCrate } from 'ro-crate';
-import { logger } from './index.ts';
-import { StructuralIndexer } from './indexer/structural.ts';
-import { SearchIndexer } from './indexer/search.ts';
-import { Indexer } from './indexer/indexer.ts';
-import type { CrateObject } from './indexer/indexer.ts';
 import ocfl from '@ocfl/ocfl-fs';
+import { ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
-import { Readable } from 'node:stream';
+import { logger } from './index.ts';
+import type { CrateObject, Indexer } from './indexer/indexer.ts';
+import { SearchIndexer } from './indexer/search.ts';
+import { StructuralIndexer } from './indexer/structural.ts';
+import { PromiseQueue } from './utils.ts';
 
 const ocflConf = {
   ocflPath: '/opt/storage/oni/ocfl',
@@ -79,7 +78,7 @@ function wrap(ocflObject: OcflObject): CrateObject {
   };
 }
 
-export async function getIndexerState(crateId?: string, type?: string) {
+export async function getIndexerState(_crateId?: string,_typee?: string) {
   return {
     isIndexed: false,
     isIndexing: false,
@@ -120,16 +119,19 @@ export async function createIndex(crateId?: string | RegExp, type?: string, forc
     await indexObject(repository.object(crateId), types, force);
   } else {
     // process IO in parallel
-    const batchedResults = Readable.from(repository).map(
-      async (ocflObject) =>
-        // if crateId is specified, index just the object and the subcollections and child objects
-        // by checking just the structure implied in the crate id
-        !(crateId instanceof RegExp) || (await ocflObject.getInventory())?.id.match(crateId)
-          ? indexObject(ocflObject, types, force)
-          : undefined,
-      { concurrency: 4 },
-    );
-    for await (const result of batchedResults) {}
+    const fn =
+      crateId instanceof RegExp
+        ? // if crateId is specified, index just the object and the subcollections and child objects
+          // by checking just the structure implied in the crate id
+          async (ocflObject: unknown) =>
+            (await ocflObject.getInventory())?.id.match(crateId) ? indexObject(ocflObject, types, force) : undefined
+        : // otherwise, index everything
+          async (ocflObject: unknown) => indexObject(ocflObject, types, force);
+    const pq = new PromiseQueue(4, fn);
+    for await (const ocflObject of repository) {
+      await pq.enqueue(ocflObject);
+    }
+    await pq.done();
   }
   logger.debug('Indexing finished');
 }
@@ -144,7 +146,7 @@ export async function deleteIndex(crateId?: string, type?: string | string[]) {
   await Promise.allSettled(indexers.map((indexer) => indexer.delete(crateId)));
 }
 
-export async function* objects(base: string) {
+export async function* objects(_base: string) {
   //TODO: implement listing only top-level collections
   for await (const ocflObject of repository) {
     try {
@@ -156,5 +158,20 @@ export async function* objects(base: string) {
     } catch (error) {
       logger.error(error);
     }
+  }
+}
+
+export async function getFile(entityId: string, storagePath: string) {
+  const crateId = (storagePath && entityId.endsWith('/' + storagePath)) ? entityId.slice(0, -storagePath.length-1) : entityId;
+  try {
+    const object = repository.object(crateId);
+    await object.load();
+    const file = object.getFile({ logicalPath: storagePath });
+    return {
+      path: repository.objectRoot(crateId) + '/' + file.contentPath,
+      stream: async () => file.stream(),
+    };
+  } catch (error) {
+    logger.error(error);
   }
 }

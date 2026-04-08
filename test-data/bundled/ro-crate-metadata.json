@@ -56,6 +56,12 @@
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
+      "contentLocation": {
+        "@id": "#place_A-QLD"
+      },
+      "spatialCoverage": {
+        "@id": "#place_A-QLD"
+      },
       "indexableText": [
         {
           "@id": "data.txt"
@@ -228,6 +234,25 @@
       "description": "Test pdf",
       "encodingFormat": "application/pdf",
       "name": "Corpus of Oni Test PDF"
-    }
+    },
+    {
+      "@id": "#place_A-QLD",
+      "@type": "Place",
+      "name": "Queensland",
+      "geo": {
+        "@id": "#geo_QLD"
+      }
+    },
+    {
+      "@id": "#geo_QLD",
+      "@type": "Geometry",
+      "name": "Queensland",
+      "asWKT": "POLYGON((138.0 -29.0, 153.0 -29.0, 153.0 -10.0, 138.0 -10.0, 138.0 -29.0))"
+    },
+    {
+      "@id": "#place_A-VIC",
+      "@type": "Place",
+      "name": "Victoria",
+      "geo": "POLYGON((140.961681 -39.15919, 150.0 -39.15919, 150.0 -34.0, 140.961681 -34.0, 140.961681 -39.15919))"    }
   ]
 }

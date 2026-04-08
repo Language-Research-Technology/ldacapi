@@ -65,10 +65,11 @@ export default {
           //recordType: { type: 'keyword' },
           //root: { type: 'keyword' },
           inLanguage: { type: 'keyword' },
-          location: { type: 'geo_point' },
+          location: { type: 'geo_shape' }, //at the moment the property name location is hardcoded.
           mediaType: { type: 'keyword' },
           datePublished: { type: 'date_range' },
           dateCreated: { type: 'date_range' },
+          temporalCoverage: { type: 'date_range' },
           _text: { type: 'text' }
           //communicationMode: { type: 'keyword' },
           // createdAt: { type: 'date' },

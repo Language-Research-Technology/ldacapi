@@ -73,3 +73,80 @@ content-type: application/json
 
 ###
 GET http://host.containers.internal:9200/entities/_mapping HTTP/1.1
+
+###
+POST http://host.containers.internal:9200/entities/_search HTTP/1.1
+content-type: application/json
+
+{
+      "query": {
+        "bool": {
+          "must": [
+            {
+              "multi_match": {
+                "query": "",
+                "fields": [
+                  "name^2",
+                  "description"
+                ],
+                "type": "best_fields",
+                "fuzziness": "AUTO",
+                "zero_terms_query": "all"
+              }
+            }
+          ],
+          "filter": [
+            {
+              "geo_bounding_box": {
+                "location": {
+                  "top_left": {
+                    "lat": -1.5818302639606454,
+                    "lon": 53.26171875
+                  },
+                  "bottom_right": {
+                    "lat": -49.83798245308485,
+                    "lon": -141.85546875
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "aggs": {
+        "@type": {
+          "terms": {
+            "field": "@type"
+          }
+        },
+        "inLanguage": {
+          "terms": {
+            "field": "inLanguage"
+          }
+        },
+        "geohash_grid": {
+          "geohash_grid": {
+            "field": "location",
+            "precision": 1,
+            "bounds": {
+              "top_left": {
+                "lat": -1.5818302639606454,
+                "lon": 53.26171875
+              },
+              "bottom_right": {
+                "lat": -49.83798245308485,
+                "lon": -141.85546875
+              }
+            }
+          }
+        }
+      },
+      "highlight": {
+        "fields": {
+          "name": {},
+          "description": {}
+        }
+      },
+      "from": 0,
+      "size": 10
+    }

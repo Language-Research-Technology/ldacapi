@@ -1,16 +1,15 @@
 //import config from '../prisma.config.ts';
-import { PrismaClient } from './generated/prisma/client.ts';
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Client } from '@opensearch-project/opensearch';
-import Fastify from 'fastify';
-import fastifyRoutes from '@fastify/routes';
-import fastifySensible from '@fastify/sensible';
 import cors from '@fastify/cors';
-import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer, OpensearchQueryBuilder } from 'arocapi';
-import ldacapi from './app.ts';
-import { Readable } from 'node:stream';
-import { config } from './configuration.ts';
+import fastifyRoutes from '@fastify/routes';
+import { Client } from '@opensearch-project/opensearch';
+import { PrismaPg } from "@prisma/adapter-pg";
 import type { Options } from 'arocapi';
+import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } from 'arocapi';
+import Fastify from 'fastify';
+import { Readable } from 'node:stream';
+import ldacapi, { fileHandler } from './app.ts';
+import { config } from './configuration.ts';
+import { PrismaClient } from './generated/prisma/client.ts';
 
 const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
 const port = parseInt(process.env.LDACAPI_PORT || '8080');
@@ -46,16 +45,7 @@ const appOpt: Options = {
       return entity;
     }
   ],
-  fileHandler: {
-    get: async (file) => {
-      const fileUrl = `https://storage.example.com/${file.meta.storagePath}`;
-      return { type: 'redirect' as 'redirect', url: fileUrl };
-    },
-    head: async (file) => ({
-      contentType: file.mediaType,
-      contentLength: file.size,
-    }),
-  },
+  fileHandler,
   // Required: RO-Crate handler for serving RO-Crate metadata
   roCrateHandler: {
     get: async (entity) => {

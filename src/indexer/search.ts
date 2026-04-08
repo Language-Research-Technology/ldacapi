@@ -1,15 +1,15 @@
-import { Indexer, RecordType } from './indexer.ts';
-import type { CrateObject } from './indexer.ts';
-import { logger } from '../index.ts';
+import { Client } from '@opensearch-project/opensearch';
 import type {
+  Bulk_RequestBody,
   Search_Request,
   Search_RequestBody,
-  Bulk_RequestBody,
 } from '@opensearch-project/opensearch/api/index.d.ts';
-import { Client } from '@opensearch-project/opensearch';
 import type { ROCrate } from 'ro-crate';
-import { Readable } from 'node:stream';
-import { propertyMapper, dataTypeMapper } from './search_mapper.ts';
+import { logger } from '../index.ts';
+import { PromiseQueue } from '../utils.ts';
+import type { CrateObject } from './indexer.ts';
+import { Indexer, RecordType } from './indexer.ts';
+import { dataTypeMapper, mapDefaultProperties, propertyMapper } from './search_mapper.ts';
 
 /**
  * Notes:
@@ -22,7 +22,6 @@ type searchParams = {
   filterPath?: string | string[];
   explain?: boolean;
 };
-
 
 function isText(entity: Record<string, any>) {
   return entity.encodingFormat?.some((ef: any) => typeof ef === 'string' && ef.startsWith('text/'));
@@ -40,7 +39,7 @@ type MapperParams = {
 
 /** The function mapped here may return an array of entities to be processed in batch  */
 const typeMapper: Record<string, (params: MapperParams) => Record<string, any>> = Object.fromEntries(
-  Object.entries(RecordType).map(([k, v]) => [k, ({ record }) => record]),
+  Object.entries(RecordType).map(([k, _v]) => [k, ({ record }) => record]),
 );
 
 const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Record<string, any>>> = {
@@ -155,6 +154,14 @@ export class SearchIndexer extends Indexer {
       if (matchedMappers.length) {
         // create common index record
         const _id = deriveId(entity['@id']);
+        // const license = resolveLicense(entity.license || parent?.license, crate, this.defaultLicense);
+        // if (!license) {
+        //   logger.error(`Skip indexing ${crateId} > ${entityId}, No License Found`);
+        //   return;
+        // }
+        // const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
+        // doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
+        // doc._metadataLicense = metadataLicense;
         let record = createDoc(crate, entity, _id, this.defaultLicense, deferredEntities, this.propertyMapper);
         logger.debug(`[structural] Adding ${_id}`);
         // add additional information to record based on type
@@ -176,64 +183,31 @@ export class SearchIndexer extends Indexer {
         logger.error(items.join('\n'));
       }
       // index bigger data such as file content in a separate step to manage payload size
-      const batchedResults = Readable.from(deferredEntities).map(
-        async (entity) => {
-          const entityTypes: string[] = entity['@type'];
-          const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
-          let doc = {};
-          for (const mapper of matchedIndexers) {
-            doc = await mapper({ properties, entity, record: doc, crate, crateObject });
-          }
-          //console.log(doc);
-          return this.client.update({
-            index: elastic.entityIndex,
-            id: deriveId(entity['@id']),
-            body: { doc, doc_as_upsert: true },
-          });
-        },
-        { concurrency: 4 },
-      );
-      for await (const result of batchedResults) {
-        //console.log(result);
+      const pq = new PromiseQueue(4, async (entity) => {
+        const entityTypes: string[] = entity['@type'];
+        const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
+        let doc = {};
+        for (const mapper of matchedIndexers) {
+          doc = await mapper({ properties, entity, record: doc, crate, crateObject });
+        }
+        //console.log(doc);
+        const result = await this.client.update({
+          index: elastic.entityIndex,
+          id: deriveId(entity['@id']),
+          body: { doc, doc_as_upsert: true },
+        });
         logger.debug(
           `[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`,
         );
+      });
+      for (const entity of deferredEntities) {
+        await pq.enqueue(entity);
       }
+      await pq.done();
       await this.client.indices.refresh({ index: elastic.entityIndex });
     } catch (error) {
       logger.error('Error indexing ' + crate.rootId);
       logger.error(error);
-    }
-  }
-
-  async _indexEntity({ ocflObject, crate, entity, parents = [], root }) {
-    const isFile = entity['@type'].includes('File');
-    const parent = parents.at(-1)?.toJSON();
-    const crateId = crate.rootId;
-    const entityId = entity['@id'];
-    const license = resolveLicense(entity.license || parent?.license, crate, this.defaultLicense);
-    if (!license) {
-      logger.error(`Skip indexing ${crateId} > ${entityId}, No License Found`);
-      return;
-    }
-    entity.license = license;
-
-    entity._crateId = crateId;
-    const doc = crate.getTree({ root: entity, depth: 1, allowCycle: false });
-    if (doc.memberOf && doc.memberOf.length) {
-      doc._memberOf = doc.memberOf = pickBasic(doc.memberOf);
-    } else {
-      doc._isTopLevel = 'true';
-    }
-    doc._root = root;
-    if (parent) doc._parent = pickBasic(parent);
-    doc._collectionStack = parents.map((e) => ({ '@id': e['@id'] })); //todo: filter by collection
-    const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
-    doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
-    doc._metadataLicense = metadataLicense;
-    indexGeoLocation({ entity, doc });
-    if (isFile) {
-      indexFile({ entity, doc, ocflObject });
     }
   }
 
@@ -257,27 +231,6 @@ export class SearchIndexer extends Indexer {
       logger.error(e);
       throw e;
     }
-  }
-}
-
-function mapDefaultProperties(value: any) {
-  switch (typeof value) {
-    case 'string':
-    case 'boolean':
-      return { '@value': value };
-    case 'object':
-      if (value['@id']) {
-        const o = { '@id': value['@id'] } as any;
-        for (const prop of ['name', 'alternateName']) {
-          if (value[prop] && value[prop].length) o[prop] = value[prop].map(mapDefaultProperties);
-        }
-        return o;
-      } else {
-        return value;
-      }
-    case 'number':
-    default:
-      return { '@value': value.toString() };
   }
 }
 
@@ -313,36 +266,35 @@ function createDoc(
     if (record[propName] == null && entity[propName] != null && entity[propName].length) {
       //console.log(propName, entity[propName]);
       const pm = propMapper[propName] || mapDefaultProperties;
-      const values = entity[propName].map((value: any) => pm(value, deferredEntities)).filter((v: any) => !!v);
+      const values = [];
+      for (const value of entity[propName]) {
+        const properties = {};
+        const res = pm(value, { deferredEntities, properties });
+        for (const name in properties) {
+          const vals = properties[name];
+          if (vals == null) continue;
+          if (record[name] == null) {
+            record[name] = vals;
+          } else {
+            if (!Array.isArray(record[name])) record[name] = [record[name]];
+            for (const v of vals) record[name].push(v);
+          }
+        }
+        if (res != null) values.push(res);
+      }
       if (values.length) record[propName] = values;
       //console.log(propName, record[propName]);
     }
   }
+
   return record;
 }
 
 /**
- * Copy one or more properties from exisiting object
- * @param {string[]} props An array of prop names
- * @param {object} obj Object to copy from
- * @returns {object}
- */
-function pick(props, obj = {}) {
-  return Object.fromEntries(props.filter((k) => k in obj).map((k) => [k, obj[k]]));
-}
-
-function pickBasic(obj) {
-  return pick(['@id', '@type', 'name'], obj);
-}
-
-function allowTextIndex(entity) {
-  return entity.license?.some((l) => allowTextIndex?.[0]);
-}
-/**
  * Find the license of an item with its id if not and id or undefined return a default license from
  * config, if passed an Id and not found it will also return a default license.
  */
-function resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
+function _resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
   for (const license of licenses || []) {
     const id = typeof license === 'string' ? license : license['@id'];
     const entity = crate.getEntity(id);
@@ -354,7 +306,7 @@ function resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
   return defaultLicense;
 }
 
-function resolveMetadataLicense(crate, defaultMetadataLicense) {
+function _resolveMetadataLicense(crate, defaultMetadataLicense) {
   const metadataDescriptorLicense = crate.getEntity('ro-crate-metadata.json')?.license || [];
   const license = metadataDescriptorLicense[0];
   if (license) {
@@ -367,35 +319,5 @@ function resolveMetadataLicense(crate, defaultMetadataLicense) {
   } else {
     //default to cc-by-4
     return defaultMetadataLicense;
-  }
-}
-
-function indexGeoLocation({ entity, doc }) {
-  var geolocation = (doc._geolocation = ['contentLocation', 'spatialCoverage'].flatMap((prop) => {
-    let result = [];
-    if (entity[prop]) {
-      result = doc['_' + prop] = entity[prop].flatMap((place) => place.geo.flatMap((g) => g.asWKT));
-    }
-    return result;
-  }));
-  doc._centroid = geolocation.map(calculateCentroid);
-}
-
-function calculateCentroid(wkt = []) {
-  // extract all coordinates from wkt string into a flat array
-  var coordinates = wkt
-    .replace(/(^\w+\s+)|[()]/g, '')
-    .split(',')
-    .map((e) =>
-      e
-        .trim()
-        .split(/\s+/)
-        .map((n) => +n),
-    );
-  var len = coordinates.length;
-  if (len) {
-    var [sumLng, sumLat] = coordinates.reduce((sum, point) => sum.map((n, i) => n + point[i]), [0, 0]);
-    var centroid = [sumLng / len, sumLat / len];
-    return `POINT (${centroid[0]} ${centroid[1]})`;
   }
 }
