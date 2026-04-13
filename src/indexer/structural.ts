@@ -35,6 +35,10 @@ export class StructuralIndexer extends Indexer {
       if (!entityType) {
         continue;
       }
+      const conformsTo = entity['conformsTo']?.find((c) => c['@id'] === RecordType[entityType]);
+      if(!conformsTo) {
+        continue;
+      }
       logger.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
       count++;
       const entityId = this.deriveUniqueEntityId(crateId, entity['@id']);
