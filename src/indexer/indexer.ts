@@ -1,7 +1,6 @@
-import { logger } from "../index.ts";
-import { config } from "../configuration.ts";
-import type { OcflObject } from "@ocfl/ocfl";
 import type { ROCrate } from "ro-crate";
+import { config } from "../configuration.ts";
+import { logger } from "../index.ts";
 
 type BaseOptions = {
   defaultLicense?: string;
@@ -30,7 +29,8 @@ export class Indexer {
 
   deriveUniqueEntityId(crateRootId : string, entityId: string) {
     if (entityId.startsWith(crateRootId)) return entityId;
-    else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
+    //else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
+    else if (entityId.includes(':')) return entityId;
     else return crateRootId + '/' + entityId;
   }
 

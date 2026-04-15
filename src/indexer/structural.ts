@@ -27,7 +27,7 @@ export class StructuralIndexer extends Indexer {
     let count = 0;
     const pq = new PromiseQueue(4, async (opt: Record<string, unknown>) => {
       for (const tableName in opt) {
-        await prisma[tableName].create({ data: opt[tableName] });
+        await prisma[tableName as keyof typeof prisma].create({ data: opt[tableName] });
       }
     });
     for (const entity of crate.entities()) {
@@ -35,9 +35,12 @@ export class StructuralIndexer extends Indexer {
       if (!entityType) {
         continue;
       }
-      const conformsTo = entity['conformsTo']?.find((c) => c['@id'] === RecordType[entityType]);
-      if(!conformsTo) {
-        continue;
+      const mustHaveConformsTo = RecordType[entityType];
+      if (mustHaveConformsTo) {
+        const conformsTo = entity.conformsTo?.find((c) => c['@id'] === mustHaveConformsTo);
+        if (!conformsTo) {
+          continue;
+        }
       }
       logger.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
       count++;
@@ -66,7 +69,7 @@ export class StructuralIndexer extends Indexer {
           file: {
             id: entityId,
             filename: entity['@id'].split('/').pop(),
-            mediaType: (entity.encodingFormat?.[0] as string) || 'application/octet-stream',
+            mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
             size: BigInt(entity.contentSize || 0),
             meta: {
               storagePath: entity['@id'],

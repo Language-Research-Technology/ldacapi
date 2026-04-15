@@ -1,13 +1,22 @@
+import { env } from 'node:process';
 import packageJson from '../package.json' with { type: 'json' };
+
+const isDev = env.NODE_ENV ? (env.NODE_ENV === 'development' || env.NODE_ENV === 'dev') : true;
 export default {
   package: packageJson,
-  tokenAdmin: process.env.TOKEN_ADMIN || '1234-1234-1234-1234',
+  isDev,
+  databaseUrl: env.DATABASE_URL || 'postgresql://ldaca:ldaca@localhost:5432/ldaca',
+  opensearchUrl: env.OPENSEARCH_URL || 'http://localhost:9200',
+  port: parseInt(env.LDACAPI_PORT || '8080'),
+  logLevel: env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
+  tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',
   indexType: {
     RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
     RepositoryObject: 'https://w3id.org/ldac/profile#Object',
-    File: 'https://schema.org/MediaObject',
-    // Person: 'https://schema.org/Person',
-    // Organization: 'https://schema.org/Organization'
+    File: '',
+    Person: 'https://w3id.org/ldac/profile#Person',
+    Organization: 'https://w3id.org/ldac/profile#Organization',
+    SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication'
   },
   search: {
     cluster: {
@@ -82,6 +91,6 @@ export default {
       '@type': { terms: { field: '@type' } },
       inLanguage: { terms: { field: 'inLanguage' } }
     },
-    entityIndex: process.env.ENTITY_INDEX || 'entities'
+    entityIndex: env.ENTITY_INDEX || 'entities'
   }
 }

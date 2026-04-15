@@ -91,8 +91,16 @@
       "name": "Attribution 4.0 International (CC BY 4.0)"
     },
     {
+      "@id": "https://uq.edu.au",
+      "@type": "Organization",
+      "name": "The University of Queensland"
+    },
+    {
       "@id": "https://ldaca.edu.au",
       "@type": "Organization",
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#Organization"
+      },
       "name": "Ldaca"
     },
     {
@@ -101,8 +109,11 @@
       "name": "John Doe"
     },
     {
-      "@id": "https://orcid.org/0001",
+      "@id": "https://orcid.org/0002",
       "@type": "Person",
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#Person"
+      },
       "name": "Jane Doe"
     },
     {
@@ -253,6 +264,22 @@
       "@id": "#place_A-VIC",
       "@type": "Place",
       "name": "Victoria",
-      "geo": "POLYGON((140.961681 -39.15919, 150.0 -39.15919, 150.0 -34.0, 140.961681 -34.0, 140.961681 -39.15919))"    }
+      "geo": "POLYGON((140.961681 -39.15919, 150.0 -39.15919, 150.0 -34.0, 140.961681 -34.0, 140.961681 -39.15919))"
+    },
+    {
+      "@id": "https://github.com/Language-Research-Technology/crate-o",
+      "@type": "SoftwareApplication",
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#SoftwareApplication"
+      },
+      "name": "Crate-O",
+      "datePublished": "2026-04-11",
+      "author": {
+        "@id": "https://orcid.org/0000-0002-4438-2755"
+      },
+      "programmingLanguage": "JavaScript",
+      "url": "https://github.com/Language-Research-Technology/crate-o",
+      "description": "Browser-based editor for RO Crates"
+    }
   ]
 }

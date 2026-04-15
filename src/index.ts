@@ -11,20 +11,21 @@ import ldacapi, { fileHandler } from './app.ts';
 import { config } from './configuration.ts';
 import { PrismaClient } from './generated/prisma/client.ts';
 
-const opensearchUrl = process.env.OPENSEARCH_URL || 'http://localhost:9200';
-const port = parseInt(process.env.LDACAPI_PORT || '8080');
 export const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL })
+  adapter: new PrismaPg({ connectionString: config.databaseUrl })
 });
-const opensearch = new Client({ node: opensearchUrl });
+const opensearch = new Client({ node: config.opensearchUrl });
 
 const fastify = Fastify({
   //logger: { level: 'debug' },
-  logger: { level: 'debug', transport: { target: 'pino-pretty' } },
-  // routerOptions: {
-  //   ignoreTrailingSlash: true,
-  // }
-})
+  logger: {
+    level: config.logLevel,
+    ...(config.isDev && { transport: { target: 'pino-pretty' } }),
+    // routerOptions: {
+    //   ignoreTrailingSlash: true,
+    // }
+  }
+});
 export const logger = fastify.log;
 
 const appOpt: Options = {
@@ -78,7 +79,10 @@ fastify.register(ldacapi, appOpt);
 (async function () {
   try {
     await fastify.ready();
-    await fastify.listen({ port })
+    await fastify.listen({ port: config.port })
+    if (config.isDev) {
+      fastify.log.info(`Server is running on development mode`);
+    }
   } catch (err) {
     fastify.log.error(err)
     process.exit(1)

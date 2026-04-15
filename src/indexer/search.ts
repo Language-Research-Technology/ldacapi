@@ -150,7 +150,7 @@ export class SearchIndexer extends Indexer {
 
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
-      const matchedMappers = entityTypes.map((t) => typeMapper[t]).filter((fn) => !!fn);
+      const matchedMappers = entityTypes.map((t) => RecordType[t] && entity.conformsTo?.find(c => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined).filter((fn) => !!fn);
       if (matchedMappers.length) {
         // create common index record
         const _id = deriveId(entity['@id']);
