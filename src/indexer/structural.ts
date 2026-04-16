@@ -52,16 +52,9 @@ export class StructuralIndexer extends Indexer {
           name: entity.name?.join('; ') || entityId,
           description: entity.description?.join('; ') || '',
           entityType: crate.getContextDefinition(entityType) || RecordType[entityType as keyof typeof RecordType],
-          memberOf:
-            entity['pcdm:memberOf']?.[0]['@id'] ||
-            entity.memberOf?.[0]['@id'] ||
-            entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
-            entity['@reverse'].hasMember?.[0]?.['@id'] ||
-            entity.isPartOf?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
-            entity['@reverse'].hasPart?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
-            null,
+          memberOf: pickSingleMemberOf(entity),
           rootCollection: crate.rootId,
-          metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
+          metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || '',
           contentLicenseId: entity.license?.[0]['@id'] || license,
           meta: { rocrate },
         },
@@ -132,4 +125,16 @@ function entityAsCrate(crate: ROCrate, entity: any) {
     newCrate.root.conformsTo = crate.root.conformsTo;
   }
   return newCrate.toJSON();
+}
+
+function pickSingleMemberOf(entity: any) {
+  return entity['pcdm:memberOf']?.[0]['@id'] ||
+    entity.memberOf?.[0]['@id'] ||
+    entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
+    entity['@reverse'].hasMember?.[0]?.['@id'] ||
+    entity.isPartOf?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
+    entity['@reverse'].hasPart?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
+    entity.isPartOf?.[0]['@id'] ||
+    entity['@reverse'].hasPart?.[0]?.['@id'] ||
+    null;
 }

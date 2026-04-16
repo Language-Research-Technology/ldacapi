@@ -252,7 +252,7 @@ function createDoc(
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
     //memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
-    metadataLicenseId: crate.metadata?.license?.[0]['@id'] || '',
+    metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || '',
     contentLicenseId: entity.license?.[0]?.['@id'] || license,
     '@id': entity['@id'],
   };

@@ -3,7 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const repository = await createStorage({
-  root: './ocfl',
+  root: '/opt/storage/oni/ocfl',
   layout: {
     extensionName: '000N-path-direct-storage-layout'
   },

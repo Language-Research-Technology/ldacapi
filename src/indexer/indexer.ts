@@ -56,11 +56,14 @@ export class Indexer {
   async index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
+    const metadataLicense = crate.descriptor.license?.[0]?.['@id'];
     const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
     if (!rootDataset) {
       logger.warn(`${crateObject.root}: Skipped: Does not contain an ROCrate with a valid root dataset.`);
     } else if (crateId === './') {
       logger.warn(`${crateObject.root}: Skipped: Cannot process a crate with invalid identifier ('./').`);
+    } else if (!metadataLicense) {
+      logger.warn(`${crateObject.root}: Skipped: No metadata license found.`);
     } else if (!license) {
       logger.warn(`${crateObject.root}: Skipped: No license found.`);
     } else {
