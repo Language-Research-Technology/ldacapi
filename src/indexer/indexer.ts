@@ -56,7 +56,7 @@ export class Indexer {
   async index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
-    const metadataLicense = crate.descriptor.license?.[0]?.['@id'];
+    const metadataLicense = crate.descriptor?.license?.[0]?.['@id'] || crate.metadata?.license?.[0]?.['@id'] || this.defaultMetadataLicense;
     const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
     if (!rootDataset) {
       logger.warn(`${crateObject.root}: Skipped: Does not contain an ROCrate with a valid root dataset.`);

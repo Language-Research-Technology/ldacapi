@@ -162,7 +162,7 @@ export class SearchIndexer extends Indexer {
         // const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
         // doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
         // doc._metadataLicense = metadataLicense;
-        let record = createDoc(crate, entity, _id, this.defaultLicense, deferredEntities, this.propertyMapper);
+        let record = createDoc(crate, entity, _id, this.defaultLicense, this.defaultMetadataLicense, deferredEntities, this.propertyMapper);
         logger.debug(`[structural] Adding ${_id}`);
         // add additional information to record based on type
         for (const mapType of matchedMappers) {
@@ -240,10 +240,12 @@ function createDoc(
   entity: Record<string, any>,
   _id: string,
   defaultLicense: string,
+  defaultMetadataLicense: string,
   deferredEntities: any[],
   propMapper: typeof propertyMapper = {},
 ) {
   const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
+  const metadataLicense = crate.descriptor?.license?.[0]?.['@id'] || crate.metadata?.license?.[0]?.['@id'] || defaultMetadataLicense;
   const record: Record<string, any> = {
     rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
     id: _id, // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
@@ -252,7 +254,7 @@ function createDoc(
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
     //memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
-    metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || '',
+    metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || metadataLicense,
     contentLicenseId: entity.license?.[0]?.['@id'] || license,
     '@id': entity['@id'],
   };
