@@ -1,7 +1,6 @@
 import { ROCrate } from 'ro-crate';
 import { logger, prisma } from '../index.ts';
-import { PromiseQueue } from '../utils.ts';
-import type { CrateObject } from './indexer.ts';
+import { PromiseQueue, firstStringOrId } from '../utils.ts';
 import { Indexer, RecordType } from './indexer.ts';
 
 export class StructuralIndexer extends Indexer {
@@ -16,26 +15,30 @@ export class StructuralIndexer extends Indexer {
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 
-  async _index({ crateObject, crate }: { crateObject: CrateObject; crate: ROCrate }) {
+  override async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
     //await ocflObject.load();
-    const rootDataset = crate.root;
     const crateId = crate.rootId;
-    const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
     //console.log(`${crateId} license: ${lic}`);
     //const objectRoot = ocflObject.root;
-    logger.info(`[structural] Indexing ${crateId}`);
+    //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
-    const pq = new PromiseQueue(4, async (opt: Record<string, unknown>) => {
+    const pq = new PromiseQueue(4, async (opt: any) => {
       for (const tableName in opt) {
-        await prisma[tableName as keyof typeof prisma].create({ data: opt[tableName] });
+        const data = opt[tableName];
+        //console.log(data.Metadatalicense);
+        if (data) {
+          // @ts-ignore
+          await prisma[tableName].create({ data });
+        }
       }
     });
+
     for (const entity of crate.entities()) {
       const entityType = entity['@type'].find((t) => t in RecordType); // only the first matching entity type is used
       if (!entityType) {
         continue;
       }
-      const mustHaveConformsTo = RecordType[entityType];
+      const mustHaveConformsTo = RecordType[entityType as keyof typeof RecordType];
       if (mustHaveConformsTo) {
         const conformsTo = entity.conformsTo?.find((c) => c['@id'] === mustHaveConformsTo);
         if (!conformsTo) {
@@ -54,22 +57,26 @@ export class StructuralIndexer extends Indexer {
           entityType: crate.getContextDefinition(entityType) || RecordType[entityType as keyof typeof RecordType],
           memberOf: pickSingleMemberOf(entity),
           rootCollection: crate.rootId,
-          metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || '',
-          contentLicenseId: entity.license?.[0]['@id'] || license,
+          metadataLicenseId: metadataLicense,
+          contentLicenseId: firstStringOrId(entity.license) || license,
           meta: { rocrate },
-        },
-        ...((entityType.startsWith('://schema.org/MediaObject') || entityType === 'File') && {
-          file: {
-            id: entityId,
-            filename: entity['@id'].split('/').pop(),
-            mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
-            size: BigInt(entity.contentSize || 0),
-            meta: {
-              storagePath: entity['@id'],
-            },
-          },
-        }),
+        }
       };
+      if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
+        const storagePath = entity['@id'];
+        const f = await crateObject.file(storagePath);
+        /* @ts-ignore */
+        param.file = {
+          id: entityId,
+          filename: storagePath.split('/').pop(),
+          mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
+          size: entity.contentSize ?? f.size ?? 0,
+          meta: {
+            storagePath,
+            crc32: f.crc32
+          }
+        };
+      }
       await pq.enqueue(param);
     }
     await pq.done();

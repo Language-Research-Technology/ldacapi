@@ -1,14 +1,19 @@
-import { createStorage } from '@ocfl/ocfl-fs';
+import ocfl from '@ocfl/ocfl-fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-const repository = await createStorage({
+const repository = ocfl.storage({
   root: '/opt/storage/oni/ocfl',
   layout: {
     extensionName: '000N-path-direct-storage-layout'
   },
-  fixityAlgorithms: ['size', 'crc32']
+  fixityAlgorithms: ['crc32']
 });
+try {
+  await repository.load();
+} catch (e) {
+  await repository.create();
+}
 
 const directories = await readdir('./test-data');
 for (let name of directories) {

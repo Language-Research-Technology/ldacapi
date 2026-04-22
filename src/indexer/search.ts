@@ -6,7 +6,7 @@ import type {
 } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from 'ro-crate';
 import { logger } from '../index.ts';
-import { PromiseQueue } from '../utils.ts';
+import { PromiseQueue, firstStringOrId } from '../utils.ts';
 import type { CrateObject } from './indexer.ts';
 import { Indexer, RecordType } from './indexer.ts';
 import { dataTypeMapper, mapDefaultProperties, propertyMapper } from './search_mapper.ts';
@@ -125,7 +125,7 @@ export class SearchIndexer extends Indexer {
     return 0;
   }
 
-  async _index({ crateObject, crate }: Parameters<Indexer['_index']>[0]) {
+  async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
     // create indices if not exists
     const elastic = this.conf;
     try {
@@ -150,7 +150,7 @@ export class SearchIndexer extends Indexer {
 
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
-      const matchedMappers = entityTypes.map((t) => RecordType[t] && entity.conformsTo?.find(c => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined).filter((fn) => !!fn);
+      const matchedMappers = entityTypes.map((t) => !RecordType[t] || entity.conformsTo?.find(c => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined).filter((fn) => !!fn);
       if (matchedMappers.length) {
         // create common index record
         const _id = deriveId(entity['@id']);
@@ -162,13 +162,13 @@ export class SearchIndexer extends Indexer {
         // const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
         // doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
         // doc._metadataLicense = metadataLicense;
-        let record = createDoc(crate, entity, _id, this.defaultLicense, this.defaultMetadataLicense, deferredEntities, this.propertyMapper);
+        let record = createDoc(crate, entity, _id, license, metadataLicense, deferredEntities, this.propertyMapper);
         logger.debug(`[structural] Adding ${_id}`);
         // add additional information to record based on type
         for (const mapType of matchedMappers) {
           record = mapType({ properties, entity, record, crate, crateObject });
         }
-        console.log(record);
+        //console.log(record);
         operations.push({ update: { _index: elastic.entityIndex, _id } }, { doc: record, doc_as_upsert: true });
       }
     }
@@ -178,7 +178,7 @@ export class SearchIndexer extends Indexer {
         refresh: true, // setting this to true will update result immediately, but will degrade performance
       });
       if (result.body.errors) {
-        logger.error(`[search] Bulk operation result errors:=`);
+        logger.error(`[search] Bulk operation result errors:`);
         const items = result.body.items.filter((item) => item.update.error).map((item) => item.update.error?.reason);
         logger.error(items.join('\n'));
       }
@@ -239,13 +239,11 @@ function createDoc(
   crate: ROCrate,
   entity: Record<string, any>,
   _id: string,
-  defaultLicense: string,
-  defaultMetadataLicense: string,
+  license: string,
+  metadataLicense: string,
   deferredEntities: any[],
   propMapper: typeof propertyMapper = {},
 ) {
-  const license = crate.root.license?.[0]?.['@id'] || defaultLicense;
-  const metadataLicense = crate.descriptor?.license?.[0]?.['@id'] || crate.metadata?.license?.[0]?.['@id'] || defaultMetadataLicense;
   const record: Record<string, any> = {
     rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
     id: _id, // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
@@ -254,8 +252,8 @@ function createDoc(
     //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
     //memberOf: entity['pcdm:memberOf'] || entity.memberOf,
     rootCollection: crate.rootId,
-    metadataLicenseId: crate.descriptor?.license?.[0]['@id'] || metadataLicense,
-    contentLicenseId: entity.license?.[0]?.['@id'] || license,
+    metadataLicenseId: metadataLicense,
+    contentLicenseId: firstStringOrId(entity.license) || license,
     '@id': entity['@id'],
   };
   //handle inverse relations

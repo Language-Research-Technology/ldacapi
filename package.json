@@ -34,6 +34,7 @@
     "fastify": "^5.8.4",
     "fastify-plugin": "^5.1.0",
     "fastify-type-provider-zod": "^6.1.0",
+    "hash-wasm": "^4.12.0",
     "p-limit": "^7.3.0",
     "prisma": "^7.5.0",
     "ro-crate": "^3.7.1",

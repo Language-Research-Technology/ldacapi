@@ -1,24 +1,37 @@
 import type { ROCrate } from "ro-crate";
 import { config } from "../configuration.ts";
 import { logger } from "../index.ts";
+import { firstStringOrId } from '../utils.ts';
 
 type BaseOptions = {
   defaultLicense?: string;
   defaultMetadataLicense?: string;
+  name?: string;
 };
 
+export interface CrateFile {
+  size: number;
+  crc32: string;
+}
+
 export interface CrateObject {
+  /** The absolute path of the root directory of the crate */
   root: string;
+  /** The text content of a file within the crate */
   text(path: string): Promise<string>;
+  /** The metadata of a file within the crate, such as size */
+  file(path: string): Promise<CrateFile>;
 }
 
 export class Indexer {
   defaultLicense: string;
   defaultMetadataLicense: string;
+  name: string;
 
   constructor(opt?: BaseOptions) {
     this.defaultLicense = opt?.defaultLicense || '';
     this.defaultMetadataLicense = opt?.defaultMetadataLicense || '';
+    this.name = opt?.name || Object.getPrototypeOf(this).constructor.name;
   }
 
   static async create(opt: any) {
@@ -36,7 +49,7 @@ export class Indexer {
 
   async init() {}
 
-  async _index(param: { crateObject: CrateObject, crate: ROCrate }) {
+  async _index(param: { crateObject: CrateObject, crate: ROCrate, license: string, metadataLicense: string }) {
     throw new Error('Not Implemented');
   }
 
@@ -56,20 +69,22 @@ export class Indexer {
   async index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
-    const metadataLicense = crate.descriptor?.license?.[0]?.['@id'] || crate.metadata?.license?.[0]?.['@id'] || this.defaultMetadataLicense;
-    const license = rootDataset.license?.[0]?.['@id'] || this.defaultLicense;
+    const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
+    const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
+    const warnPrefix = `[${this.name}][${crateObject.root}]`;
     if (!rootDataset) {
-      logger.warn(`${crateObject.root}: Skipped: Does not contain an ROCrate with a valid root dataset.`);
+      logger.warn(`${warnPrefix} Skipped: Does not contain an ROCrate with a valid root dataset.`);
     } else if (crateId === './') {
-      logger.warn(`${crateObject.root}: Skipped: Cannot process a crate with invalid identifier ('./').`);
+      logger.warn(`${warnPrefix} Skipped: Cannot process a crate with invalid identifier ('./').`);
     } else if (!metadataLicense) {
-      logger.warn(`${crateObject.root}: Skipped: No metadata license found.`);
+      logger.warn(`${warnPrefix} Skipped: No metadata license found.`);
     } else if (!license) {
-      logger.warn(`${crateObject.root}: Skipped: No license found.`);
+      logger.warn(`${warnPrefix} Skipped: No license found.`);
     } else {
       //logger.debug('index ' + ocflObject.root);
       //console.log(this.__state);
-      await this._index({ crateObject, crate });
+      logger.info(`Indexing ${crateId}`);
+      await this._index({ crateObject, crate, license, metadataLicense });
     }
   }
 

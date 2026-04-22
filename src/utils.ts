@@ -39,6 +39,17 @@ export class PromiseQueue {
   }
 }
 
+export function firstStringOrId(values: unknown[]): string | undefined {
+  for (const value of values || []) {
+    if (typeof value === 'string') {
+      return value;
+    } else if (typeof value === 'object' && value !== null && '@id' in value && typeof value['@id'] === 'string') {
+      return value['@id'];
+    }
+  //return typeof value === 'string' ? value : (value as { '@id'?: string })?.['@id'];
+  }
+}
+
 // function delay() {
 //   return new Promise(resolve => setTimeout(resolve, 200));
 // }

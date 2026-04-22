@@ -11,7 +11,7 @@
       "@id": "ro-crate-metadata.json",
       "@type": "CreativeWork",
       "identifier": "ro-crate-metadata.json",
-      "licence": "CC_BY",
+      "licence": "https://creativecommons.org/licenses/by/4.0/",
       "about": {
         "@id": "arcp://name,bundled"
       }

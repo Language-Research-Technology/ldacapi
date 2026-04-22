@@ -1,5 +1,6 @@
 import type { OcflObject } from '@ocfl/ocfl';
 import ocfl from '@ocfl/ocfl-fs';
+import { createCRC32 } from 'hash-wasm';
 import { ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import { logger } from './index.ts';
@@ -7,6 +8,7 @@ import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
 import { PromiseQueue } from './utils.ts';
+const crc32 = await createCRC32();
 
 const ocflConf = {
   ocflPath: '/opt/storage/oni/ocfl',
@@ -24,8 +26,7 @@ const ocflConf = {
   previewPathInternal: '/ocfl/previews',
 };
 
-const defaultLicense = 'https://opensource.org/licenses/MIT';
-const defaultMetadataLicense = 'https://opensource.org/licenses/MIT';
+const { defaultLicense, defaultMetadataLicense } = config;
 const ocflPath = '/opt/storage/oni/ocfl';
 const ocflPathInternal = 'ocfl';
 
@@ -69,16 +70,31 @@ export async function init(opts: any) {
   }
 }
 
+async function calculateCrc32(file) {
+  crc32.init();
+  for await (const chunk of (await file.stream())) {
+    crc32.update(chunk);
+  }
+  return crc32.digest('hex');
+}
+
 function wrap(ocflObject: OcflObject): CrateObject {
   return {
     root: ocflObject.root,
-    text: async (path: string) => {
+    async text(path: string) {
       return await ocflObject.getFile({ logicalPath: path }).text();
     },
+    async file(path: string) {
+      const file = ocflObject.getFile({ logicalPath: path });
+      return { 
+        size: file.size ?? file.fixity?.size ?? (await file.stat()).size,
+        crc32: file.fixity?.crc32 ?? await calculateCrc32(file)
+      };
+    }
   };
 }
 
-export async function getIndexerState(_crateId?: string,_typee?: string) {
+export async function getIndexerState(_crateId?: string, _typee?: string) {
   return {
     isIndexed: false,
     isIndexing: false,
@@ -122,11 +138,11 @@ export async function createIndex(crateId?: string | RegExp, type?: string, forc
     const fn =
       crateId instanceof RegExp
         ? // if crateId is specified, index just the object and the subcollections and child objects
-          // by checking just the structure implied in the crate id
-          async (ocflObject: unknown) =>
-            (await ocflObject.getInventory())?.id.match(crateId) ? indexObject(ocflObject, types, force) : undefined
+        // by checking just the structure implied in the crate id
+        async (ocflObject: unknown) =>
+          (await ocflObject.getInventory())?.id.match(crateId) ? indexObject(ocflObject, types, force) : undefined
         : // otherwise, index everything
-          async (ocflObject: unknown) => indexObject(ocflObject, types, force);
+        async (ocflObject: unknown) => indexObject(ocflObject, types, force);
     const pq = new PromiseQueue(4, fn);
     for await (const ocflObject of repository) {
       await pq.enqueue(ocflObject);
@@ -139,9 +155,9 @@ export async function createIndex(crateId?: string | RegExp, type?: string, forc
 export async function deleteIndex(crateId?: string, type?: string | string[]) {
   const indexers = type
     ? ([] as string[])
-        .concat(type)
-        .map((t) => INDEXER[t])
-        .filter((i) => !!i)
+      .concat(type)
+      .map((t) => INDEXER[t])
+      .filter((i) => !!i)
     : Object.values(INDEXER);
   await Promise.allSettled(indexers.map((indexer) => indexer.delete(crateId)));
 }
@@ -162,7 +178,7 @@ export async function* objects(_base: string) {
 }
 
 export async function getFile(entityId: string, storagePath: string) {
-  const crateId = (storagePath && entityId.endsWith('/' + storagePath)) ? entityId.slice(0, -storagePath.length-1) : entityId;
+  const crateId = (storagePath && entityId.endsWith('/' + storagePath)) ? entityId.slice(0, -storagePath.length - 1) : entityId;
   try {
     const object = repository.object(crateId);
     await object.load();

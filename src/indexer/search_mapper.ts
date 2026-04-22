@@ -28,7 +28,7 @@ const dataTypeDate: PropertyMapperFn = (value) => {
 
 const location: PropertyMapperFn = (value, { properties }) => {
   const place = value as { longitude?: number | string; latitude?: number | string; geo?: unknown[] };
-  const location = []; // index geolocation in a separate field to support geo search, this location name is hardcoded
+  const location = []; 
   if (place.longitude != null && place.latitude != null) {
     location.push({ type: 'point', coordinates: [place.longitude, place.latitude] });
   }
@@ -36,10 +36,11 @@ const location: PropertyMapperFn = (value, { properties }) => {
     if (typeof geo === 'string') {
       location.push(geo);
     } else if (geo.asWKT) {
-      location.push(geo.asWKT);
+      location.push(...geo.asWKT);
     }
   }
   console.log('location', location);
+  // index geolocation in a separate field to support geo search, this location name is hardcoded
   if (location.length) properties.location = location;
   if (value['@id']) return { '@id': value['@id'] };
 };

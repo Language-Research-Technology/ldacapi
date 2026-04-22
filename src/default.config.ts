@@ -10,6 +10,9 @@ export default {
   port: parseInt(env.LDACAPI_PORT || '8080'),
   logLevel: env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
   tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',
+  defaultLicense: '',
+  defaultMetadataLicense: '',
+
   indexType: {
     RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
     RepositoryObject: 'https://w3id.org/ldac/profile#Object',
@@ -74,7 +77,7 @@ export default {
           //recordType: { type: 'keyword' },
           //root: { type: 'keyword' },
           inLanguage: { type: 'keyword' },
-          location: { type: 'geo_shape' }, //at the moment the property name location is hardcoded.
+          location: { type: 'geo_shape', doc_values: false }, //at the moment the property name location is hardcoded.
           mediaType: { type: 'keyword' },
           datePublished: { type: 'date_range' },
           dateCreated: { type: 'date_range' },
