@@ -5,7 +5,7 @@ import { Client } from '@opensearch-project/opensearch';
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Options } from 'arocapi';
 import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } from 'arocapi';
-import Fastify from 'fastify';
+import Fastify, { type RegisterOptions } from 'fastify';
 import { Readable } from 'node:stream';
 import ldacapi, { fileHandler } from './app.ts';
 import { config } from './configuration.ts';
@@ -28,7 +28,7 @@ const fastify = Fastify({
 });
 export const logger = fastify.log;
 
-const appOpt: Options = {
+const appOpt: Options & RegisterOptions = { 
   prisma,
   opensearch,
   disableCors: true,
@@ -64,14 +64,15 @@ const appOpt: Options = {
       contentType: 'application/ld+json',
       contentLength: Buffer.byteLength(JSON.stringify(entity.meta.rocrate)),
     }),
-  }
+  },
+  prefix: config.prefix || '',
 };
 
 //fastify.register(fastifySensible);
 fastify.register(cors, {
   methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 });
-fastify.register(fastifyRoutes);
+fastify.register(fastifyRoutes, { prefix: appOpt.prefix });
 fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
 

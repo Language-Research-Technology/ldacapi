@@ -12,7 +12,7 @@ export default {
   tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',
   defaultLicense: '',
   defaultMetadataLicense: '',
-
+  prefix: '/api',
   indexType: {
     RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
     RepositoryObject: 'https://w3id.org/ldac/profile#Object',
