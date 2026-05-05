@@ -8,6 +8,7 @@ export default {
   databaseUrl: env.DATABASE_URL || 'postgresql://ldaca:ldaca@localhost:5432/ldaca',
   opensearchUrl: env.OPENSEARCH_URL || 'http://localhost:9200',
   port: parseInt(env.LDACAPI_PORT || '8080'),
+  host: env.LDACAPI_HOST,
   logLevel: env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
   tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',
   defaultLicense: '',

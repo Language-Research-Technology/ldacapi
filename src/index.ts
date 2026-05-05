@@ -80,7 +80,7 @@ fastify.register(ldacapi, appOpt);
 (async function () {
   try {
     await fastify.ready();
-    await fastify.listen({ port: config.port })
+    await fastify.listen({ port: config.port, host: config.host });
     if (config.isDev) {
       fastify.log.info(`Server is running on development mode`);
     }

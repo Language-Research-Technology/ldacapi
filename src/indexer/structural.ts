@@ -2,6 +2,7 @@ import { ROCrate } from 'ro-crate';
 import { logger, prisma } from '../index.ts';
 import { PromiseQueue, firstStringOrId } from '../utils.ts';
 import { Indexer, RecordType } from './indexer.ts';
+import { log } from 'console';
 
 export class StructuralIndexer extends Indexer {
   ocflPath: string;
@@ -62,22 +63,26 @@ export class StructuralIndexer extends Indexer {
           meta: { rocrate },
         }
       };
-      if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
-        const storagePath = entity['@id'];
-        const f = await crateObject.file(storagePath);
-        /* @ts-ignore */
-        param.file = {
-          id: entityId,
-          filename: storagePath.split('/').pop(),
-          mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
-          size: entity.contentSize ?? f.size ?? 0,
-          meta: {
-            storagePath,
-            crc32: f.crc32
-          }
-        };
+      try {
+        if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
+          const storagePath = entity['@id'];
+          const f = await crateObject.file(storagePath);
+          /* @ts-ignore */
+          param.file = {
+            id: entityId,
+            filename: storagePath.split('/').pop(),
+            mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
+            size: entity.contentSize ?? f.size ?? 0,
+            meta: {
+              storagePath,
+              crc32: f.crc32
+            }
+          };
+        }
+        await pq.enqueue(param);        
+      } catch (error) {
+        logger.error(error);
       }
-      await pq.enqueue(param);
     }
     await pq.done();
     // const relRoot = relative(this.ocflPath, objectRoot);
