@@ -86,6 +86,9 @@ function wrap(ocflObject: OcflObject): CrateObject {
     },
     async file(path: string) {
       const file = ocflObject.getFile({ logicalPath: path });
+      if (!file) {
+        throw new Error(`File not found in ocfl inventory: ${path}`);
+      }
       return { 
         size: file.size ?? file.fixity?.size ?? (await file.stat()).size,
         crc32: file.fixity?.crc32 ?? await calculateCrc32(file)

@@ -69,20 +69,84 @@
         }
       ],
       "hasPart": [
-        {
-          "@id": "data.txt"
-        },
-        {
-          "@id": "image.jpg"
-        }
+        { "@id": "data.txt" },
+        { "@id": "image.jpg" }
       ],
       "pcdm:hasMember": [
+        { "@id": "arcp://name,bundled/ch1" },
+        { "@id": "arcp://name,bundled/ch2" },
+        { "@id": "arcp://name,bundled/intro" }
+      ]
+    },
+    {
+      "@id": "arcp://name,bundled/ch1",
+      "@type": [ "RepositoryCollection" ],
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#Collection"
+      },
+      "name": "Corpus of Oni Chapter 1",
+      "description": "Sub collection 1 - test pcdm:hasMember",
+      "license": {
+        "@id": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "publisher": {
+        "@id": "https://ldaca.edu.au"
+      },
+      "datePublished": "2023-12-21",
+      "author": [
         {
-          "@id": "arcp://name,bundled/intro"
-        },
-        {
-          "@id": "arcp://name,bundled/history"
+          "@id": "https://orcid.org/0001"
         }
+      ],
+      "rightsHolder": {
+        "@id": "https://ldaca.edu.au"
+      },
+      "accountablePerson": {
+        "@id": "https://orcid.org/0001"
+      },
+      "inLanguage": {
+        "@id": "https://glottolog.org/resource/languoid/id/stan1293"
+      },
+      "hasPart": [
+        { "@id": "data.txt" },
+        { "@id": "image.jpg" }
+      ],
+      "pcdm:hasMember": [
+        { "@id": "arcp://name,bundled/ch1/history" }
+      ]
+    },
+    {
+      "@id": "arcp://name,bundled/ch2",
+      "@type": [ "RepositoryCollection" ],
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#Collection"
+      },
+      "name": "Corpus of Oni Chapter 2",
+      "description": "Sub collection 2 - test hasPart",
+      "license": {
+        "@id": "https://creativecommons.org/licenses/by/4.0/"
+      },
+      "publisher": {
+        "@id": "https://ldaca.edu.au"
+      },
+      "datePublished": "2023-12-21",
+      "author": [
+        {
+          "@id": "https://orcid.org/0001"
+        }
+      ],
+      "rightsHolder": {
+        "@id": "https://ldaca.edu.au"
+      },
+      "accountablePerson": {
+        "@id": "https://orcid.org/0001"
+      },
+      "inLanguage": {
+        "@id": "https://glottolog.org/resource/languoid/id/stan1293"
+      },
+      "hasPart": [
+        { "@id": "sub_col_2.txt" },
+        { "@id": "arcp://name,bundled/ch2/facts" }
       ]
     },
     {
@@ -187,6 +251,9 @@
         },
         {
           "@id": "media/intro.mpeg"
+        },
+        {
+          "@id": "non_existent_file.txt"
         }
       ],
       "indexableText": {
@@ -198,7 +265,31 @@
       "name": "Introduction to Oni"
     },
     {
-      "@id": "arcp://name,bundled/history",
+      "@id": "arcp://name,bundled/ch1/history",
+      "@type": "RepositoryObject",
+      "author": {
+        "@id": "https://orcid.org/0002"
+      },
+      "communicationMode": {
+        "@id": "https://w3id.org/ldac/terms#WrittenLanguage"
+      },
+      "conformsTo": {
+        "@id": "https://w3id.org/ldac/profile#Object"
+      },
+      "dateCreated": "1788",
+      "pcdm:memberOf": { "@id": "arcp://name,bundled/ch1" },
+      "hasPart": [
+        {
+          "@id": "history.pdf"
+        }
+      ],
+      "inLanguage": {
+        "@id": "https://glottolog.org/resource/languoid/id/stan1293"
+      },
+      "name": "History of Oni"
+    },
+    {
+      "@id": "arcp://name,bundled/ch2/facts",
       "@type": "RepositoryObject",
       "author": {
         "@id": "https://orcid.org/0002"
@@ -211,14 +302,12 @@
       },
       "dateCreated": "1788",
       "hasPart": [
-        {
-          "@id": "history.pdf"
-        }
+        { "@id": "facts.csv" }
       ],
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
-      "name": "History of Oni"
+      "name": "Facts of Oni"
     },
     {
       "@id": "intro.txt",
@@ -229,7 +318,34 @@
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
-      "name": "Intro Text"
+      "name": "Intro Text",
+      "author": [
+        { "@id": "arcp://name,people/JohnSmith" },
+        { "@id": "arcp://name,people/JaneSmith" }
+      ]
+    },
+    {
+      "@id": "facts.csv",
+      "@type": "File",
+      "description": "Facts",
+      "encodingFormat": "text/csv",
+      "name": "Facts Table",
+      "author": [
+        { "@id": "arcp://name,people/JohnSmith" },
+        { "@id": "arcp://name,people/JaneSmith" }
+      ]
+    },
+    {
+      "@id": "non_existent_file.txt",
+      "@type": "File",
+      "description": "Test if file does not exist",
+      "name": "non_existent_file"
+    },
+    {
+      "@id": "sub_col_2.txt",
+      "@type": "File",
+      "description": "Test sub collection 1",
+      "name": "sub_col_2"
     },
     {
       "@id": "media/intro.mpeg",
@@ -237,7 +353,8 @@
       "dateModified": "2021-11-10T11:16:31+11:00",
       "description": "Test video",
       "encodingFormat": "audio/mpeg",
-      "name": "Corpus of Oni Test Video"
+      "name": "Corpus of Oni Test Video",
+      "editor": { "@id": "arcp://name,people/JohnSmith" }
     },
     {
       "@id": "history.pdf",
