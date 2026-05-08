@@ -5,28 +5,17 @@ import { Client } from '@opensearch-project/opensearch';
 import { PrismaPg } from "@prisma/adapter-pg";
 import type { Options } from 'arocapi';
 import arocapi, { AllPublicAccessTransformer, AllPublicFileAccessTransformer } from 'arocapi';
-import Fastify, { type RegisterOptions } from 'fastify';
+import type { RegisterOptions } from 'fastify';
 import { Readable } from 'node:stream';
 import ldacapi, { fileHandler } from './app.ts';
 import { config } from './configuration.ts';
 import { PrismaClient } from './generated/prisma/client.ts';
+import { fastify } from './utils.ts';
 
 export const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: config.databaseUrl })
 });
 const opensearch = new Client({ node: config.opensearchUrl });
-
-const fastify = Fastify({
-  //logger: { level: 'debug' },
-  logger: {
-    level: config.logLevel,
-    ...(config.isDev && { transport: { target: 'pino-pretty' } }),
-    // routerOptions: {
-    //   ignoreTrailingSlash: true,
-    // }
-  }
-});
-export const logger = fastify.log;
 
 const appOpt: Options & RegisterOptions = { 
   prisma,

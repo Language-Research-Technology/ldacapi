@@ -6,7 +6,7 @@ import pkg from "../package.json" with { type: "json" };
 import type { FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { File } from './generated/prisma/client.ts';
-import { logger } from './index.ts';
+import { log } from './utils.ts';
 import { initRepository, type Repository } from './repository.ts';
 import { admin } from './routes/admin.ts';
 
@@ -58,8 +58,8 @@ function fileMetadata(file: File): FileMetadata {
 
 export const fileHandler: FileHandler = {
   get: async (file, { request }) => {
-    logger.debug(`Get object file`);
-    logger.debug(file);
+    log.debug(`Get object file`);
+    log.debug(file);
     const metadata = fileMetadata(file);
     const rf = await repository.getFile(file.id, file.meta.storagePath);
     //if (!rf) return fastify.httpErrors.notFound(`File not found: ${file.id}`);

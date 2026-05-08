@@ -1,31 +1,47 @@
-export class PromiseQueue {
+import Fastify from 'fastify';
+import { config } from './configuration.ts';
+
+export const fastify = Fastify({
+  //logger: { level: 'debug' },
+  logger: {
+    level: config.logLevel,
+    ...(config.isDev && { transport: { target: 'pino-pretty' } }),
+    // routerOptions: {
+    //   ignoreTrailingSlash: true,
+    // }
+  }
+});
+
+export const log = fastify.log;
+
+export class PromiseQueue<T = any> {
   concurrency: number;
-  sharedFunction: Function;
-  queue = [];
-  #returnSlot;
-  constructor(concurrency = 1, sharedFunction?: Function) {
+  sharedFunction?: (t: T)=>Promise<unknown>;
+  queue: (Promise<unknown>|null)[] = [];
+  #returnSlot?: (value: number) => void;
+  constructor(concurrency = 1, sharedFunction?: (t: T)=>Promise<unknown>) {
     this.concurrency = concurrency;
     this.sharedFunction = sharedFunction;
-    this.queue = new Array(concurrency);
+    this.queue = new Array<Promise<unknown>|null>(concurrency);
   }
   /**
-   * Enqueue a value or function to be run. This method will be awaited until there is an available slot in the queue. 
+   * Enqueue a value or function to be run. This method will be awaited until there is an available slot in the queue.
+   * If a function is passed, it will be called immediately with no arguments and is expected to return a promise. The result of the promise will be returned.
    */
   //async enqueue<V>(value: V): Promise<R>;
   //async enqueue<RV, V extends () => Promise<RV>>(task: V): Promise<RV>;
-  async enqueue(valueOrTask) {
+  async enqueue(valueOrTask: T) {
     let slot = this.queue.findIndex(v => v == null);
     if (slot === -1) {
-      slot = await (new Promise(resolve => {
+      slot = await (new Promise<number>(resolve => {
         this.#returnSlot = resolve;
       }));
     }
-    let p: Promise<any>;
+    let p: Promise<unknown>;
     if (typeof valueOrTask === 'function') {
       p = valueOrTask();
     } else {
-      if (!this.sharedFunction) throw new Error('No shared function provided for non-function tasks');
-      p = this.sharedFunction(valueOrTask);
+      p = this.sharedFunction ? this.sharedFunction(valueOrTask) : Promise.resolve(valueOrTask);
     }
     this.queue[slot] = p.then(v => {
       this.queue[slot] = null;

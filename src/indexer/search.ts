@@ -5,7 +5,7 @@ import type {
   Search_RequestBody,
 } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from 'ro-crate';
-import { logger } from '../index.ts';
+import { log } from '../utils.ts';
 import { PromiseQueue, firstStringOrId } from '../utils.ts';
 import type { CrateObject } from './indexer.ts';
 import { Indexer, RecordType } from './indexer.ts';
@@ -49,10 +49,10 @@ const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Recor
       const entityId = entity['@id'];
       try {
         record._text = (await crateObject?.text(entityId)) || '';
-        logger.info(`[search] Indexing File: ${entityId}`);
+        log.info(`[search] Indexing File: ${entityId}`);
       } catch (e) {
-        logger.error(`[search] Cannot read file: ${entityId}`);
-        logger.error(e);
+        log.error(`[search] Cannot read file: ${entityId}`);
+        log.error(e);
         record._error = 'file_not_found';
       }
     }
@@ -83,17 +83,17 @@ export class SearchIndexer extends Indexer {
   }
 
   async init() {
-    logger.debug('Configure OpenSearch Cluster');
+    log.debug('Configure OpenSearch Cluster');
     try {
       const elastic = this.conf;
       await this.client.cluster.putSettings({ body: elastic.cluster });
       if (elastic?.log === 'debug') {
         const config = await this.client.cluster.getSettings();
-        logger.debug('Current cluster setting: ' + JSON.stringify(config));
+        log.debug('Current cluster setting: ' + JSON.stringify(config));
       }
     } catch (e) {
-      logger.error('configureCluster');
-      logger.error(e);
+      log.error('configureCluster');
+      log.error(e);
     }
   }
 
@@ -107,10 +107,10 @@ export class SearchIndexer extends Indexer {
       } else {
         await this.client.indices.delete({ index: this.conf.entityIndex });
       }
-      logger.debug(`[search] Index ${crateId || '<all>'} deleted`);
+      log.debug(`[search] Index ${crateId || '<all>'} deleted`);
     } catch (error) {
       if ((error as any).meta?.statusCode !== 404) {
-        logger.error(error);
+        log.error(error);
       }
     }
   }
@@ -120,7 +120,7 @@ export class SearchIndexer extends Indexer {
       const res = await this.client.count({ index: this.conf.entityIndex });
       return res.body.count;
     } catch (e) {
-      logger.error(e);
+      log.error(e);
     }
     return 0;
   }
@@ -140,7 +140,7 @@ export class SearchIndexer extends Indexer {
     } catch (error) {
       //logger.debug('search index already exists, ignore');
       if ((error as any).meta?.statusCode !== 400) {
-        logger.debug(error);
+        log.debug(error);
       }
     }
     const { properties } = elastic.create.mappings;
@@ -163,7 +163,7 @@ export class SearchIndexer extends Indexer {
         // doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
         // doc._metadataLicense = metadataLicense;
         let record = createDoc(crate, entity, _id, license, metadataLicense, deferredEntities, this.propertyMapper);
-        logger.debug(`[structural] Adding ${_id}`);
+        log.debug(`[structural] Adding ${_id}`);
         // add additional information to record based on type
         for (const mapType of matchedMappers) {
           record = mapType({ properties, entity, record, crate, crateObject });
@@ -178,9 +178,9 @@ export class SearchIndexer extends Indexer {
         refresh: true, // setting this to true will update result immediately, but will degrade performance
       });
       if (result.body.errors) {
-        logger.error(`[search] Bulk operation result errors:`);
+        log.error(`[search] Bulk operation result errors:`);
         const items = result.body.items.filter((item) => item.update.error).map((item) => item.update.error?.reason);
-        logger.error(items.join('\n'));
+        log.error(items.join('\n'));
       }
       // index bigger data such as file content in a separate step to manage payload size
       const pq = new PromiseQueue(4, async (entity) => {
@@ -196,7 +196,7 @@ export class SearchIndexer extends Indexer {
           id: deriveId(entity['@id']),
           body: { doc, doc_as_upsert: true },
         });
-        logger.debug(
+        log.debug(
           `[search] Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`,
         );
       });
@@ -206,16 +206,16 @@ export class SearchIndexer extends Indexer {
       await pq.done();
       await this.client.indices.refresh({ index: elastic.entityIndex });
     } catch (error) {
-      logger.error('Error indexing ' + crate.rootId);
-      logger.error(error);
+      log.error('Error indexing ' + crate.rootId);
+      log.error(error);
     }
   }
 
   async search({ index = this.conf.entityIndex, searchBody, filterPath, explain }: searchParams) {
     try {
-      logger.debug('----- searchBody ----');
-      logger.debug(JSON.stringify(searchBody));
-      logger.debug('----- searchBody ----');
+      log.debug('----- searchBody ----');
+      log.debug(JSON.stringify(searchBody));
+      log.debug('----- searchBody ----');
       const opts: Search_Request = {
         index,
         body: searchBody,
@@ -224,11 +224,11 @@ export class SearchIndexer extends Indexer {
       if (filterPath) {
         opts.filter_path = filterPath;
       }
-      logger.debug(JSON.stringify(opts));
+      log.debug(JSON.stringify(opts));
       const result = await this.client.search(opts);
       return result.body;
     } catch (e) {
-      logger.error(e);
+      log.error(e);
       throw e;
     }
   }
@@ -301,7 +301,7 @@ function _resolveLicense(licenses: any[], crate: ROCrate, defaultLicense: any) {
     if (entity) {
       return entity;
     }
-    logger.warn(`Invalid license: ${id}`);
+    log.warn(`Invalid license: ${id}`);
   }
   return defaultLicense;
 }

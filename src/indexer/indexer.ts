@@ -1,6 +1,6 @@
 import type { ROCrate } from "ro-crate";
 import { config } from "../configuration.ts";
-import { logger } from "../index.ts";
+import { log } from "../utils.ts";
 import { firstStringOrId } from '../utils.ts';
 
 type BaseOptions = {
@@ -73,17 +73,17 @@ export class Indexer {
     const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
     const warnPrefix = `[${this.name}][${crateObject.root}]`;
     if (!rootDataset) {
-      logger.warn(`${warnPrefix} Skipped: Does not contain an ROCrate with a valid root dataset.`);
+      log.warn(`${warnPrefix} Skipped: Does not contain an ROCrate with a valid root dataset.`);
     } else if (crateId === './') {
-      logger.warn(`${warnPrefix} Skipped: Cannot process a crate with invalid identifier ('./').`);
+      log.warn(`${warnPrefix} Skipped: Cannot process a crate with invalid identifier ('./').`);
     } else if (!metadataLicense) {
-      logger.warn(`${warnPrefix} Skipped: No metadata license found.`);
+      log.warn(`${warnPrefix} Skipped: No metadata license found.`);
     } else if (!license) {
-      logger.warn(`${warnPrefix} Skipped: No license found.`);
+      log.warn(`${warnPrefix} Skipped: No license found.`);
     } else {
       //logger.debug('index ' + ocflObject.root);
       //console.log(this.__state);
-      logger.info(`Indexing ${crateId}`);
+      log.info(`Indexing ${crateId}`);
       await this._index({ crateObject, crate, license, metadataLicense });
     }
   }

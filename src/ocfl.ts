@@ -3,7 +3,7 @@ import ocfl from '@ocfl/ocfl-fs';
 import { createCRC32 } from 'hash-wasm';
 import { ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
-import { logger } from './index.ts';
+import { log } from './utils.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
@@ -34,7 +34,7 @@ let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 
 export async function init(opts: any) {
-  logger.info('Initializing OCFL repository and indexers');
+  log.info('Initializing OCFL repository and indexers');
   INDEXER = {
     structural: await StructuralIndexer.create({
       defaultLicense,
@@ -61,11 +61,11 @@ export async function init(opts: any) {
   try {
     await repository.load();
   } catch (e) {
-    logger.error('=======================================');
-    logger.error('Repository Error: please check your OCFL');
-    logger.error((e as Error).message);
-    logger.error(JSON.stringify(ocflConf));
-    logger.error('=======================================');
+    log.error('=======================================');
+    log.error('Repository Error: please check your OCFL');
+    log.error((e as Error).message);
+    log.error(JSON.stringify(ocflConf));
+    log.error('=======================================');
     throw e;
   }
 }
@@ -109,7 +109,7 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
   if (!ocflObject) return;
   try {
     await ocflObject.load();
-    logger.debug(`Found OFCL object: ${ocflObject.id}`);
+    log.debug(`Found OFCL object: ${ocflObject.id}`);
     const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
     const rawCrate = JSON.parse(jsonContent);
     const crate = await ROCrate.create(rawCrate);
@@ -122,17 +122,17 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
           await indexer.index({ crateObject, crate });
           // counts[t]++;
         } catch (error) {
-          logger.error(error);
+          log.error(error);
         }
       }
     }
   } catch (e) {
-    logger.error(e);
+    log.error(e);
   }
 }
 
 export async function createIndex(crateId?: string | RegExp, type?: string, force?: boolean) {
-  logger.debug('Indexing started');
+  log.debug('Indexing started');
   const types = type ? [type] : ['structural', 'search'];
   if (typeof crateId === 'string') {
     await indexObject(repository.object(crateId), types, force);
@@ -152,7 +152,7 @@ export async function createIndex(crateId?: string | RegExp, type?: string, forc
     }
     await pq.done();
   }
-  logger.debug('Indexing finished');
+  log.debug('Indexing finished');
 }
 
 export async function deleteIndex(crateId?: string, type?: string | string[]) {
@@ -175,7 +175,7 @@ export async function* objects(_base: string) {
       const name = jsonParsed['@graph'].find((e: any) => e['@id'] === inv.id)?.name?.toString();
       yield { id: inv.id, name, path: ocflObject.root };
     } catch (error) {
-      logger.error(error);
+      log.error(error);
     }
   }
 }
@@ -191,6 +191,6 @@ export async function getFile(entityId: string, storagePath: string) {
       stream: async () => file.stream(),
     };
   } catch (error) {
-    logger.error(error);
+    log.error(error);
   }
 }

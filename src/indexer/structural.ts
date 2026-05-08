@@ -1,8 +1,8 @@
 import { ROCrate } from 'ro-crate';
-import { logger, prisma } from '../index.ts';
+import { prisma } from '../index.ts';
 import { PromiseQueue, firstStringOrId } from '../utils.ts';
 import { type CrateFile, Indexer, RecordType } from './indexer.ts';
-import { log } from 'console';
+import { log } from '../utils.ts';
 
 export class StructuralIndexer extends Indexer {
   ocflPath: string;
@@ -46,7 +46,7 @@ export class StructuralIndexer extends Indexer {
           continue;
         }
       }
-      logger.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
+      log.debug(`[structural] Indexing ${crateId} ${entity['@id']}`);
       count++;
       const entityId = this.deriveUniqueEntityId(crateId, entity['@id']);
       const rocrate = entityAsCrate(crate, entity);
@@ -69,7 +69,7 @@ export class StructuralIndexer extends Indexer {
         try {
           f = await crateObject.file(storagePath);
         } catch (error) {
-          logger.error(`[structural][${crateId}] ${(error as Error).message}`);
+          log.error(`[structural][${crateId}] ${(error as Error).message}`);
         }
         /* @ts-ignore */
         param.file = {
@@ -105,7 +105,7 @@ export class StructuralIndexer extends Indexer {
     //   }
     // }
 
-    logger.info(`[structural] Indexed ${crateId}: entities=${count}`);
+    log.info(`[structural] Indexed ${crateId}: entities=${count}`);
   }
 
   async delete(crateId?: string) {
@@ -113,7 +113,7 @@ export class StructuralIndexer extends Indexer {
     //const truncate = !crateId;
     await prisma.file.deleteMany({ where });
     await prisma.entity.deleteMany({ where });
-    logger.debug(`[structural] Index ${crateId || '<all>'} deleted`);
+    log.debug(`[structural] Index ${crateId || '<all>'} deleted`);
     //await File.destroy({ truncate, where });
   }
 
