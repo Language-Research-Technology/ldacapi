@@ -87,7 +87,8 @@ const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: Lda
 
       const disposition = request.query.disposition || 'attachment';
       const filename = request.query.filename || file.filename || filePath.split('/').pop() || 'file';
-      reply.header('Content-Disposition', `${disposition}; filename="${filename}"`);
+      // filename can contain unicode chars which aren't valid raw header bytes; use RFC 5987 encoding
+      reply.header('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(filename)}`);
       reply.header('Content-Type', file.mediaType);
       if (request.headers.via?.includes('nginx')) {
         // try to auto-detect nginx proxy using `via` header
@@ -134,7 +135,7 @@ export const fileHandler: FileHandler = {
     const signature = generateSignature(file.id);
     return {
       type: 'redirect',
-      url: `/api/dav/${encodeURIComponent(crateId)}/${storagePath}?disposition=${disposition}&filename=${encodeURIComponent(filename)}&signature=${signature}`
+      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?disposition=${disposition}&filename=${encodeURIComponent(filename)}&signature=${signature}`
     };
   },
   head: async (file) => fileMetadata(file),
