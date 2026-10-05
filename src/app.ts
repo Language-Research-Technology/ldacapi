@@ -57,10 +57,8 @@ const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: Lda
     tombstonePolicy: '404',
     extensions: {},
     search: {
-      filters:
-        Object.fromEntries(aggregations.map((name) => [name, { type: 'string' }])),
-      facets:
-        Object.fromEntries(aggregations.map((name) => [name, {}])),
+      filters: Object.fromEntries(aggregations.map((name) => [name, { type: 'string' }])),
+      facets: Object.fromEntries(aggregations.map((name) => [name, {}])),
     },
   }));
 };
@@ -80,11 +78,12 @@ export const fileHandler: FileHandler = {
     const { disposition, filename } = request.query;
     const storagePath = file.meta.storagePath;
     log.debug(`fileHandler: ${file.id}  ${file.meta.storagePath}`);
-    const crateId = (storagePath && file.id.endsWith('/' + storagePath)) ? file.id.slice(0, -storagePath.length - 1) : file.id;
+    const crateId =
+      storagePath && file.id.endsWith(`/${storagePath}`) ? file.id.slice(0, -storagePath.length - 1) : file.id;
     const signature = generateSignature(file.id);
     return {
       type: 'redirect',
-      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?disposition=${disposition}&filename=${encodeURIComponent(filename)}&signature=${signature}`
+      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?disposition=${disposition}&filename=${encodeURIComponent(filename)}&signature=${signature}`,
     };
   },
   head: async (file) => fileMetadata(file),

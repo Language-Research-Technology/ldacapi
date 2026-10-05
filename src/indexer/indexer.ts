@@ -1,7 +1,6 @@
-import type { ROCrate } from "ro-crate";
-import { config } from "../configuration.ts";
-import { log as plog} from '../utils.ts';
-import { firstStringOrId } from '../utils.ts';
+import type { ROCrate } from 'ro-crate';
+import { config } from '../configuration.ts';
+import { firstStringOrId, log as plog } from '../utils.ts';
 
 const log = plog.child({ module: 'indexer' });
 
@@ -42,29 +41,29 @@ export class Indexer {
     return indexer;
   }
 
-  deriveUniqueEntityId(crateRootId : string, entityId: string) {
+  deriveUniqueEntityId(crateRootId: string, entityId: string) {
     if (entityId.startsWith(crateRootId)) return entityId;
     //else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
     else if (entityId.match(/.+:.+/)) return entityId;
-    else return crateRootId + '/' + entityId;
+    else return `${crateRootId}/${entityId}`;
   }
 
   async init() {}
 
-  async count(crateId?: string): Promise<number> {
+  async count(_crateId?: string): Promise<number> {
     throw new Error('Not Implemented');
   }
 
-  /** 
-   * Delete the index for a given crateId or all index entries if a crateId is not specified. 
-   * All implementation of this method should ensure that when crateId is 
+  /**
+   * Delete the index for a given crateId or all index entries if a crateId is not specified.
+   * All implementation of this method should ensure that when crateId is
    * null or undefined, the entire index (or all entries) is deleted.
    */
-  async delete(crateId?: string) {
+  async delete(_crateId?: string) {
     throw new Error('Not Implemented');
   }
 
-  async index({ crateObject, crate }: { crateObject: CrateObject, crate: ROCrate }) {
+  async index({ crateObject, crate }: { crateObject: CrateObject; crate: ROCrate }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
@@ -91,18 +90,14 @@ export class Indexer {
     }
   }
 
-  async _index(param: { crateObject: CrateObject, crate: ROCrate, license: string, metadataLicense: string }) {
+  async _index(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
     throw new Error('Not Implemented');
   }
 
   /** Index a single entity within the crate. This needs to be implemented in the specific concrete indexer implementation. */
-  async _indexEntity(param: { crateObject: CrateObject, crate: ROCrate, license: string, metadataLicense: string }) {
+  async _indexEntity(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
     throw new Error('Not Implemented');
   }
-
 }
 
 export const RecordType = config.indexType;
-
-
- 

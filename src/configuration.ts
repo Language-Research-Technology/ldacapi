@@ -3,6 +3,7 @@ import { log } from './utils.ts';
 
 //export const config = Object.create(defaultConfig);
 export { config };
+
 const nodeEnv = process.env.NODE_ENV || 'development';
 const configPath = process.env.LDACAPI_CONFIG_PATH || `../${nodeEnv}.config.ts`;
 

@@ -15,7 +15,9 @@
     "db:sync": "ln -sfn ../node_modules/arocapi/prisma/models prisma/arocapi && npx prisma generate && npx prisma db push",
     "index": "node scripts/indexOCFL.mjs",
     "db:console:bash": "docker compose exec db bash",
-    "db:console": "docker compose exec db psql -U root -d catalog"
+    "db:console": "docker compose exec db psql -U root -d catalog",
+    "lint:biome": "biome check",
+    "lint": "concurrently -p \"[{name}]\" -n \"biome,types,knip\" -c \"yellow.bold,cyan.bold,magenta.bold\" \"pnpm:lint:biome\""
   },
   "author": "",
   "license": "GPL-3.0-or-later",

@@ -20,10 +20,7 @@
     },
     {
       "@id": "arcp://name,distributed_content_restricted",
-      "@type": [
-        "Dataset",
-        "RepositoryCollection"
-      ],
+      "@type": ["Dataset", "RepositoryCollection"],
       "conformsTo": {
         "@id": "https://w3id.org/ldac/profile#Collection"
       },
@@ -69,10 +66,7 @@
     },
     {
       "@id": "arcp://name,distributed_content_restricted/main",
-      "@type": [
-        "Dataset",
-        "RepositoryObject"
-      ],
+      "@type": ["Dataset", "RepositoryObject"],
       "conformsTo": {
         "@id": "https://w3id.org/ldac/profile#Object"
       },
@@ -110,9 +104,7 @@
           "@id": "data.txt"
         }
       ],
-      "hasPart": [
-        { "@id": "data.txt" }
-      ]
+      "hasPart": [{ "@id": "data.txt" }]
     },
     {
       "@id": "https://creativecommons.org/licenses/by/4.0/",
