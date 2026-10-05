@@ -1,5 +1,4 @@
-import Fastify from 'fastify';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('ldacapi main app', () => {
   describe('App Registration', () => {

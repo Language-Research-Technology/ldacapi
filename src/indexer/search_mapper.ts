@@ -20,7 +20,7 @@ const defaultEntityName: PropertyMapperFn = (value) =>
   value;
 
 const dataTypeDate: PropertyMapperFn = (value) => {
-  const datestr = typeof value !== 'string' ? '' + value : value;
+  const datestr = typeof value !== 'string' ? `${value}` : value;
   let [gte, lte] = datestr.split('/').map((d) => new Date(d).valueOf());
   if (lte == null) lte = gte;
   else return { gte, lte };
@@ -28,7 +28,7 @@ const dataTypeDate: PropertyMapperFn = (value) => {
 
 const location: PropertyMapperFn = (value, { properties }) => {
   const place = value as { longitude?: number | string; latitude?: number | string; geo?: unknown[] };
-  const locations = []; 
+  const locations = [];
   if (place.longitude != null && place.latitude != null) {
     locations.push(`POINT(${place.longitude} ${place.latitude})`); //{ type: 'point', coordinates: [place.longitude, place.latitude] }
   }

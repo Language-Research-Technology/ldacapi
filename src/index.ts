@@ -9,10 +9,10 @@ import type { Options } from 'arocapi';
 import arocapi from 'arocapi';
 import type { RegisterOptions } from 'fastify';
 import ldacapi, { fileHandler } from './app.ts';
-import { auth } from './routes/auth.ts';
 import { accessTransformer, resolveValidLicenses } from './auth.ts';
 import { config } from './configuration.ts';
 import { PrismaClient } from './generated/prisma/client.ts';
+import { auth } from './routes/auth.ts';
 import { fastify } from './utils.ts';
 
 export const prisma = new PrismaClient({
@@ -72,7 +72,7 @@ fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
 fastify.register(auth, { prefix: config.prefixAuth || config.prefix || '' });
 // Run the server!
-(async function () {
+(async () => {
   try {
     await fastify.listen({ port: config.port, host: config.host });
     if (config.isDev) {

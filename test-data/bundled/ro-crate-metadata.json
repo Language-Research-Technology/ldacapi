@@ -20,10 +20,7 @@
     },
     {
       "@id": "arcp://name,bundled",
-      "@type": [
-        "Dataset",
-        "RepositoryCollection"
-      ],
+      "@type": ["Dataset", "RepositoryCollection"],
       "conformsTo": {
         "@id": "https://w3id.org/ldac/profile#Collection"
       },
@@ -70,10 +67,7 @@
           "@id": "data.txt"
         }
       ],
-      "hasPart": [
-        { "@id": "data.txt" },
-        { "@id": "image.jpg" }
-      ],
+      "hasPart": [{ "@id": "data.txt" }, { "@id": "image.jpg" }],
       "pcdm:hasMember": [
         { "@id": "arcp://name,bundled/ch1" },
         { "@id": "arcp://name,bundled/ch2" },
@@ -82,7 +76,7 @@
     },
     {
       "@id": "arcp://name,bundled/ch1",
-      "@type": [ "RepositoryCollection" ],
+      "@type": ["RepositoryCollection"],
       "conformsTo": {
         "@id": "https://w3id.org/ldac/profile#Collection"
       },
@@ -109,17 +103,12 @@
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
-      "hasPart": [
-        { "@id": "data.txt" },
-        { "@id": "image.jpg" }
-      ],
-      "pcdm:hasMember": [
-        { "@id": "arcp://name,bundled/ch1/history" }
-      ]
+      "hasPart": [{ "@id": "data.txt" }, { "@id": "image.jpg" }],
+      "pcdm:hasMember": [{ "@id": "arcp://name,bundled/ch1/history" }]
     },
     {
       "@id": "arcp://name,bundled/ch2",
-      "@type": [ "RepositoryCollection" ],
+      "@type": ["RepositoryCollection"],
       "conformsTo": {
         "@id": "https://w3id.org/ldac/profile#Collection"
       },
@@ -146,10 +135,7 @@
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
-      "hasPart": [
-        { "@id": "sub_col_2.txt" },
-        { "@id": "arcp://name,bundled/ch2/facts" }
-      ]
+      "hasPart": [{ "@id": "sub_col_2.txt" }, { "@id": "arcp://name,bundled/ch2/facts" }]
     },
     {
       "@id": "https://creativecommons.org/licenses/by/4.0/",
@@ -306,9 +292,7 @@
         "@id": "https://w3id.org/ldac/profile#Object"
       },
       "dateCreated": "1788",
-      "hasPart": [
-        { "@id": "facts.csv" }
-      ],
+      "hasPart": [{ "@id": "facts.csv" }],
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
@@ -324,10 +308,7 @@
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
       "name": "Intro Text",
-      "author": [
-        { "@id": "arcp://name,people/JohnSmith" },
-        { "@id": "arcp://name,people/JaneSmith" }
-      ]
+      "author": [{ "@id": "arcp://name,people/JohnSmith" }, { "@id": "arcp://name,people/JaneSmith" }]
     },
     {
       "@id": "facts.csv",
@@ -338,10 +319,7 @@
       "license": {
         "@id": "https://choosealicense.com/no-permission/"
       },
-      "author": [
-        { "@id": "arcp://name,people/JohnSmith" },
-        { "@id": "arcp://name,people/JaneSmith" }
-      ]
+      "author": [{ "@id": "arcp://name,people/JohnSmith" }, { "@id": "arcp://name,people/JaneSmith" }]
     },
     {
       "@id": "non_existent_file.txt",

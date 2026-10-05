@@ -3,12 +3,11 @@ import ocfl from '@ocfl/ocfl-fs';
 import { createCRC32 } from 'hash-wasm';
 import { ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
-import { log } from './utils.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
-import { PromiseQueue } from './utils.ts';
-import { State, type RepositoryFile } from './repository.ts';
+import { type RepositoryFile, State } from './repository.ts';
+import { log, PromiseQueue } from './utils.ts';
 
 const crc32 = await createCRC32();
 
@@ -32,7 +31,7 @@ const { defaultLicense, defaultMetadataLicense } = config;
 const ocflPath = '/opt/storage/oni/ocfl';
 const ocflPathInternal = 'ocfl';
 
-let stateCache: { [key: string]: { [key: string]: (typeof State[keyof typeof State]) | undefined } } = {};
+const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof State] | undefined } } = {};
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 
@@ -75,7 +74,7 @@ export async function init(opts: any) {
 
 async function calculateCrc32(file: RepositoryFile) {
   crc32.init();
-  for await (const chunk of (await file.stream())) {
+  for await (const chunk of await file.stream()) {
     crc32.update(chunk);
   }
   return crc32.digest('hex');
@@ -94,20 +93,20 @@ function wrap(ocflObject: OcflObject): CrateObject {
       }
       return {
         size: file.size ?? file.fixity?.size ?? (await file.stat()).size,
-        crc32: file.fixity?.crc32 ?? await calculateCrc32(file)
+        crc32: file.fixity?.crc32 ?? (await calculateCrc32(file)),
       };
-    }
+    },
   };
 }
 
-function _setState(crateId: string, types: string | string[], state?: typeof State[keyof typeof State]) {
+function _setState(crateId: string, types: string | string[], state?: (typeof State)[keyof typeof State]) {
   stateCache[crateId] = stateCache[crateId] || {};
   for (const type of ([] as string[]).concat(types)) {
     stateCache[crateId][type] = state;
   }
 }
 
-function setState(crateId: string | undefined, types: string | string[], state?: typeof State[keyof typeof State]) {
+function setState(crateId: string | undefined, types: string | string[], state?: (typeof State)[keyof typeof State]) {
   if (crateId) {
     _setState(crateId, types, state);
   } else {
@@ -116,7 +115,7 @@ function setState(crateId: string | undefined, types: string | string[], state?:
     }
   }
 }
-  
+
 export async function getState(crateId: string, type?: string) {
   const indexers: [string, Indexer][] = type ? [[type, INDEXER[type]]] : Object.entries(INDEXER);
   for (const [name, indexer] of indexers) {
@@ -221,14 +220,15 @@ export async function* objects(prefix?: string, refresh?: boolean) {
 }
 
 export async function getFile(entityId: string, storagePath: string) {
-  const crateId = (storagePath && entityId.endsWith('/' + storagePath)) ? entityId.slice(0, -storagePath.length - 1) : entityId;
+  const crateId =
+    storagePath && entityId.endsWith(`/${storagePath}`) ? entityId.slice(0, -storagePath.length - 1) : entityId;
   try {
     const object = repository.object(crateId);
     await object.load();
     const file = object.getFile({ logicalPath: storagePath });
     //console.log(file);
     return {
-      path: repository.objectRoot(crateId) + '/' + file.contentPath,
+      path: `${repository.objectRoot(crateId)}/${file.contentPath}`,
       stream: async () => file.stream(),
     };
   } catch (error) {

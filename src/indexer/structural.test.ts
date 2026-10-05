@@ -5,9 +5,7 @@ import { entityAsCrate } from './structural.ts';
 
 describe('entityAsCrate', () => {
   it('preserves the original RO-Crate context when serializing an entity', async () => {
-    const raw = JSON.parse(
-      fs.readFileSync('./test-data/distributed_root/ro-crate-metadata.json', 'utf8'),
-    );
+    const raw = JSON.parse(fs.readFileSync('./test-data/distributed_root/ro-crate-metadata.json', 'utf8'));
 
     const crate = await ROCrate.create(raw);
     const result = entityAsCrate(crate, crate.root, '');

@@ -12,24 +12,26 @@ const log = plog.child({ module: 'auth' });
  * This is only useful for the backing OIDC provider that artificially limit functionality when using public client mode such as CILogon.
  * The OIDC configuration is fetched from the OIDC provider and cached in memory.
  * The /authorize, /token, and /jwks endpoints are implemented to proxy the corresponding endpoints of the OIDC provider.
- * @param fastify 
- * @param _opts 
+ * @param fastify
+ * @param _opts
  */
 export const auth: FastifyPluginAsync = async (fastify, _opts) => {
   let openidConfig: Record<string, string>;
   let modifiedOpenidConfig: Record<string, string>;
   if (config.oidc.endpoint) {
     const openidConfigUrl = `${config.oidc.endpoint}/.well-known/openid-configuration`;
-    fetch(openidConfigUrl).then(async (response) => {
-      if (response.ok) {
-        openidConfig = await response.json();
-        config.oidc.userinfoEndpoint = openidConfig.userinfo_endpoint;
-      } else {
-        throw new Error(`Failed to fetch ${openidConfigUrl}: ${response.statusText}`);
-      }
-    }).catch((error) => {
-      log.error(error);
-    });
+    fetch(openidConfigUrl)
+      .then(async (response) => {
+        if (response.ok) {
+          openidConfig = await response.json();
+          config.oidc.userinfoEndpoint = openidConfig.userinfo_endpoint;
+        } else {
+          throw new Error(`Failed to fetch ${openidConfigUrl}: ${response.statusText}`);
+        }
+      })
+      .catch((error) => {
+        log.error(error);
+      });
   }
 
   //let openidConfig: Record<string, string>;
@@ -42,11 +44,11 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
       //const baseUrl = `${request.protocol}://${request.host}${config.prefix}`;
       const baseUrl = `${request.protocol}://${request.host}${config.prefixAuth || config.prefix || ''}`;
       if (!modifiedOpenidConfig) {
-        modifiedOpenidConfig = { 
+        modifiedOpenidConfig = {
           ...openidConfig,
           authorization_endpoint: `${baseUrl}/authorize`,
           token_endpoint: `${baseUrl}/token`,
-          jwks_uri: `${baseUrl}/jwks`
+          jwks_uri: `${baseUrl}/jwks`,
         };
       }
       return reply.send(modifiedOpenidConfig);
@@ -56,7 +58,9 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
   });
 
   app.get('/authorize', async (request, reply) =>
-    openidConfig?.authorization_endpoint ? reply.redirect(openidConfig.authorization_endpoint + request.url.slice(request.url.indexOf('?')), 301) : reply.notFound(),
+    openidConfig?.authorization_endpoint
+      ? reply.redirect(openidConfig.authorization_endpoint + request.url.slice(request.url.indexOf('?')), 301)
+      : reply.notFound(),
   );
 
   app.get('/jwks', async (_request, reply) => {
@@ -66,10 +70,10 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
       reply.header('content-type', result.headers.get('content-type'));
       return reply.code(result.status).send(result.body);
     } catch (error) {
-      return reply.internalServerError((error as Error).message);      
+      return reply.internalServerError((error as Error).message);
     }
   });
-  
+
   app.post('/token', async (request, reply) => {
     if (!openidConfig?.token_endpoint) return reply.notFound();
     const incoming = request.body as Record<string, string>;
@@ -79,7 +83,7 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
     try {
       const result = await fetch(openidConfig.token_endpoint, {
         method: 'POST',
-        body: new URLSearchParams(incoming)
+        body: new URLSearchParams(incoming),
       });
       //result.headers.forEach((value, key) => { reply.header(key, value) });
       reply.header('pragma', result.headers.get('pragma') || 'no-cache');
@@ -104,4 +108,3 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
     }
   });
 };
-

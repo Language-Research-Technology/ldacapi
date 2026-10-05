@@ -1,4 +1,4 @@
-import type { AuthorisedEntity, AuthorisedFile, StandardEntity, AccessTransformer } from 'arocapi';
+import type { AuthorisedEntity, AuthorisedFile, StandardEntity } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
 import { config } from './configuration.ts';
 
@@ -17,9 +17,9 @@ type RemsUserEntitlement = {
   mail: string;
 };
 
-const renderTemplate = new Function('licenseId', 'return `' + config.enrollmentUrl + '`;');
+const renderTemplate = new Function('licenseId', `return \`${config.enrollmentUrl}\`;`);
 function resolveEnrollmentUrl(licenseId: string) {
-  return renderTemplate(licenseId)
+  return renderTemplate(licenseId);
 }
 
 export async function resolveValidLicenses() {
@@ -39,8 +39,12 @@ export async function accessTransformer(
     access: {
       metadata: canAccessMetadata,
       content: canAccessContent,
-      metadataAuthorizationUrl: canAccessMetadata ? undefined : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
-      contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
+      metadataAuthorizationUrl: canAccessMetadata
+        ? undefined
+        : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
+      contentAuthorizationUrl: canAccessContent
+        ? undefined
+        : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
     },
   };
 }
@@ -100,4 +104,3 @@ async function authenticateUser(request: FastifyRequest): Promise<string | undef
     }
   }
 }
-

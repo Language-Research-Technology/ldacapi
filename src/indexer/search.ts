@@ -5,8 +5,7 @@ import type {
   Search_RequestBody,
 } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { ROCrate } from 'ro-crate';
-import { log as plog} from '../utils.ts';
-import { PromiseQueue, firstStringOrId } from '../utils.ts';
+import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
 import type { CrateObject } from './indexer.ts';
 import { Indexer, RecordType } from './indexer.ts';
 import { dataTypeMapper, mapDefaultProperties, propertyMapper } from './search_mapper.ts';
@@ -45,11 +44,11 @@ const typeMapper: Record<string, (params: MapperParams) => Record<string, any>> 
 );
 
 const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Record<string, any>>> = {
-  File: async function ({ entity, record, crate, crateObject }) {
+  File: async ({ entity, record, crate, crateObject }) => {
     //todo: check licence if it allows indexing content
     if (isText(entity)) {
       const entityId = entity['@id'] as string;
-      const filepath = entityId.startsWith(crate.rootId) ? entityId.replace(crate.rootId + '/', '') : entityId;
+      const filepath = entityId.startsWith(crate.rootId) ? entityId.replace(`${crate.rootId}/`, '') : entityId;
       try {
         //log.debug(filepath);
         record._text = (await crateObject?.text(filepath)) || '';
@@ -93,7 +92,7 @@ export class SearchIndexer extends Indexer {
       await this.client.cluster.putSettings({ body: elastic.cluster });
       if (elastic?.log === 'debug') {
         const config = await this.client.cluster.getSettings();
-        log.debug('Current cluster setting: ' + JSON.stringify(config));
+        log.debug(`Current cluster setting: ${JSON.stringify(config)}`);
       }
     } catch (e) {
       log.error('configureCluster');
@@ -121,12 +120,12 @@ export class SearchIndexer extends Indexer {
 
   async count(crateId?: string) {
     try {
-      const res = await this.client.count({ 
-        index: this.conf.entityIndex, 
-        ...(crateId && { body: { query: { prefix: { id: { value: crateId } } } } }) 
+      const res = await this.client.count({
+        index: this.conf.entityIndex,
+        ...(crateId && { body: { query: { prefix: { id: { value: crateId } } } } }),
       });
       return res.body.count;
-    } catch (e) {
+    } catch (_e) {
       //log.error(e);
     }
     return 0;
@@ -157,7 +156,11 @@ export class SearchIndexer extends Indexer {
 
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
-      const matchedMappers = entityTypes.map((t) => !RecordType[t] || entity.conformsTo?.find(c => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined).filter((fn) => !!fn);
+      const matchedMappers = entityTypes
+        .map((t) =>
+          !RecordType[t] || entity.conformsTo?.find((c) => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined,
+        )
+        .filter((fn) => !!fn);
       if (matchedMappers.length) {
         // create common index record
         const _id = deriveId(entity['@id']);
@@ -216,7 +219,7 @@ export class SearchIndexer extends Indexer {
       await pq.done();
       await this.client.indices.refresh({ index: elastic.entityIndex });
     } catch (error) {
-      log.error('Error indexing ' + crate.rootId);
+      log.error(`Error indexing ${crate.rootId}`);
       log.error(error);
     }
   }
@@ -295,9 +298,9 @@ function createDoc(
       //console.log(propName, record[propName]);
     }
   }
-  if (record._locations && record._locations.length) {
+  if (record._locations?.length) {
     // index geolocation in a separate field to support geo search, this location name is hardcoded
-    const locations = [...(new Set([...record._locations]))];
+    const locations = [...new Set([...record._locations])];
     if (locations.length === 1) {
       record.location = locations[0];
     } else {

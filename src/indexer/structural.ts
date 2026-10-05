@@ -1,8 +1,7 @@
 import { ROCrate } from 'ro-crate';
 import { prisma } from '../index.ts';
-import { PromiseQueue, firstStringOrId } from '../utils.ts';
+import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
 import { type CrateFile, Indexer, RecordType } from './indexer.ts';
-import { log as plog} from '../utils.ts';
 
 const log = plog.child({ module: 'indexer/structural' });
 
@@ -31,8 +30,8 @@ export class StructuralIndexer extends Indexer {
         //console.log(data.Metadatalicense);
         if (data) {
           try {
-            // @ts-ignore
-            await prisma[tableName].create({ data });            
+            // @ts-expect-error
+            await prisma[tableName].create({ data });
           } catch (error) {
             log.error(`Error indexing ${crateId} ${data.id}: ${(error as Error).message}`);
           }
@@ -78,26 +77,26 @@ export class StructuralIndexer extends Indexer {
           metadataLicenseId: metadataLicense,
           contentLicenseId: firstStringOrId(entity.license) || license,
           meta: { rocrate },
-        }
+        },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
-        const storagePath = entity['@id'].match(/.+:.+/) ? entity['@id'].replace(crateId + '/', '') : entity['@id'];
+        const storagePath = entity['@id'].match(/.+:.+/) ? entity['@id'].replace(`${crateId}/`, '') : entity['@id'];
         let f: CrateFile = { size: -1, crc32: '' };
         try {
           f = await crateObject.file(storagePath);
         } catch (error) {
           log.error(`[${crateId}] ${(error as Error).message}`);
         }
-        /* @ts-ignore */
+        /* @ts-expect-error */
         param.file = {
           id: entityId,
           filename: storagePath.split('/').pop(),
-          mediaType: entity.encodingFormat?.find(v => typeof v === 'string') || 'application/octet-stream',
+          mediaType: entity.encodingFormat?.find((v) => typeof v === 'string') || 'application/octet-stream',
           size: +(entity.contentSize?.[0] ?? f.size),
           meta: {
             storagePath,
-            crc32: f.crc32
-          }
+            crc32: f.crc32,
+          },
         };
       }
       await pq.enqueue(param);
@@ -128,7 +127,7 @@ export class StructuralIndexer extends Indexer {
 }
 
 export function entityAsCrate(crate: ROCrate, entity: any, license: string) {
-  const newCrate = new ROCrate({'@context': crate['@context']}, { array: true, link: true });
+  const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
   for (const key in entity) {
     newCrate.root[key] = entity[key];
   }
@@ -143,7 +142,8 @@ export function entityAsCrate(crate: ROCrate, entity: any, license: string) {
 }
 
 function pickSingleMemberOf(entity: any) {
-  return entity['pcdm:memberOf']?.[0]['@id'] ||
+  return (
+    entity['pcdm:memberOf']?.[0]['@id'] ||
     entity.memberOf?.[0]['@id'] ||
     entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
     entity['@reverse'].hasMember?.[0]?.['@id'] ||
@@ -151,5 +151,6 @@ function pickSingleMemberOf(entity: any) {
     entity['@reverse'].hasPart?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
     entity.isPartOf?.[0]['@id'] ||
     entity['@reverse'].hasPart?.[0]?.['@id'] ||
-    null;
+    null
+  );
 }

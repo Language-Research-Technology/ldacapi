@@ -11,10 +11,10 @@ export const fastify = Fastify({
       transport: {
         target: 'pino-pretty',
         options: { messageFormat: '[{module}] {msg}', ignore: 'pid,module,hostname' },
-      }
-    })
+      },
+    }),
   },
-  trustProxy: true // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
+  trustProxy: true, // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
 });
 
 export const log = fastify.log;
@@ -24,7 +24,7 @@ export class PromiseQueue<T = unknown> {
   sharedFunction?: (t: T) => Promise<unknown>;
   #runs: (Promise<unknown> | null)[] = [];
   #queue: ((value: number) => void)[] = [];
-  #done?: (() => void);
+  #done?: () => void;
   constructor(concurrency = 1, sharedFunction?: (t: T) => Promise<unknown>) {
     this.concurrency = concurrency;
     this.sharedFunction = sharedFunction;
@@ -37,11 +37,11 @@ export class PromiseQueue<T = unknown> {
   //async enqueue<V>(value: V): Promise<R>;
   //async enqueue<RV, V extends () => Promise<RV>>(task: V): Promise<RV>;
   async enqueue(valueOrTask: T) {
-    let slot = this.#runs.findIndex(v => v == null);
+    let slot = this.#runs.findIndex((v) => v == null);
     if (slot === -1) {
-      slot = await (new Promise<number>(resolve => {
+      slot = await new Promise<number>((resolve) => {
         this.#queue.push(resolve);
-      }));
+      });
     }
     let p: Promise<unknown>;
     if (typeof valueOrTask === 'function') {
@@ -49,23 +49,27 @@ export class PromiseQueue<T = unknown> {
     } else {
       p = this.sharedFunction ? this.sharedFunction(valueOrTask) : Promise.resolve(valueOrTask);
     }
-    this.#runs[slot] = p.catch(error => { console.log(error) }).finally(() => {
-      this.#runs[slot] = null;
-      const next = this.#queue.shift();
-      if (next) {
-        next(slot);
-      } else if (this.#done && !this.#runs.some(v => !!v)) {
-        //setTimeout(this.#done);
-        this.#done();
-        this.#done = undefined;
-      }
-    });
+    this.#runs[slot] = p
+      .catch((error) => {
+        console.log(error);
+      })
+      .finally(() => {
+        this.#runs[slot] = null;
+        const next = this.#queue.shift();
+        if (next) {
+          next(slot);
+        } else if (this.#done && !this.#runs.some((v) => !!v)) {
+          //setTimeout(this.#done);
+          this.#done();
+          this.#done = undefined;
+        }
+      });
     return { value: p };
   }
   /** Signal the queue to finish operation and wait until all tasks are complete */
   async done() {
-    if (this.#runs.every(v => !v) && !this.#queue.length) return;
-    return new Promise<void>(resolve => {
+    if (this.#runs.every((v) => !v) && !this.#queue.length) return;
+    return new Promise<void>((resolve) => {
       this.#done = resolve;
     });
   }
@@ -82,5 +86,4 @@ export function firstStringOrId(values: unknown[]): string | undefined {
   }
 }
 
-export class TemporalMap<_T = unknown> {
-}
+export class TemporalMap<_T = unknown> {}
