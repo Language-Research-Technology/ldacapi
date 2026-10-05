@@ -20,7 +20,7 @@
   "author": "",
   "license": "GPL-3.0-or-later",
   "dependencies": {
-    "@biomejs/biome": "^2.4.9",
+    "@biomejs/biome": "^2.5.15",
     "@fastify/bearer-auth": "^10.1.2",
     "@fastify/cors": "^11.2.0",
     "@fastify/formbody": "^8.0.2",
