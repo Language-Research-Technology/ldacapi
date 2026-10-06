@@ -19,9 +19,8 @@ const dataTypeDate: PropertyMapperFn = (value) => {
   let [gte, lte] = datestr.split('/').map((d) => new Date(d).valueOf());
   if (lte == null) {
     lte = gte;
-  } else {
-    return { gte, lte };
   }
+  return { gte, lte };
 };
 
 const location: PropertyMapperFn = (value, { properties } = {}) => {
