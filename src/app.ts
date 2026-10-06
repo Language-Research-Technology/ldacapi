@@ -10,13 +10,7 @@ import { admin as adminRoute } from './routes/admin.ts';
 import { fileRoute } from './routes/file.ts';
 import { log } from './utils.ts';
 
-// declare module 'fastify' {
-//   interface FastifyInstance {
-//     repository: Repository;
-//   }
-// }
-
-export type LdacapiOptions = {
+type LdacapiOptions = {
   prisma: PrismaClient;
   opensearch: Client;
   disableCors?: boolean;
@@ -35,7 +29,6 @@ const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: Lda
   repository = await initRepository('ocfl', { opensearchClient: options.opensearch });
   fastify.decorate('repository', repository);
 
-  // Declare a route
   fastify.get('/', async function handler(_request, _replyy) {
     const routes = fastify.routes.keys().toArray();
     return {
