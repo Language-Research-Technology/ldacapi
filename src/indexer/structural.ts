@@ -1,5 +1,5 @@
 import { type Entity, ROCrate } from 'ro-crate';
-import { prisma } from '../index.ts';
+import { prisma } from '../prisma.ts';
 import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
 import { type BaseOptions, type CrateFile, Indexer, RecordType } from './indexer.ts';
 
