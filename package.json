@@ -9,12 +9,12 @@
   },
   "scripts": {
     "test": "NODE_ENV=test prisma migrate reset -f && vitest run",
-    "dev": "node --env-file=.env --watch src/index.ts",
+    "dev": "node --env-file-if-exists=.env --watch src/index.ts",
     "db:reset": "prisma migrate reset -f && prisma generate && prisma db push",
     "migrate": "prisma migrate dev",
     "db:sync": "prisma generate && prisma db push",
     "db:console:bash": "docker compose exec db bash",
-    "db:console": "docker compose exec db psql -U root -d catalog",
+    "db:console": "docker compose exec db psql -U ldacapi -d ldacapi",
     "lint:biome": "biome check",
     "lint:knip": "knip",
     "lint": "pnpm run --parallel /^lint:/"

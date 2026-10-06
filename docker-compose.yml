@@ -15,9 +15,9 @@ services:
     container_name: ldacapi_db
     tty: true
     environment:
-      POSTGRES_DB: "${DB_NAME}"
-      POSTGRES_USER: "${DB_USER}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: ldacapi
+      POSTGRES_USER: ldacapi
+      POSTGRES_PASSWORD: ldacapi
       POSTGRES_HOST_AUTH_METHOD: "trust"
       PGDATA: /postgresql/data
     volumes:
@@ -36,7 +36,7 @@ services:
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
-      - _JAVA_OPTIONS=${OPENSEARCH_JAVA_OPTIONS} #this fixes Mac M4 bug -XX:UseSVE=0 and WSL2 bug should be empty
+      - _JAVA_OPTIONS=${OPENSEARCH_JAVA_OPTIONS:-} #this fixes Mac M4 bug -XX:UseSVE=0 and WSL2 bug should be empty
       #- xpack.security.enabled=false # for elasticsearch
       - plugins.security.disabled=true # for opensearch
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=ABCDE1234!

@@ -1,11 +1,13 @@
 import { env } from 'node:process';
 import packageJson from '../package.json' with { type: 'json' };
 
+export const DEFAULT_DATABASE_URL = 'postgresql://ldacapi:ldacapi@localhost:5432/ldacapi';
+
 const isDev = env.NODE_ENV ? env.NODE_ENV === 'development' || env.NODE_ENV === 'dev' : true;
 export default {
   package: packageJson,
   isDev,
-  databaseUrl: env.DATABASE_URL || 'postgresql://ldaca:ldaca@localhost:5432/ldaca',
+  databaseUrl: env.DATABASE_URL || DEFAULT_DATABASE_URL,
   opensearchUrl: env.OPENSEARCH_URL || 'http://localhost:9200',
   port: parseInt(env.LDACAPI_PORT || '8080', 10),
   host: env.LDACAPI_HOST,
