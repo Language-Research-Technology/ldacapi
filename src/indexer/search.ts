@@ -287,16 +287,22 @@ function createDoc(
         const res = pm(value, { deferredEntities, properties });
         for (const name in properties) {
           const vals = properties[name];
-          if (vals == null) continue;
+          if (vals == null) {
+            continue;
+          }
           if (record[name] == null) {
             record[name] = vals;
           } else {
             record[name] = [].concat(record[name], vals);
           }
         }
-        if (res != null) values.push(res);
+        if (res != null) {
+          values.push(res);
+        }
       }
-      if (values.length) record[propName] = values;
+      if (values.length) {
+        record[propName] = values;
+      }
       //console.log(propName, record[propName]);
     }
   }

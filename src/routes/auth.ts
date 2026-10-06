@@ -64,7 +64,9 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
   );
 
   app.get('/jwks', async (_request, reply) => {
-    if (!openidConfig?.jwks_uri) return reply.notFound();
+    if (!openidConfig?.jwks_uri) {
+      return reply.notFound();
+    }
     try {
       const result = await fetch(openidConfig.jwks_uri);
       reply.header('content-type', result.headers.get('content-type'));
@@ -75,11 +77,15 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
   });
 
   app.post('/token', async (request, reply) => {
-    if (!openidConfig?.token_endpoint) return reply.notFound();
+    if (!openidConfig?.token_endpoint) {
+      return reply.notFound();
+    }
     const incoming = request.body as Record<string, string>;
     incoming.client_secret = config.oidc.clientSecret;
     //console.log(incoming);
-    if (incoming.client_id !== config.oidc.clientId) return reply.badRequest('Invalid client_id');
+    if (incoming.client_id !== config.oidc.clientId) {
+      return reply.badRequest('Invalid client_id');
+    }
     try {
       const result = await fetch(openidConfig.token_endpoint, {
         method: 'POST',

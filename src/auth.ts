@@ -30,7 +30,9 @@ export async function accessTransformer(entity: StandardEntity, { request }: { r
   const { metadataLicenseId, contentLicenseId } = entity;
   const canAccessMetadata = await checkLicense(request, metadataLicenseId);
   const canAccessContent = await checkLicense(request, contentLicenseId);
-  if (!canAccessMetadata) entity.description = '[Access is restricted]';
+  if (!canAccessMetadata) {
+    entity.description = '[Access is restricted]';
+  }
   return {
     ...entity,
     access: {
@@ -77,7 +79,9 @@ async function checkLicense(request: FastifyRequest, licenseId: string): Promise
 
 async function authenticateUser(request: FastifyRequest): Promise<string | undefined> {
   let userId = request.getDecorator<string>('userId');
-  if (userId) return userId;
+  if (userId) {
+    return userId;
+  }
   if (config.oidc.userinfoEndpoint) {
     const authHeader = request.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {

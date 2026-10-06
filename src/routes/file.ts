@@ -61,7 +61,9 @@ export const fileRoute: FastifyPluginAsync<FileRouteOptions> = async (fastify, o
           }
 
           const rf = await repository.getFile(crateId, filePath);
-          if (!rf) return reply.notFound(`File not found: ${crateId}/${filePath}`);
+          if (!rf) {
+            return reply.notFound(`File not found: ${crateId}/${filePath}`);
+          }
 
           const disposition = request.query.disposition || 'attachment';
           const filename = request.query.filename || file.filename || filePath.split('/').pop() || 'file';

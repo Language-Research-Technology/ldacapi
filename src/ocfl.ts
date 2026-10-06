@@ -120,7 +120,9 @@ function setState(crateId: string | undefined, types: string | string[], state?:
 export async function getState(crateId: string, type?: string) {
   const indexers: [string, Indexer][] = type ? [[type, INDEXER[type]]] : Object.entries(INDEXER);
   for (const [name, indexer] of indexers) {
-    if (!indexer) return;
+    if (!indexer) {
+      return;
+    }
     if (!stateCache[crateId]?.[name]) {
       const count = await INDEXER[name].count(crateId);
       if (count > 0) {
@@ -134,7 +136,9 @@ export async function getState(crateId: string, type?: string) {
 }
 
 async function indexObject(ocflObject: OcflObject, types: string[], force?: boolean) {
-  if (!ocflObject) return;
+  if (!ocflObject) {
+    return;
+  }
   try {
     log.debug(`Found OFCL object: ${ocflObject.id}`);
     const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
@@ -145,7 +149,9 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
       if (indexer) {
         setState(ocflObject.id, t, State.INDEXING);
         try {
-          if (force) await indexer.delete(crate.rootId);
+          if (force) {
+            await indexer.delete(crate.rootId);
+          }
           const crateObject = wrap(ocflObject);
           await indexer.index({ crateObject, crate });
           // counts[t]++;
