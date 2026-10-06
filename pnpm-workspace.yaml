@@ -7,3 +7,4 @@ saveTypes: true
 allowBuilds:
   "@prisma/engines": true
   prisma: true
+  lefthook: true
