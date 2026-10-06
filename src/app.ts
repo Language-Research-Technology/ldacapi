@@ -72,10 +72,16 @@ export const fileHandler: FileHandler = {
     const storagePath = file.meta.storagePath;
     log.debug(`fileHandler: ${file.id}  ${file.meta.storagePath}`);
     const crateId = storagePath && file.id.endsWith(`/${storagePath}`) ? file.id.slice(0, -storagePath.length - 1) : file.id;
-    const signature = generateSignature(file.id);
+    const params = new URLSearchParams({ signature: generateSignature(file.id) });
+    if (disposition) {
+      params.set('disposition', disposition);
+    }
+    if (filename) {
+      params.set('filename', filename);
+    }
     return {
       type: 'redirect',
-      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?disposition=${disposition}&filename=${encodeURIComponent(filename)}&signature=${signature}`,
+      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?${params}`,
     };
   },
   head: async (file) => fileMetadata(file),
