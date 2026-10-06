@@ -12,7 +12,7 @@
     "dev": "node --env-file=.env --watch src/index.ts",
     "db:reset": "prisma migrate reset -f && npx prisma generate && npx prisma db push",
     "migrate": "npx prisma migrate dev",
-    "db:sync": "ln -sfn ../node_modules/arocapi/prisma/models prisma/arocapi && npx prisma generate && npx prisma db push",
+    "db:sync": "npx prisma generate && npx prisma db push",
     "index": "node scripts/indexOCFL.mjs",
     "db:console:bash": "docker compose exec db bash",
     "db:console": "docker compose exec db psql -U root -d catalog",
