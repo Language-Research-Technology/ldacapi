@@ -85,5 +85,3 @@ export function firstStringOrId(values: unknown[]): string | undefined {
     //return typeof value === 'string' ? value : (value as { '@id'?: string })?.['@id'];
   }
 }
-
-export class TemporalMap<_T = unknown> {}
