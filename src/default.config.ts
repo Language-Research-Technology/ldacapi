@@ -1,7 +1,7 @@
 import { env } from 'node:process';
 import packageJson from '../package.json' with { type: 'json' };
 
-export const DEFAULT_DATABASE_URL = 'postgresql://ldacapi:ldacapi@localhost:5432/ldacapi';
+export const DEFAULT_DATABASE_URL = `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi${env.NODE_ENV === 'test' ? '_test' : ''}`;
 
 const isDev = env.NODE_ENV ? env.NODE_ENV === 'development' || env.NODE_ENV === 'dev' : true;
 export default {
