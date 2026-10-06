@@ -8,7 +8,7 @@ import type { Options } from 'arocapi';
 import arocapi from 'arocapi';
 import type { RegisterOptions } from 'fastify';
 import ldacapi, { fileHandler } from './app.ts';
-import { accessTransformer, resolveValidLicenses } from './auth.ts';
+import { accessTransformer, fileAccessTransformer, resolveValidLicenses } from './auth.ts';
 import { config } from './configuration.ts';
 import { prisma } from './prisma.ts';
 import { auth } from './routes/auth.ts';
@@ -22,7 +22,7 @@ const appOpt: Options & RegisterOptions = {
   disableCors: true,
   queryBuilderOptions: { aggregations: config.search.aggregations },
   accessTransformer: accessTransformer,
-  fileAccessTransformer: accessTransformer,
+  fileAccessTransformer,
   resolveValidLicenses,
   entityTransformers: [
     (entity) => {

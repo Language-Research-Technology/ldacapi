@@ -1,6 +1,7 @@
-import type { AuthorisedEntity, AuthorisedFile, StandardEntity } from 'arocapi';
+import type { AuthorisedEntity, AuthorisedFile, StandardEntity, StandardFile } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
 import { config } from './configuration.ts';
+import { prisma } from './prisma.ts';
 
 const openLicenses = new Set(config.openLicenses);
 
@@ -26,7 +27,7 @@ export async function resolveValidLicenses() {
   return config.openLicenses;
 }
 
-export async function accessTransformer(entity: StandardEntity, { request }: { request: FastifyRequest }): Promise<AuthorisedEntity | AuthorisedFile> {
+export async function accessTransformer(entity: StandardEntity, { request }: { request: FastifyRequest }): Promise<AuthorisedEntity> {
   const { metadataLicenseId, contentLicenseId } = entity;
   const canAccessMetadata = await checkLicense(request, metadataLicenseId);
   const canAccessContent = await checkLicense(request, contentLicenseId);
@@ -39,6 +40,19 @@ export async function accessTransformer(entity: StandardEntity, { request }: { r
       metadata: canAccessMetadata,
       content: canAccessContent,
       metadataAuthorizationUrl: canAccessMetadata ? undefined : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
+      contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
+    },
+  };
+}
+
+export async function fileAccessTransformer(file: StandardFile, { request }: { request: FastifyRequest }): Promise<AuthorisedFile> {
+  const entity = await prisma.entity.findUnique({ where: { id: file.id }, select: { contentLicenseId: true } });
+  const contentLicenseId = entity?.contentLicenseId ?? '';
+  const canAccessContent = await checkLicense(request, contentLicenseId);
+  return {
+    ...file,
+    access: {
+      content: canAccessContent,
       contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
     },
   };
