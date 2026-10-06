@@ -10,7 +10,7 @@ export default {
   databaseUrl: env.DATABASE_URL || DEFAULT_DATABASE_URL,
   opensearchUrl: env.OPENSEARCH_URL || 'http://localhost:9200',
   port: parseInt(env.LDACAPI_PORT || '8080', 10),
-  host: env.LDACAPI_HOST,
+  host: env.LDACAPI_HOST || 'localhost',
   logLevel: env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
   maxParamLength: parseInt(env.LDACAPI_MAX_PARAM_LENGTH || '500', 10),
   tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',

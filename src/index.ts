@@ -4,36 +4,40 @@ import cors from '@fastify/cors';
 import fastifyRoutes from '@fastify/routes';
 import fastifySensible from '@fastify/sensible';
 import { Client } from '@opensearch-project/opensearch';
+import type { AggregationContainer } from '@opensearch-project/opensearch/api/_types/_common.aggregations.js';
 import type { Options } from 'arocapi';
 import arocapi from 'arocapi';
 import type { RegisterOptions } from 'fastify';
-import ldacapi, { fileHandler } from './app.ts';
-import { accessTransformer, fileAccessTransformer, resolveValidLicenses } from './auth.ts';
+import ldacapi, { fileHandler, type LdacapiOptions } from './app.ts';
+import { accessTransformer, fileAccessTransformer } from './auth.ts';
 import { config } from './configuration.ts';
 import { prisma } from './prisma.ts';
 import { auth } from './routes/auth.ts';
 import { fastify } from './utils.ts';
 
 const opensearch = new Client({ node: config.opensearchUrl });
+const prefix = config.prefix || '';
 
-const appOpt: Options & RegisterOptions = {
+const appOpt: Options & LdacapiOptions & RegisterOptions = {
   prisma,
   opensearch,
   disableCors: true,
-  queryBuilderOptions: { aggregations: config.search.aggregations },
+  // OpenSearch's TermsAggregationFields type omits `field`
+  queryBuilderOptions: { aggregations: config.search.aggregations as unknown as Record<string, AggregationContainer> },
   accessTransformer: accessTransformer,
   fileAccessTransformer,
-  resolveValidLicenses,
+  // arocapi doesn't support this option yet
+  // resolveValidLicenses,
   entityTransformers: [
-    (entity) => {
-      entity.accessControl = 'Public';
-      entity.counts = {
+    (entity) => ({
+      ...entity,
+      accessControl: 'Public',
+      counts: {
         collections: 0,
         objects: 0,
         files: 0,
-      };
-      return entity;
-    },
+      },
+    }),
   ],
   fileHandler,
   // Required: RO-Crate handler for serving RO-Crate metadata
@@ -54,7 +58,7 @@ const appOpt: Options & RegisterOptions = {
       contentLength: Buffer.byteLength(JSON.stringify(entity.meta.rocrate)),
     }),
   },
-  prefix: config.prefix || '',
+  prefix,
   aggregations: config.search.aggregations,
 };
 fastify.decorateRequest('userLicenses', null);
@@ -63,10 +67,10 @@ fastify.register(fastifySensible);
 fastify.register(cors, {
   methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 });
-fastify.register(fastifyRoutes, { prefix: appOpt.prefix });
+fastify.register(fastifyRoutes, { prefix });
 fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
-fastify.register(auth, { prefix: config.prefixAuth || config.prefix || '' });
+fastify.register(auth, { prefix: config.prefixAuth || prefix });
 // Run the server!
 (async () => {
   try {

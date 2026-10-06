@@ -2,10 +2,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { env, loadEnvFile } from 'node:process';
 import { defineConfig } from 'prisma/config';
-import packageJson from './package.json' with { type: 'json' };
 import { DEFAULT_DATABASE_URL } from './src/default.config.ts';
 
-const _name = packageJson.name;
 let paths = [join(homedir(), '.env'), './.env'];
 
 if (env.NODE_ENV) {

@@ -1,9 +1,12 @@
 import { type Entity, ROCrate } from 'ro-crate';
+import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
 import { type BaseOptions, type CrateFile, Indexer, RecordType } from './indexer.ts';
 
 const log = plog.child({ module: 'indexer/structural' });
+
+type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
 type StructuralOptions = BaseOptions & {
   ocflPath: string;
@@ -30,17 +33,14 @@ export class StructuralIndexer extends Indexer {
     //const objectRoot = ocflObject.root;
     //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
-    const pq = new PromiseQueue(4, async (opt: Record<string, { id: string } | undefined>) => {
-      for (const tableName in opt) {
-        const data = opt[tableName];
-        //console.log(data.Metadatalicense);
-        if (data) {
-          try {
-            await prisma[tableName].create({ data });
-          } catch (error) {
-            log.error(`Error indexing ${crateId} ${data.id}: ${(error as Error).message}`);
-          }
+    const pq = new PromiseQueue(4, async ({ entity, file }: IndexRecord) => {
+      try {
+        await prisma.entity.create({ data: entity });
+        if (file) {
+          await prisma.file.create({ data: file });
         }
+      } catch (error) {
+        log.error(`Error indexing ${crateId} ${entity.id}: ${(error as Error).message}`);
       }
     });
 
@@ -56,13 +56,13 @@ export class StructuralIndexer extends Indexer {
       }
     }
     for (const entity of crate.entities()) {
-      const entityType = entity['@type'].find((t) => t in RecordType); // only the first matching entity type is used
+      const entityType = entity['@type'].find((t: string) => t in RecordType); // only the first matching entity type is used
       if (!entityType) {
         continue;
       }
-      const mustHaveConformsTo = RecordType[entityType as keyof typeof RecordType];
+      const mustHaveConformsTo = RecordType[entityType];
       if (mustHaveConformsTo) {
-        const conformsTo = entity.conformsTo?.find((c) => c['@id'] === mustHaveConformsTo);
+        const conformsTo = entity.conformsTo?.find((c: { '@id': string }) => c['@id'] === mustHaveConformsTo);
         if (!conformsTo) {
           continue;
         }
@@ -71,12 +71,12 @@ export class StructuralIndexer extends Indexer {
       count++;
       const entityId = entity['@id'];
       const rocrate = entityAsCrate(crate, entity, license);
-      const param = {
+      const param: IndexRecord = {
         entity: {
           id: entityId,
           name: entity.name?.join('; ') || entityId,
           description: entity.description?.join('; ') || '',
-          entityType: crate.getContextDefinition(entityType) || RecordType[entityType as keyof typeof RecordType],
+          entityType: crate.getContextDefinition(entityType) || RecordType[entityType],
           memberOf: pickSingleMemberOf(entity),
           rootCollection: crate.rootId,
           metadataLicenseId: metadataLicense,
@@ -92,11 +92,10 @@ export class StructuralIndexer extends Indexer {
         } catch (error) {
           log.error(`[${crateId}] ${(error as Error).message}`);
         }
-        /* @ts-expect-error */
         param.file = {
           id: entityId,
           filename: storagePath.split('/').pop(),
-          mediaType: entity.encodingFormat?.find((v) => typeof v === 'string') || 'application/octet-stream',
+          mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
           size: +(entity.contentSize?.[0] ?? f.size),
           meta: {
             storagePath,
@@ -146,8 +145,8 @@ function pickSingleMemberOf(entity: Entity) {
     entity.memberOf?.[0]['@id'] ||
     entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
     entity['@reverse'].hasMember?.[0]?.['@id'] ||
-    entity.isPartOf?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
-    entity['@reverse'].hasPart?.find((e) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
+    entity.isPartOf?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
+    entity['@reverse'].hasPart?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
     entity.isPartOf?.[0]['@id'] ||
     entity['@reverse'].hasPart?.[0]?.['@id'] ||
     null

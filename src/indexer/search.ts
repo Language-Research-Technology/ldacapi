@@ -1,7 +1,7 @@
 import { Client } from '@opensearch-project/opensearch';
 import type { Bulk_RequestBody, Indices_Create_RequestBody, Search_Request, Search_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { Entity, ROCrate } from 'ro-crate';
-import type { config } from '../configuration.ts';
+import { config } from '../configuration.ts';
 import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
 import { Indexer, RecordType } from './indexer.ts';
@@ -23,7 +23,7 @@ type searchParams = {
 
 type SearchOptions = BaseOptions & {
   searchSettings: typeof config.search & { log?: string };
-  client?: Client;
+  client?: Client | undefined;
 };
 
 const statusCode = (error: unknown) => (error as { meta?: { statusCode?: number } }).meta?.statusCode;
@@ -75,14 +75,14 @@ export class SearchIndexer extends Indexer {
   constructor(opt: SearchOptions) {
     super(opt);
     this.conf = opt.searchSettings;
-    this.client = opt.client || new Client({ node: process.env.OPENSEARCH_URL });
+    this.client = opt.client || new Client({ node: config.opensearchUrl });
     // this.conformsTo = {
     //   [configuration.api.conformsTo.collection]: mapCollection,
     //   [configuration.api.conformsTo.object]: mapObject
     //};
     const { properties } = this.conf.create.mappings;
-    for (const name in properties) {
-      const mapper = dataTypeMapper[properties[name].type];
+    for (const [name, mapping] of Object.entries(properties)) {
+      const mapper = 'type' in mapping ? dataTypeMapper[mapping.type] : undefined;
       if (mapper && !this.propertyMapper[name]) {
         this.propertyMapper[name] = mapper;
       }
@@ -161,7 +161,7 @@ export class SearchIndexer extends Indexer {
     for (const entity of crate.entities()) {
       const entityTypes: string[] = entity['@type'];
       const matchedMappers = entityTypes
-        .map((t) => (!RecordType[t] || entity.conformsTo?.find((c) => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined))
+        .map((t) => (!RecordType[t] || entity.conformsTo?.find((c: { '@id': string }) => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined))
         .filter((fn) => !!fn);
       if (matchedMappers.length) {
         // create common index record
@@ -194,7 +194,7 @@ export class SearchIndexer extends Indexer {
       //log.debug('Finish bulk indexing');
       if (result.body.errors) {
         log.error(`Bulk operation result errors:`);
-        const items = result.body.items.filter((item) => item.update.error).map((item) => item.update.error?.reason);
+        const items = result.body.items.filter((item) => item.update?.error).map((item) => item.update?.error?.reason);
         log.error(items.join('\n'));
         log.error(result.body);
       }
@@ -234,8 +234,10 @@ export class SearchIndexer extends Indexer {
       const opts: Search_Request = {
         index,
         body: searchBody,
-        explain: explain,
       };
+      if (explain != null) {
+        opts.explain = explain;
+      }
       if (filterPath) {
         opts.filter_path = filterPath;
       }
@@ -293,7 +295,7 @@ function createDoc(
           if (record[name] == null) {
             record[name] = vals;
           } else {
-            record[name] = [].concat(record[name], vals);
+            record[name] = ([] as unknown[]).concat(record[name], vals);
           }
         }
         if (res != null) {
@@ -319,34 +321,34 @@ function createDoc(
   return record;
 }
 
-/**
- * Find the license of an item with its id if not and id or undefined return a default license from
- * config, if passed an Id and not found it will also return a default license.
- */
-function _resolveLicense(licenses: (string | { '@id': string })[], crate: ROCrate, defaultLicense?: Entity) {
-  for (const license of licenses || []) {
-    const id = typeof license === 'string' ? license : license['@id'];
-    const entity = crate.getEntity(id);
-    if (entity) {
-      return entity;
-    }
-    log.warn(`Invalid license: ${id}`);
-  }
-  return defaultLicense;
-}
-
-function _resolveMetadataLicense(crate, defaultMetadataLicense) {
-  const metadataDescriptorLicense = crate.getEntity('ro-crate-metadata.json')?.license || [];
-  const license = metadataDescriptorLicense[0];
-  if (license) {
-    return {
-      metadataIsPublic: license.metadataIsPublic?.[0] || false,
-      name: license.name?.[0],
-      id: license['@id'],
-      description: license.description?.[0],
-    };
-  } else {
-    //default to cc-by-4
-    return defaultMetadataLicense;
-  }
-}
+// /**
+//  * Find the license of an item with its id if not and id or undefined return a default license from
+//  * config, if passed an Id and not found it will also return a default license.
+//  */
+// function _resolveLicense(licenses: (string | { '@id': string })[], crate: ROCrate, defaultLicense?: Entity) {
+//   for (const license of licenses || []) {
+//     const id = typeof license === 'string' ? license : license['@id'];
+//     const entity = crate.getEntity(id);
+//     if (entity) {
+//       return entity;
+//     }
+//     log.warn(`Invalid license: ${id}`);
+//   }
+//   return defaultLicense;
+// }
+//
+// function _resolveMetadataLicense(crate: ROCrate, defaultMetadataLicense?: unknown) {
+//   const metadataDescriptorLicense = crate.getEntity('ro-crate-metadata.json')?.license || [];
+//   const license = metadataDescriptorLicense[0];
+//   if (license) {
+//     return {
+//       metadataIsPublic: license.metadataIsPublic?.[0] || false,
+//       name: license.name?.[0],
+//       id: license['@id'],
+//       description: license.description?.[0],
+//     };
+//   } else {
+//     //default to cc-by-4
+//     return defaultMetadataLicense;
+//   }
+// }

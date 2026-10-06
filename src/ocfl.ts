@@ -1,4 +1,4 @@
-import type { OcflObject } from '@ocfl/ocfl';
+import type { OcflObject, OcflObjectFile } from '@ocfl/ocfl';
 import ocfl from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
 import { createCRC32 } from 'hash-wasm';
@@ -7,7 +7,7 @@ import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
-import { type RepositoryFile, State } from './repository.ts';
+import { State } from './repository.ts';
 import { log, PromiseQueue } from './utils.ts';
 
 const crc32 = await createCRC32();
@@ -73,7 +73,7 @@ export async function init(opts: { opensearchClient?: Client }) {
   }
 }
 
-async function calculateCrc32(file: RepositoryFile) {
+async function calculateCrc32(file: OcflObjectFile) {
   crc32.init();
   for await (const chunk of await file.stream()) {
     crc32.update(chunk);
@@ -93,7 +93,7 @@ function wrap(ocflObject: OcflObject): CrateObject {
         throw new Error(`File not found in ocfl inventory: ${path}`);
       }
       return {
-        size: file.size ?? file.fixity?.size ?? (await file.stat()).size,
+        size: Number(file.size ?? file.fixity?.size ?? (await file.stat()).size),
         crc32: file.fixity?.crc32 ?? (await calculateCrc32(file)),
       };
     },
@@ -118,13 +118,13 @@ function setState(crateId: string | undefined, types: string | string[], state?:
 }
 
 export async function getState(crateId: string, type?: string) {
-  const indexers: [string, Indexer][] = type ? [[type, INDEXER[type]]] : Object.entries(INDEXER);
+  const indexers: [string, Indexer | undefined][] = type ? [[type, INDEXER[type]]] : Object.entries(INDEXER);
   for (const [name, indexer] of indexers) {
     if (!indexer) {
       return;
     }
     if (!stateCache[crateId]?.[name]) {
-      const count = await INDEXER[name].count(crateId);
+      const count = await indexer.count(crateId);
       if (count > 0) {
         stateCache[crateId] = stateCache[crateId] || {};
         stateCache[crateId][name] = State.INDEXED;
@@ -132,7 +132,7 @@ export async function getState(crateId: string, type?: string) {
     }
     //if (!StateCache[crateId]?.[name]) return State.NONE;
   }
-  return type ? { [type]: stateCache[crateId][type] } : (stateCache[crateId] ?? {});
+  return type ? { [type]: stateCache[crateId]?.[type] } : (stateCache[crateId] ?? {});
 }
 
 async function indexObject(ocflObject: OcflObject, types: string[], force?: boolean) {
@@ -174,7 +174,7 @@ export async function createIndex(crateId?: string | RegExp, type?: string | str
     await indexObject(repository.object(crateId), types, force);
   } else {
     // process IO in parallel
-    const pq = new PromiseQueue(4, async (ocflObject: unknown) => indexObject(ocflObject, types, force));
+    const pq = new PromiseQueue(4, async (ocflObject: OcflObject) => indexObject(ocflObject, types, force));
     if (crateId instanceof RegExp) {
       // if crateId pattern is specified, index just the object and the subcollections and child objects
       // by checking just the structure implied in the crate id

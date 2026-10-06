@@ -23,9 +23,9 @@ function enrollmentUrl(licenseId: string): string {
   return renderTemplate(encodeURIComponent(licenseId));
 }
 
-export async function resolveValidLicenses() {
-  return config.openLicenses;
-}
+// export async function resolveValidLicenses() {
+//   return config.openLicenses;
+// }
 
 export async function accessTransformer(entity: StandardEntity, { request }: { request: FastifyRequest }): Promise<AuthorisedEntity> {
   const { metadataLicenseId, contentLicenseId } = entity;
