@@ -4,7 +4,7 @@ import { firstStringOrId, log as plog } from '../utils.ts';
 
 const log = plog.child({ module: 'indexer' });
 
-type BaseOptions = {
+export type BaseOptions = {
   defaultLicense?: string;
   defaultMetadataLicense?: string;
   name?: string;
@@ -35,7 +35,7 @@ export class Indexer {
     this.name = opt?.name || Object.getPrototypeOf(this).constructor.name;
   }
 
-  static async create(opt: any) {
+  static async create<T extends Indexer, O>(this: new (opt: O) => T, opt: O) {
     const indexer = new this(opt);
     await indexer.init();
     return indexer;

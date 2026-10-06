@@ -24,7 +24,7 @@ export interface Repository {
 }
 
 /** Load or initialize a repository */
-export async function initRepository(type: string, opts: any): Promise<Repository> {
+export async function initRepository(type: string, opts: Record<string, unknown>): Promise<Repository> {
   const repo = await import(`./${type}.ts`);
   await repo.init(opts);
   return repo;

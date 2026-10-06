@@ -26,10 +26,7 @@ export async function resolveValidLicenses() {
   return config.openLicenses;
 }
 
-export async function accessTransformer(
-  entity: StandardEntity,
-  { request }: { request: FastifyRequest },
-): Promise<AuthorisedEntity | AuthorisedFile> {
+export async function accessTransformer(entity: StandardEntity, { request }: { request: FastifyRequest }): Promise<AuthorisedEntity | AuthorisedFile> {
   const { metadataLicenseId, contentLicenseId } = entity;
   const canAccessMetadata = await checkLicense(request, metadataLicenseId);
   const canAccessContent = await checkLicense(request, contentLicenseId);
@@ -39,12 +36,8 @@ export async function accessTransformer(
     access: {
       metadata: canAccessMetadata,
       content: canAccessContent,
-      metadataAuthorizationUrl: canAccessMetadata
-        ? undefined
-        : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
-      contentAuthorizationUrl: canAccessContent
-        ? undefined
-        : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
+      metadataAuthorizationUrl: canAccessMetadata ? undefined : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
+      contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
     },
   };
 }

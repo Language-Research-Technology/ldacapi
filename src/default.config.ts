@@ -1,7 +1,7 @@
 import { env } from 'node:process';
 import packageJson from '../package.json' with { type: 'json' };
 
-const isDev = env.NODE_ENV ? (env.NODE_ENV === 'development' || env.NODE_ENV === 'dev') : true;
+const isDev = env.NODE_ENV ? env.NODE_ENV === 'development' || env.NODE_ENV === 'dev' : true;
 export default {
   package: packageJson,
   isDev,
@@ -10,7 +10,7 @@ export default {
   port: parseInt(env.LDACAPI_PORT || '8080', 10),
   host: env.LDACAPI_HOST,
   logLevel: env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
-  maxParamLength: parseInt(env.LDACAPI_MAX_PARAM_LENGTH || '500'),
+  maxParamLength: parseInt(env.LDACAPI_MAX_PARAM_LENGTH || '500', 10),
   tokenAdmin: env.TOKEN_ADMIN || '1234-1234-1234-1234',
   defaultLicense: '',
   defaultMetadataLicense: '',
@@ -25,14 +25,14 @@ export default {
   rems: {
     user: env.REMS_USER || '',
     key: env.REMS_KEY || '',
-    endpoint: env.REMS_ENDPOINT || ''
+    endpoint: env.REMS_ENDPOINT || '',
   },
   enrollmentUrl: env.ENROLLMENT_URL || '',
   oidc: {
     endpoint: env.OIDC_ENDPOINT || '',
     clientId: env.OIDC_CLIENT_ID || '',
     clientSecret: env.OIDC_CLIENT_SECRET || '',
-    userinfoEndpoint: ''
+    userinfoEndpoint: '',
   },
   indexType: {
     RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
@@ -40,30 +40,30 @@ export default {
     File: '',
     Person: 'https://w3id.org/ldac/profile#Person',
     Organization: 'https://w3id.org/ldac/profile#Organization',
-    SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication'
+    SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication',
   },
   search: {
     cluster: {
       persistent: {
-        "search.max_open_scroll_context": 5000
+        'search.max_open_scroll_context': 5000,
       },
       transient: {
-        "search.max_open_scroll_context": 5000
-      }
+        'search.max_open_scroll_context': 5000,
+      },
     },
     create: {
       settings: {
         index: {
           max_result_window: 100000,
           highlight: {
-            max_analyzed_offset: 1000000
+            max_analyzed_offset: 1000000,
           },
           mapping: {
             total_fields: {
-              limit: 1000
-            }
-          }
-        }
+              limit: 1000,
+            },
+          },
+        },
       },
       mappings: {
         // _source: {
@@ -93,7 +93,7 @@ export default {
           conformsTo: {
             properties: {
               '@id': { type: 'keyword' },
-            }
+            },
           },
           //recordType: { type: 'keyword' },
           //root: { type: 'keyword' },
@@ -104,18 +104,18 @@ export default {
           datePublished: { type: 'date_range' },
           dateCreated: { type: 'date_range' },
           temporalCoverage: { type: 'date_range' },
-          _text: { type: 'text' }
+          _text: { type: 'text' },
           //communicationMode: { type: 'keyword' },
           // createdAt: { type: 'date' },
           // updatedAt: { type: 'date' },
-        }
-      }
+        },
+      },
     },
     aggregations: {
-//      entityType: { terms: { field: 'entityType' } },
+      //      entityType: { terms: { field: 'entityType' } },
       '@type': { terms: { field: '@type' } },
-      inLanguage: { terms: { field: 'inLanguage' } }
+      inLanguage: { terms: { field: 'inLanguage' } },
     },
-    entityIndex: env.ENTITY_INDEX || 'entities'
-  }
-}
+    entityIndex: env.ENTITY_INDEX || 'entities',
+  },
+};

@@ -29,7 +29,7 @@ const appOpt: Options & RegisterOptions = {
   fileAccessTransformer: accessTransformer,
   resolveValidLicenses,
   entityTransformers: [
-    (entity, { fastify }) => {
+    (entity) => {
       entity.accessControl = 'Public';
       entity.counts = {
         collections: 0,

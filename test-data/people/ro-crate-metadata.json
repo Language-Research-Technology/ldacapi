@@ -28,11 +28,7 @@
         "@id": "https://creativecommons.org/licenses/by/4.0/"
       },
       "datePublished": "2023-12-21",
-      "hasPart": [
-        { "@id": "arcp://name,organisation/ldaca" },
-        { "@id": "arcp://name,people/JohnSmith" },
-        { "@id": "arcp://name,people/JaneSmith" }
-      ]
+      "hasPart": [{ "@id": "arcp://name,organisation/ldaca" }, { "@id": "arcp://name,people/JohnSmith" }, { "@id": "arcp://name,people/JaneSmith" }]
     },
     {
       "@id": "https://creativecommons.org/licenses/by/4.0/",

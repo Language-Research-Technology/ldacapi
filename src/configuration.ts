@@ -17,12 +17,12 @@ try {
   }
 }
 
-function merge(target: any, source: any) {
+function merge(target: Record<string, unknown>, source: Record<string, unknown>) {
   for (const key in source) {
     const value = source[key];
-    if (typeof value === 'object' && Object.is(value.constructor, Object)) {
+    if (typeof value === 'object' && value !== null && Object.is(value.constructor, Object)) {
       target[key] = target[key] ?? {};
-      merge(target[key], value);
+      merge(target[key] as Record<string, unknown>, value as Record<string, unknown>);
     } else {
       target[key] = value;
     }
