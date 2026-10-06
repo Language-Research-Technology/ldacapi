@@ -4,20 +4,16 @@ import cors from '@fastify/cors';
 import fastifyRoutes from '@fastify/routes';
 import fastifySensible from '@fastify/sensible';
 import { Client } from '@opensearch-project/opensearch';
-import { PrismaPg } from '@prisma/adapter-pg';
 import type { Options } from 'arocapi';
 import arocapi from 'arocapi';
 import type { RegisterOptions } from 'fastify';
 import ldacapi, { fileHandler } from './app.ts';
 import { accessTransformer, resolveValidLicenses } from './auth.ts';
 import { config } from './configuration.ts';
-import { PrismaClient } from './generated/prisma/client.ts';
+import { prisma } from './prisma.ts';
 import { auth } from './routes/auth.ts';
 import { fastify } from './utils.ts';
 
-export const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: config.databaseUrl }),
-});
 const opensearch = new Client({ node: config.opensearchUrl });
 
 const appOpt: Options & RegisterOptions = {
