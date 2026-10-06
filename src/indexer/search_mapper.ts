@@ -1,9 +1,6 @@
 import type { Entity } from '../types.ts';
 
-type PropertyMapperFn = (
-  value: unknown,
-  opt?: { deferredEntities?: Entity[]; properties?: Record<string, any> },
-) => unknown | undefined;
+type PropertyMapperFn = (value: unknown, opt?: { deferredEntities?: Entity[]; properties?: Record<string, unknown> }) => unknown | undefined;
 
 const indexableText: PropertyMapperFn = (value, { deferredEntities }) => {
   if ('@id' in (value as object) && deferredEntities) {
@@ -15,9 +12,7 @@ const indexableText: PropertyMapperFn = (value, { deferredEntities }) => {
 const defaultText: PropertyMapperFn = (value) => (value as { '@value'?: unknown })['@value'] || value;
 
 const defaultEntityName: PropertyMapperFn = (value) =>
-  (value as { name?: unknown[] }).name?.map((v) => defaultText(v))[0] ||
-  (value as { '@value'?: unknown })['@value'] ||
-  value;
+  (value as { name?: unknown[] }).name?.map((v) => defaultText(v))[0] || (value as { '@value'?: unknown })['@value'] || value;
 
 const dataTypeDate: PropertyMapperFn = (value) => {
   const datestr = typeof value !== 'string' ? `${value}` : value;
@@ -27,7 +22,12 @@ const dataTypeDate: PropertyMapperFn = (value) => {
 };
 
 const location: PropertyMapperFn = (value, { properties }) => {
-  const place = value as { longitude?: number | string; latitude?: number | string; geo?: unknown[] };
+  const place = value as {
+    longitude?: number | string;
+    latitude?: number | string;
+    geo?: (string | { asWKT?: string[] })[];
+    name?: unknown;
+  };
   const locations = [];
   if (place.longitude != null && place.latitude != null) {
     locations.push(`POINT(${place.longitude} ${place.latitude})`); //{ type: 'point', coordinates: [place.longitude, place.latitude] }
@@ -43,7 +43,7 @@ const location: PropertyMapperFn = (value, { properties }) => {
     properties._locations = locations;
   }
   //if (value['@id']) return { '@id': value['@id'], name: value.name };
-  return value.name;
+  return place.name;
 };
 
 export const dataTypeMapper: Record<string, PropertyMapperFn> = {
@@ -62,22 +62,24 @@ export const propertyMapper: Record<string, PropertyMapperFn> = {
   spatialCoverage: location,
 };
 
-export function mapDefaultProperties(value: any) {
+export function mapDefaultProperties(value: unknown): unknown {
   switch (typeof value) {
     case 'string':
     case 'boolean':
       return { '@value': value };
-    case 'object':
-      if (value['@id']) {
-        const o = { '@id': value['@id'] } as any;
+    case 'object': {
+      const entity = value as Record<string, unknown[] | undefined>;
+      if (entity['@id']) {
+        const o: Record<string, unknown> = { '@id': entity['@id'] };
         for (const prop of ['name', 'alternateName']) {
-          if (value[prop]?.length) o[prop] = value[prop].map(mapDefaultProperties);
+          if (entity[prop]?.length) o[prop] = entity[prop].map(mapDefaultProperties);
         }
         return o;
       } else {
         return value;
       }
+    }
     default:
-      return { '@value': value.toString() };
+      return { '@value': String(value) };
   }
 }

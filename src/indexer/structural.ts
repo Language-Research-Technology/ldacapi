@@ -1,16 +1,22 @@
-import { ROCrate } from 'ro-crate';
+import { type Entity, ROCrate } from 'ro-crate';
 import { prisma } from '../index.ts';
 import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
-import { type CrateFile, Indexer, RecordType } from './indexer.ts';
+import { type BaseOptions, type CrateFile, Indexer, RecordType } from './indexer.ts';
 
 const log = plog.child({ module: 'indexer/structural' });
+
+type StructuralOptions = BaseOptions & {
+  ocflPath: string;
+  ocflPathInternal: string;
+  memberOfField?: string;
+};
 
 export class StructuralIndexer extends Indexer {
   ocflPath: string;
   ocflPathInternal: string;
   memberOfField: string;
 
-  constructor(opt: any) {
+  constructor(opt: StructuralOptions) {
     super(opt);
     this.ocflPath = opt.ocflPath;
     this.ocflPathInternal = opt.ocflPathInternal;
@@ -24,13 +30,12 @@ export class StructuralIndexer extends Indexer {
     //const objectRoot = ocflObject.root;
     //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
-    const pq = new PromiseQueue(4, async (opt: any) => {
+    const pq = new PromiseQueue(4, async (opt: Record<string, { id: string } | undefined>) => {
       for (const tableName in opt) {
         const data = opt[tableName];
         //console.log(data.Metadatalicense);
         if (data) {
           try {
-            // @ts-expect-error
             await prisma[tableName].create({ data });
           } catch (error) {
             log.error(`Error indexing ${crateId} ${data.id}: ${(error as Error).message}`);
@@ -116,17 +121,11 @@ export class StructuralIndexer extends Indexer {
   }
 
   async count(crateId?: string) {
-    let opt;
-    if (crateId) {
-      opt = {
-        where: { id: crateId },
-      };
-    }
-    return await prisma.entity.count(opt);
+    return await prisma.entity.count(crateId ? { where: { id: crateId } } : undefined);
   }
 }
 
-export function entityAsCrate(crate: ROCrate, entity: any, license: string) {
+export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
   for (const key in entity) {
     newCrate.root[key] = entity[key];
@@ -141,7 +140,7 @@ export function entityAsCrate(crate: ROCrate, entity: any, license: string) {
   return newCrate.toJSON();
 }
 
-function pickSingleMemberOf(entity: any) {
+function pickSingleMemberOf(entity: Entity) {
   return (
     entity['pcdm:memberOf']?.[0]['@id'] ||
     entity.memberOf?.[0]['@id'] ||

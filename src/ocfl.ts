@@ -1,7 +1,8 @@
 import type { OcflObject } from '@ocfl/ocfl';
 import ocfl from '@ocfl/ocfl-fs';
+import type { Client } from '@opensearch-project/opensearch';
 import { createCRC32 } from 'hash-wasm';
-import { ROCrate } from 'ro-crate';
+import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
@@ -35,7 +36,7 @@ const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof 
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 
-export async function init(opts: any) {
+export async function init(opts: { opensearchClient?: Client }) {
   log.info('Initializing OCFL repository and indexers');
   INDEXER = {
     structural: await StructuralIndexer.create({
@@ -211,7 +212,7 @@ export async function* objects(prefix?: string, refresh?: boolean) {
       const inv = await ocflObject.getInventory();
       const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
       const jsonParsed = JSON.parse(jsonContent);
-      const name = jsonParsed['@graph'].find((e: any) => e['@id'] === inv.id)?.name?.toString();
+      const name = jsonParsed['@graph'].find((e: RawEntity) => e['@id'] === inv.id)?.name?.toString();
       yield { id: inv.id, name, path: ocflObject.root, state: await getState(inv.id) };
     } catch (error) {
       log.error(error);
@@ -220,8 +221,7 @@ export async function* objects(prefix?: string, refresh?: boolean) {
 }
 
 export async function getFile(entityId: string, storagePath: string) {
-  const crateId =
-    storagePath && entityId.endsWith(`/${storagePath}`) ? entityId.slice(0, -storagePath.length - 1) : entityId;
+  const crateId = storagePath && entityId.endsWith(`/${storagePath}`) ? entityId.slice(0, -storagePath.length - 1) : entityId;
   try {
     const object = repository.object(crateId);
     await object.load();

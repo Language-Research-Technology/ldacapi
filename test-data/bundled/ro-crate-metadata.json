@@ -68,11 +68,7 @@
         }
       ],
       "hasPart": [{ "@id": "data.txt" }, { "@id": "image.jpg" }],
-      "pcdm:hasMember": [
-        { "@id": "arcp://name,bundled/ch1" },
-        { "@id": "arcp://name,bundled/ch2" },
-        { "@id": "arcp://name,bundled/intro" }
-      ]
+      "pcdm:hasMember": [{ "@id": "arcp://name,bundled/ch1" }, { "@id": "arcp://name,bundled/ch2" }, { "@id": "arcp://name,bundled/intro" }]
     },
     {
       "@id": "arcp://name,bundled/ch1",

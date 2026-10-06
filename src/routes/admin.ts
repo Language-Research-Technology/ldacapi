@@ -49,8 +49,7 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository 
     {
       schema: {
         summary: 'Index all creates or a specified crate from the OCFL repository.',
-        description:
-          'If the index already exists, it will not be re-indexed unless the "force" query parameter is set to true.',
+        description: 'If the index already exists, it will not be re-indexed unless the "force" query parameter is set to true.',
         params: z.object({
           crateId: z.string().optional(),
           type: z.string().optional(),
