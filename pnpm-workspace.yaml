@@ -1,0 +1,9 @@
+update:
+  githubActions: true
+
+autoDedupe: true
+saveTypes: true
+
+allowBuilds:
+  "@prisma/engines": true
+  prisma: true
