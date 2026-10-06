@@ -2,7 +2,5 @@
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
   // src/ocfl.ts is loaded dynamically by initRepository()
   "entry": ["make-ocfl.ts", "src/ocfl.ts"],
-  // Loaded by pino as a transport target string
-  "ignoreDependencies": ["pino-pretty"],
   "tags": ["-lintignore"]
 }

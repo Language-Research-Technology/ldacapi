@@ -1,18 +1,28 @@
 import Fastify from 'fastify';
 import { config } from './configuration.ts';
 
+const hasPinoPretty = (() => {
+  try {
+    import.meta.resolve('pino-pretty');
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 export const fastify = Fastify({
   routerOptions: {
     maxParamLength: config.maxParamLength,
   },
   logger: {
     level: config.logLevel,
-    ...(config.isDev && {
-      transport: {
-        target: 'pino-pretty',
-        options: { messageFormat: '[{module}] {msg}', ignore: 'pid,module,hostname' },
-      },
-    }),
+    ...(config.isDev &&
+      hasPinoPretty && {
+        transport: {
+          target: 'pino-pretty',
+          options: { messageFormat: '[{module}] {msg}', ignore: 'pid,module,hostname' },
+        },
+      }),
   },
   trustProxy: true, // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
 });
