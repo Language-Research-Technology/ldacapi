@@ -2,7 +2,7 @@ import type { Entity } from '../types.ts';
 
 type PropertyMapperFn = (value: unknown, opt?: { deferredEntities?: Entity[]; properties?: Record<string, unknown> }) => unknown | undefined;
 
-const indexableText: PropertyMapperFn = (value, { deferredEntities }) => {
+const indexableText: PropertyMapperFn = (value, { deferredEntities } = {}) => {
   if ('@id' in (value as object) && deferredEntities) {
     deferredEntities.push(value as Entity);
   }
@@ -24,7 +24,7 @@ const dataTypeDate: PropertyMapperFn = (value) => {
   }
 };
 
-const location: PropertyMapperFn = (value, { properties }) => {
+const location: PropertyMapperFn = (value, { properties } = {}) => {
   const place = value as {
     longitude?: number | string;
     latitude?: number | string;
@@ -42,7 +42,7 @@ const location: PropertyMapperFn = (value, { properties }) => {
       locations.push(...geo.asWKT);
     }
   }
-  if (locations.length) {
+  if (locations.length && properties) {
     properties._locations = locations;
   }
   //if (value['@id']) return { '@id': value['@id'], name: value.name };

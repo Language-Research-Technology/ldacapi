@@ -1,4 +1,4 @@
-export interface RepositoryFile {
+interface RepositoryFile {
   /** The file path relative to the repository root */
   path: string;
   stream: () => Promise<ReadableStream>;

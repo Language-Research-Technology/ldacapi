@@ -24,7 +24,7 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
       .then(async (response) => {
         if (response.ok) {
           openidConfig = await response.json();
-          config.oidc.userinfoEndpoint = openidConfig.userinfo_endpoint;
+          config.oidc.userinfoEndpoint = openidConfig.userinfo_endpoint ?? '';
         } else {
           throw new Error(`Failed to fetch ${openidConfigUrl}: ${response.statusText}`);
         }

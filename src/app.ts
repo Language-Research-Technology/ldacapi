@@ -10,7 +10,7 @@ import { admin as adminRoute } from './routes/admin.ts';
 import { fileRoute } from './routes/file.ts';
 import { log } from './utils.ts';
 
-type LdacapiOptions = {
+export type LdacapiOptions = {
   prisma: PrismaClient;
   opensearch: Client;
   disableCors?: boolean;
@@ -68,7 +68,7 @@ function fileMetadata(file: File): FileMetadata {
 export const fileHandler: FileHandler = {
   get: async (file, { request }) => {
     //console.log('fileHandler', file);
-    const { disposition, filename } = request.query;
+    const { disposition, filename } = request.query as { disposition?: string; filename?: string };
     const storagePath = file.meta.storagePath;
     log.debug(`fileHandler: ${file.id}  ${file.meta.storagePath}`);
     const crateId = storagePath && file.id.endsWith(`/${storagePath}`) ? file.id.slice(0, -storagePath.length - 1) : file.id;

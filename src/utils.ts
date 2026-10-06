@@ -31,10 +31,10 @@ export const log = fastify.log;
 
 export class PromiseQueue<T = unknown> {
   concurrency: number;
-  sharedFunction?: (t: T) => Promise<unknown>;
+  sharedFunction: ((t: T) => Promise<unknown>) | undefined;
   #runs: (Promise<unknown> | null)[] = [];
   #queue: ((value: number) => void)[] = [];
-  #done?: () => void;
+  #done: (() => void) | undefined;
   constructor(concurrency = 1, sharedFunction?: (t: T) => Promise<unknown>) {
     this.concurrency = concurrency;
     this.sharedFunction = sharedFunction;

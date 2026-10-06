@@ -105,4 +105,4 @@ export class Indexer {
   }
 }
 
-export const RecordType = config.indexType;
+export const RecordType: Record<string, string> = config.indexType;
