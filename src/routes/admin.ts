@@ -106,7 +106,9 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository 
     },
     async (request, reply) => {
       let { crateId, type } = request.params;
-      if (crateId === 'all' || crateId === '*') crateId = undefined;
+      if (crateId === 'all' || crateId === '*') {
+        crateId = undefined;
+      }
       repo.deleteIndex(crateId, type);
       return reply.send({ message: 'Deleting' });
     },

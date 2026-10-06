@@ -42,10 +42,15 @@ export class Indexer {
   }
 
   deriveUniqueEntityId(crateRootId: string, entityId: string) {
-    if (entityId.startsWith(crateRootId)) return entityId;
+    if (entityId.startsWith(crateRootId)) {
+      return entityId;
+    }
     //else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
-    else if (entityId.match(/.+:.+/)) return entityId;
-    else return `${crateRootId}/${entityId}`;
+    else if (entityId.match(/.+:.+/)) {
+      return entityId;
+    } else {
+      return `${crateRootId}/${entityId}`;
+    }
   }
 
   async init() {}

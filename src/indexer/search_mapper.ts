@@ -17,8 +17,11 @@ const defaultEntityName: PropertyMapperFn = (value) =>
 const dataTypeDate: PropertyMapperFn = (value) => {
   const datestr = typeof value !== 'string' ? `${value}` : value;
   let [gte, lte] = datestr.split('/').map((d) => new Date(d).valueOf());
-  if (lte == null) lte = gte;
-  else return { gte, lte };
+  if (lte == null) {
+    lte = gte;
+  } else {
+    return { gte, lte };
+  }
 };
 
 const location: PropertyMapperFn = (value, { properties }) => {
@@ -72,7 +75,9 @@ export function mapDefaultProperties(value: unknown): unknown {
       if (entity['@id']) {
         const o: Record<string, unknown> = { '@id': entity['@id'] };
         for (const prop of ['name', 'alternateName']) {
-          if (entity[prop]?.length) o[prop] = entity[prop].map(mapDefaultProperties);
+          if (entity[prop]?.length) {
+            o[prop] = entity[prop].map(mapDefaultProperties);
+          }
         }
         return o;
       } else {

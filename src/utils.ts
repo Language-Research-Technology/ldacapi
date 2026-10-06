@@ -78,7 +78,9 @@ export class PromiseQueue<T = unknown> {
   }
   /** Signal the queue to finish operation and wait until all tasks are complete */
   async done() {
-    if (this.#runs.every((v) => !v) && !this.#queue.length) return;
+    if (this.#runs.every((v) => !v) && !this.#queue.length) {
+      return;
+    }
     return new Promise<void>((resolve) => {
       this.#done = resolve;
     });
