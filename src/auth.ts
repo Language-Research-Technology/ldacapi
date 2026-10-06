@@ -19,8 +19,8 @@ type RemsUserEntitlement = {
 };
 
 const renderTemplate = new Function('licenseId', `return \`${config.enrollmentUrl}\`;`);
-function resolveEnrollmentUrl(licenseId: string) {
-  return renderTemplate(licenseId);
+function enrollmentUrl(licenseId: string): string {
+  return renderTemplate(encodeURIComponent(licenseId));
 }
 
 export async function resolveValidLicenses() {
@@ -39,8 +39,8 @@ export async function accessTransformer(entity: StandardEntity, { request }: { r
     access: {
       metadata: canAccessMetadata,
       content: canAccessContent,
-      metadataAuthorizationUrl: canAccessMetadata ? undefined : resolveEnrollmentUrl(encodeURIComponent(metadataLicenseId)),
-      contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
+      ...(!canAccessMetadata && { metadataAuthorizationUrl: enrollmentUrl(metadataLicenseId) }),
+      ...(!canAccessContent && { contentAuthorizationUrl: enrollmentUrl(contentLicenseId) }),
     },
   };
 }
@@ -53,7 +53,7 @@ export async function fileAccessTransformer(file: StandardFile, { request }: { r
     ...file,
     access: {
       content: canAccessContent,
-      contentAuthorizationUrl: canAccessContent ? undefined : resolveEnrollmentUrl(encodeURIComponent(contentLicenseId)),
+      ...(!canAccessContent && { contentAuthorizationUrl: enrollmentUrl(contentLicenseId) }),
     },
   };
 }
@@ -61,34 +61,35 @@ export async function fileAccessTransformer(file: StandardFile, { request }: { r
 async function checkLicense(request: FastifyRequest, licenseId: string): Promise<boolean> {
   if (openLicenses.has(licenseId)) {
     return true;
-  } else {
-    let userLicenses = request.getDecorator<string[]>('userLicenses');
-    if (!userLicenses) {
-      const userId = await authenticateUser(request);
-      if (userId && config.rems.endpoint) {
-        const res = await fetch(`${config.rems.endpoint}/entitlements?user=${encodeURIComponent(userId)}`, {
-          headers: {
-            'x-rems-api-key': config.rems.key,
-            'x-rems-user-id': config.rems.user,
-            accept: 'application/json',
-          },
-        });
-        console.log(res);
-        if (res.ok) {
-          const data = await res.json();
-          console.log(data);
-          userLicenses = data.map((item: RemsUserEntitlement) => item.resource);
-          request.setDecorator('userLicenses', userLicenses);
-        } else {
-          request.log.error(`Failed to fetch user entitlements: ${res.status} ${res.statusText}`);
-        }
-      }
-    }
-    if (userLicenses) {
-      return userLicenses.includes(licenseId);
-    }
   }
-  return false;
+  let userLicenses = request.getDecorator<Promise<string[] | undefined> | null>('userLicenses');
+  if (!userLicenses) {
+    userLicenses = fetchUserLicenses(request);
+    request.setDecorator('userLicenses', userLicenses);
+  }
+  return (await userLicenses)?.includes(licenseId) ?? false;
+}
+
+async function fetchUserLicenses(request: FastifyRequest): Promise<string[] | undefined> {
+  const userId = await authenticateUser(request);
+  if (!userId || !config.rems.endpoint) {
+    return;
+  }
+  const res = await fetch(`${config.rems.endpoint}/entitlements?user=${encodeURIComponent(userId)}`, {
+    headers: {
+      'x-rems-api-key': config.rems.key,
+      'x-rems-user-id': config.rems.user,
+      accept: 'application/json',
+    },
+  });
+  console.log(res);
+  if (!res.ok) {
+    request.log.error(`Failed to fetch user entitlements: ${res.status} ${res.statusText}`);
+    return;
+  }
+  const data = await res.json();
+  console.log(data);
+  return data.map((item: RemsUserEntitlement) => item.resource);
 }
 
 async function authenticateUser(request: FastifyRequest): Promise<string | undefined> {
