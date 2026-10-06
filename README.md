@@ -3,10 +3,10 @@ Implementation of Arocapi for Language Data Commons
 
 
 ```
-npm install
+pnpm install
 docker compose up
-npm run db:sync
-npm run dev
+pnpm db:sync
+pnpm dev
 ```
 
 index the data
