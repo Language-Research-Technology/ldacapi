@@ -12,25 +12,7 @@ import { log, PromiseQueue } from './utils.ts';
 
 const crc32 = await createCRC32();
 
-const ocflConf = {
-  ocflPath: '/opt/storage/oni/ocfl',
-  ocflPathInternal: '/ocfl',
-  ocflScratch: '/opt/storage/oni/scratch-ocfl',
-  ocflTestPath: '/opt/storage/oni/test/ocfl',
-  ocflTestScratch: '/opt/storage/oni/test/scratch-ocfl',
-  catalogFilename: 'ro-crate-metadata.json',
-  hashAlgorithm: 'md5',
-  create: {
-    repoName: 'LDACA',
-    collections: '../test-data/ingest-crate-list.development.json',
-  },
-  previewPath: '/opt/storage/oni/temp/ocfl/previews/',
-  previewPathInternal: '/ocfl/previews',
-};
-
 const { defaultLicense, defaultMetadataLicense } = config;
-const ocflPath = '/opt/storage/oni/ocfl';
-const ocflPathInternal = 'ocfl';
 
 const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof State] | undefined } } = {};
 let INDEXER: { [key: string]: Indexer };
@@ -42,8 +24,6 @@ export async function init(opts: { opensearchClient?: Client }) {
     structural: await StructuralIndexer.create({
       defaultLicense,
       defaultMetadataLicense,
-      ocflPath,
-      ocflPathInternal,
     }),
     search: await SearchIndexer.create({
       defaultLicense,
@@ -53,8 +33,8 @@ export async function init(opts: { opensearchClient?: Client }) {
     }),
   };
   repository = ocfl.storage({
-    root: ocflConf.ocflPath,
-    workspace: ocflConf.ocflScratch,
+    root: config.ocfl.root,
+    workspace: config.ocfl.scratch,
     ocflVersion: '1.1',
     fixityAlgorithms: ['crc32'],
     layout: {
@@ -64,12 +44,7 @@ export async function init(opts: { opensearchClient?: Client }) {
   try {
     await repository.load();
   } catch (e) {
-    log.error('=======================================');
-    log.error('Repository Error: please check your OCFL');
-    log.error((e as Error).message);
-    log.error(JSON.stringify(ocflConf));
-    log.error('=======================================');
-    throw e;
+    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. In development, run \`pnpm seed\` to create it.`, { cause: e });
   }
 }
 

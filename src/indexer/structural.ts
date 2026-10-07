@@ -9,20 +9,14 @@ const log = plog.child({ module: 'indexer/structural' });
 type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
 type StructuralOptions = BaseOptions & {
-  ocflPath: string;
-  ocflPathInternal: string;
   memberOfField?: string;
 };
 
 export class StructuralIndexer extends Indexer {
-  ocflPath: string;
-  ocflPathInternal: string;
   memberOfField: string;
 
   constructor(opt: StructuralOptions) {
     super(opt);
-    this.ocflPath = opt.ocflPath;
-    this.ocflPathInternal = opt.ocflPathInternal;
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 

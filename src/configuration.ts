@@ -1,3 +1,4 @@
+import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 
 type Env = Record<string, string | undefined>;
@@ -106,6 +107,8 @@ export function loadConfig(processEnv: Env) {
       DATABASE_URL: devDefault(`postgresql://ldacapi:ldacapi@localhost:5432/ldacapi${nodeEnv === 'test' ? '_test' : ''}`),
       OPENSEARCH_URL: devDefault('http://localhost:9200'),
       TOKEN_ADMIN: devDefault('1234-1234-1234-1234'),
+      OCFL_ROOT: devDefault('storage/ocfl'),
+      OCFL_SCRATCH: z.string().optional(),
       LDACAPI_PORT: z.coerce.number().int().default(8080),
       LDACAPI_HOST: z.string().default('localhost'),
       LDACAPI_MAX_PARAM_LENGTH: z.coerce.number().int().default(500),
@@ -137,6 +140,10 @@ export function loadConfig(processEnv: Env) {
     logLevel: env.LOG_LEVEL,
     maxParamLength: env.LDACAPI_MAX_PARAM_LENGTH,
     tokenAdmin: env.TOKEN_ADMIN,
+    ocfl: {
+      root: resolve(env.OCFL_ROOT),
+      scratch: resolve(env.OCFL_SCRATCH ?? join(dirname(env.OCFL_ROOT), 'scratch')),
+    },
     defaultLicense: env.DEFAULT_LICENSE,
     defaultMetadataLicense: env.DEFAULT_METADATA_LICENSE,
     openLicenses,
