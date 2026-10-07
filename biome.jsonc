@@ -5,10 +5,6 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
-  "files": {
-    "ignoreUnknown": false,
-    "includes": ["**", "!ro-crate-metadata.json"]
-  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
