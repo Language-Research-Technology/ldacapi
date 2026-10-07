@@ -41,6 +41,7 @@ services:
       - plugins.security.disabled=true # for opensearch
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=ABCDE1234!
       - DISABLE_INSTALL_DEMO_CONFIG=true
+      - cluster.routing.allocation.disk.threshold_enabled=false # dev machines are often nearly full; don't block index creation
     volumes:
       - opensearch_data:/usr/share/opensearch/data
     ports:
