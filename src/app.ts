@@ -1,10 +1,9 @@
 import type { Client } from '@opensearch-project/opensearch';
-import type { PrismaClient } from '@prisma/client/extension';
 import type { AccessTransformer, EntityTransformer, FileHandler, FileMetadata } from 'arocapi';
 import type { FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
-import type { File } from './generated/prisma/client.ts';
+import type { File, PrismaClient } from './generated/prisma/client.ts';
 import { initRepository, type Repository } from './repository.ts';
 import { admin as adminRoute } from './routes/admin.ts';
 import { fileRoute } from './routes/file.ts';
