@@ -28,8 +28,8 @@ You need Node.js 24 (24.18 or later), [pnpm](https://pnpm.io/) and Docker.
 
 ```sh
 pnpm install
-docker compose up -d   # Postgres, OpenSearch and Oni
-pnpm bootstrap         # migrate the database, seed OCFL from test-data, index
+docker compose up -d --wait   # Postgres, OpenSearch and Oni
+pnpm bootstrap                # migrate the database, seed OCFL from test-data, index
 pnpm dev
 ```
 

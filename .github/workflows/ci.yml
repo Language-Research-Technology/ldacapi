@@ -49,7 +49,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       opensearch:
-        image: opensearchproject/opensearch:3.5.0
+        image: opensearchproject/opensearch:3.9.0
         env:
           discovery.type: single-node
           plugins.security.disabled: "true"
