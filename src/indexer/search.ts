@@ -1,4 +1,4 @@
-import { Client } from '@opensearch-project/opensearch';
+import { Client, errors } from '@opensearch-project/opensearch';
 import type { Bulk_RequestBody, Indices_Create_RequestBody, Search_Request, Search_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
@@ -25,8 +25,6 @@ type SearchOptions = BaseOptions & {
   searchSettings: typeof config.search & { log?: string };
   client?: Client | undefined;
 };
-
-const statusCode = (error: unknown) => (error as { meta?: { statusCode?: number } }).meta?.statusCode;
 
 function isText(entity: Entity) {
   return entity.encodingFormat?.some((ef: unknown) => typeof ef === 'string' && ef.startsWith('text/'));
@@ -102,6 +100,21 @@ export class SearchIndexer extends Indexer {
       log.error('configureCluster');
       log.error(e);
     }
+    await this.ensureIndex();
+  }
+
+  /** Writing to a missing index auto-creates it without our mappings, so create it first and fail if we can't */
+  async ensureIndex() {
+    try {
+      await this.client.indices.create({
+        index: this.conf.entityIndex,
+        body: this.conf.create as Indices_Create_RequestBody,
+      });
+    } catch (error) {
+      if (!(error instanceof errors.ResponseError && error.body.error?.type === 'resource_already_exists_exception')) {
+        throw error;
+      }
+    }
   }
 
   async delete(crateId?: string) {
@@ -116,7 +129,7 @@ export class SearchIndexer extends Indexer {
       }
       log.debug(`Index ${crateId || '<all>'} deleted`);
     } catch (error) {
-      if (statusCode(error) !== 404) {
+      if (!(error instanceof errors.ResponseError && error.statusCode === 404)) {
         log.error(error);
       }
     }
@@ -136,23 +149,8 @@ export class SearchIndexer extends Indexer {
   }
 
   async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
-    // create indices if not exists
+    await this.ensureIndex();
     const elastic = this.conf;
-    try {
-      await this.client.indices.create({
-        index: elastic.entityIndex,
-        body: elastic.create as Indices_Create_RequestBody,
-      });
-      // await this.client.indices.putSettings({
-      //   index: elastic.entityIndex,
-      //   body: elastic.index
-      // });
-    } catch (error) {
-      //logger.debug('search index already exists, ignore');
-      if (statusCode(error) !== 400) {
-        log.debug(error);
-      }
-    }
     const { properties } = elastic.create.mappings;
     const operations: Bulk_RequestBody = [];
     const deferredEntities: Entity[] = []; // for individual updates
