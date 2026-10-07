@@ -31,6 +31,7 @@ const searchSettings = {
   create: {
     settings: {
       index: {
+        auto_expand_replicas: '0-1',
         max_result_window: 100000,
         highlight: {
           max_analyzed_offset: 1000000,
