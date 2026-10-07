@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
   // src/ocfl.ts is loaded dynamically by initRepository()
-  "entry": ["make-ocfl.ts", "src/ocfl.ts"],
+  "entry": ["src/ocfl.ts"],
   "tags": ["-lintignore"]
 }

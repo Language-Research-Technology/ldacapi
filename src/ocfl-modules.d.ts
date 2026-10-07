@@ -20,6 +20,7 @@ declare module '@ocfl/ocfl' {
   export interface OcflStorage extends AsyncIterable<OcflObject> {
     load(): Promise<void>;
     create(): Promise<void>;
+    exists(): Promise<boolean>;
     object(id: string): OcflObject;
     objectRoot(id: string): string;
   }

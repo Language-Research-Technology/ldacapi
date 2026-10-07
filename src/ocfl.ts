@@ -32,7 +32,16 @@ export async function init(opts: { opensearchClient?: Client }) {
       client: opts.opensearchClient,
     }),
   };
-  repository = ocfl.storage({
+  repository = createStorage();
+  try {
+    await repository.load();
+  } catch (e) {
+    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. In development, run \`pnpm seed\` to create it.`, { cause: e });
+  }
+}
+
+export function createStorage() {
+  return ocfl.storage({
     root: config.ocfl.root,
     workspace: config.ocfl.scratch,
     ocflVersion: '1.1',
@@ -41,11 +50,6 @@ export async function init(opts: { opensearchClient?: Client }) {
       extensionName: '000N-path-direct-storage-layout',
     },
   });
-  try {
-    await repository.load();
-  } catch (e) {
-    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. In development, run \`pnpm seed\` to create it.`, { cause: e });
-  }
 }
 
 async function calculateCrc32(file: OcflObjectFile) {
