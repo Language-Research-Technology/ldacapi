@@ -1,30 +1,22 @@
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { env, loadEnvFile } from 'node:process';
+import { loadEnvFile } from 'node:process';
 import { defineConfig } from 'prisma/config';
-import { DEFAULT_DATABASE_URL } from './src/default.config.ts';
 
-let paths = [join(homedir(), '.env'), './.env'];
-
-if (env.NODE_ENV) {
-  paths = [join(homedir(), `.env.${env.NODE_ENV}`), join(homedir(), '.env'), `./.env.${env.NODE_ENV}`, './.env'];
-}
-for (const path of paths) {
-  try {
-    loadEnvFile(path);
-    break;
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
-      throw error;
-    }
+try {
+  loadEnvFile('.env');
+} catch (error) {
+  if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) {
+    throw error;
   }
 }
+
+const { config } = await import('./src/configuration.ts');
+
 export default defineConfig({
   schema: 'prisma',
   migrations: {
     path: 'prisma/migrations',
   },
   datasource: {
-    url: env.DATABASE_URL || DEFAULT_DATABASE_URL,
+    url: config.databaseUrl,
   },
 });
