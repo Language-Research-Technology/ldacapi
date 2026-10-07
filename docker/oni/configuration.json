@@ -1,0 +1,394 @@
+{
+  "ui": {
+    "title": "Oni Discovery Portal",
+    "shortTitle": "Oni",
+    "splash": {
+      "text": "Oni acknowledges all Aboriginal and Torres Strait Islander Traditional Custodians of Country and recognises their continuing connection to land, sea, culture and community. We pay our respects to Elders past and present.",
+      "textClass": "text-5xl text-[#F4EDE4] pb-10",
+      "image": "splash-background-1.png",
+      "enabled": true,
+      "launcher": "Acknowledgement of Country"
+    },
+    "home": {
+      "enabled": true,
+      "hero": {
+        "title": "Welcome to the Discovery Portal",
+        "subtitle": "Explore language data collections from across the Pacific and Australia",
+        "backgroundClass": "bg-gray-100"
+      },
+      "content": "<p class='text-gray-600'>Discover and explore our extensive collection of language resources.</p>"
+    },
+    "navHeight": "80px",
+    "showEllipsis": true,
+    "help": {
+      "aboutText": "This is an Oni Data Portal publication. This portal provides access to a repository of language data, it is provided by the Language Data Commons of Australia [LDaCA](<a href='https://ldaca.edu.au'>https://ldaca.edu.au</a>).",
+      "citationText": "CITE AS: Oni Platform. A project with co-investment from Australian Research Data Commons, The University of Queensland, The University of Melbourne, The University of Sydney, Monash University, First Languages Australia and AARNet."
+    },
+    "subHelpLinks": [
+      {
+        "name": "Example Link",
+        "href": "https://www.example.com",
+        "target": "_blank"
+      }
+    ],
+    "terms": {
+      "text": "Example terms of service",
+      "href": "/terms",
+      "title": "Terms of Service"
+    },
+    "privacy": {
+      "text": "Example privacy notice",
+      "href": "/privacy",
+      "title": "Privacy Notice"
+    },
+    "footer": {
+      "copyright": "Example Group",
+      "link": {
+        "href": "https://example.com",
+        "text": "Oni"
+      }
+    },
+    "login": {
+      "enabled": true,
+      "manageTermsAndConditions": false
+    },
+    "topNavItems": [
+      {
+        "route": "search",
+        "display": "Search"
+      },
+      {
+        "route": "list?entityType=http%3A%2F%2Fpcdm.org%2Fmodels%23Collection",
+        "display": "Collections"
+      },
+      {
+        "route": "list?entityType=http%3A%2F%2Fpcdm.org%2Fmodels%23Object",
+        "display": "Items"
+      },
+      {
+        "route": "list?entityType=http%3A%2F%2Fpcdm.org%2Fmodels%23Object,http%3A%2F%2Fpcdm.org%2Fmodels%23Collection",
+        "display": "Both"
+      }
+    ],
+    "search": {
+      "sorting": [
+        {
+          "value": "relevance",
+          "label": "Relevance"
+        },
+        {
+          "value": "id",
+          "label": "Collections"
+        },
+        {
+          "value": "name",
+          "label": "Title"
+        },
+        {
+          "value": "created_at",
+          "label": "Created"
+        }
+      ],
+      "default": {
+        "sorting": "relevance",
+        "ordering": "desc"
+      },
+      "searchDetails": [
+        {
+          "field": "Language",
+          "label": "Language"
+        }
+      ]
+    },
+    "main": {
+      "byteFields": ["size", "contentSize"],
+      "durationFields": ["duration"],
+      "expand": ["speaker", "author", "citation"],
+      "paginatedMeta": ["inLanguage", "ldac:subjectLanguage"]
+    },
+    "collection": {
+      "meta": {
+        "mode": "filter",
+        "top": [
+          {
+            "display": "Name",
+            "name": "name"
+          },
+          {
+            "display": "Description",
+            "name": "description"
+          },
+          {
+            "display": "Date Published",
+            "name": "datePublished"
+          }
+        ],
+        "hide": [
+          "name",
+          "description",
+          "datePublished",
+          "license",
+          "@type",
+          "_containsTypes",
+          "id",
+          "_isRoot",
+          "_isTopLevel",
+          "_root",
+          "hasPart",
+          "hasMember",
+          "_memberOf",
+          "_isSubLevel",
+          "memberOf",
+          "_access",
+          "_collectionStack",
+          "_metadataIsPublic",
+          "_metadataLicense",
+          "identifier",
+          "_mainCollection",
+          "_subCollection",
+          "_isOCFL"
+        ]
+      }
+    },
+    "object": {
+      "meta": {
+        "mode": "filter",
+        "top": [
+          {
+            "display": "Name",
+            "name": "name"
+          },
+          {
+            "display": "Description",
+            "name": "description"
+          },
+          {
+            "display": "Date Published",
+            "name": "datePublished"
+          }
+        ],
+        "hide": [
+          "_memberOf",
+          "name",
+          "description",
+          "datePublished",
+          "identifier",
+          "license",
+          "@type",
+          "_containsTypes",
+          "id",
+          "_isRoot",
+          "_isTopLevel",
+          "_root",
+          "hasPart",
+          "hasMember",
+          "error",
+          "_parent",
+          "_access",
+          "indexableText",
+          "_access",
+          "_collectionStack",
+          "_metadataIsPublic",
+          "_metadataLicense",
+          "_mainCollection",
+          "_subCollection",
+          "_isOCFL"
+        ]
+      }
+    },
+    "file": {
+      "meta": {
+        "mode": "filter",
+        "top": [
+          {
+            "display": "Name",
+            "name": "name"
+          },
+          {
+            "display": "Description",
+            "name": "description"
+          },
+          {
+            "display": "Date Published",
+            "name": "datePublished"
+          }
+        ],
+        "hide": [
+          "name",
+          "@type",
+          "_access",
+          "id",
+          "_parent",
+          "_memberOf",
+          "_root",
+          "_text",
+          "_collectionStack",
+          "_metadataIsPublic",
+          "_metadataLicense",
+          "_mainCollection",
+          "_subCollection",
+          "_isOCFL"
+        ]
+      }
+    },
+    "takedown": "https://docs.google.com/forms/d/e/1FAIpQLSc3wWGYLgkEtba65mL46BUhMAPWiHt5EHrQ2rWiI4nJqPjpDg/viewform?usp=pp_url&entry.812577446={url}",
+    "citeData": {
+      "help": {
+        "text": "See this <span style=\"display: inline-flex; align-items: center;\"><a class=\"el-link el-link--primary\" target=\"_blank\" href=\"https://www.ldaca.edu.au/resources/user-guides/portal/cite-data/\">help</a></span> page for more detail."
+      }
+    },
+    "metadataMapping": {
+      "mappingFile": "ro-crate-metadata.json",
+      "textReplacements": {
+        "^_": "",
+        "^ldac:doi$": "DOI",
+        "^ldac:isDeIdentified$": "Is De-Identified",
+        "^citation$": "Related Works",
+        "^ldac:": "",
+        "^dct:": "",
+        "^local:": "",
+        "^prov:": "",
+        "^pcdm:": "",
+        "^isbn$": "ISBN",
+        "^issn$": "ISSN",
+        "^url$": "URL",
+        "^@id$": "ID",
+        "^@type$": "Type",
+        "^arcp://name,custom/terms#": ""
+      }
+    },
+    "head": {
+      "title": "DC.publisher",
+      "meta": [
+        {
+          "name": "DC.title",
+          "content": "name"
+        },
+        {
+          "name": "DC.description",
+          "content": "description"
+        },
+        {
+          "name": "DC.creator",
+          "content": "creator"
+        },
+        {
+          "name": "DC.contributor",
+          "content": "contributor"
+        },
+        {
+          "name": "DC.date",
+          "content": "datePublished"
+        },
+        {
+          "name": "DC.coverage",
+          "content": "temporalCoverage"
+        },
+        {
+          "name": "DC.language",
+          "content": "language"
+        },
+        {
+          "name": "DC.identifier",
+          "content": "@id"
+        },
+        {
+          "name": "DC.publisher",
+          "content": "publisher"
+        },
+        {
+          "name": "DC.type",
+          "content": "@type"
+        },
+        {
+          "name": "DC.type",
+          "content": "materialType"
+        },
+        {
+          "name": "DC.license",
+          "content": "license"
+        },
+        {
+          "name": "DC.date",
+          "content": "dateCreated"
+        }
+      ]
+    },
+    "aggregations": [
+      {
+        "display": "Collection",
+        "name": "root"
+      },
+      {
+        "display": "Member Of",
+        "name": "memberOf"
+      },
+      {
+        "display": "License",
+        "name": "license"
+      },
+      {
+        "display": "Record Type",
+        "name": "@type"
+      },
+      {
+        "display": "Language",
+        "name": "inLanguage"
+      },
+      {
+        "display": "Communication Mode",
+        "name": "communicationMode"
+      },
+      {
+        "display": "Linguistic Genre",
+        "name": "linguisticGenre"
+      },
+      {
+        "display": "File Format",
+        "name": "encodingFormat"
+      },
+      {
+        "display": "Annotation Type",
+        "name": "annotationType"
+      }
+    ],
+    "searchFields": {
+      "name": "Name",
+      "description": "Description",
+      "inLanguage": "Language",
+      "text": "Text"
+    },
+    "mapConfig": {
+      "boundingBox": {
+        "topRight": {
+          "lat": -11.523088,
+          "lng": 162.649886
+        },
+        "bottomLeft": {
+          "lat": -42.811522,
+          "lng": 108.64901
+        }
+      },
+      "zoom": 8
+    },
+    "features": {
+      "hasZipDownload": true,
+      "hasAnnouncements": false
+    },
+    "presentation": {
+      "errorPageImage": true,
+      "fileVisibilityField": ["display", "photo"],
+      "preferredPhotoField": "image"
+    }
+  },
+  "api": {
+    "rocrate": {
+      "endpoint": "http://localhost:8080/api"
+    },
+    "oidc": {
+      "endpoint": "http://localhost:8080",
+      "clientId": "REPLACE_ME",
+      "scope": "openid profile email"
+    }
+  }
+}

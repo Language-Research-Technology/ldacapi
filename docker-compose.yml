@@ -49,3 +49,16 @@ services:
       - "9300:9300"
     networks:
       - ldacapi
+
+  oni:
+    restart: always
+    image: ghcr.io/crate-works/oni:2
+    container_name: ldacapi_oni
+    environment:
+      - ONI_API_ENDPOINT=http://localhost:8080/api
+    volumes:
+      - ./docker/oni/configuration.json:/configuration.json:ro
+    ports:
+      - "3000:80"
+    networks:
+      - ldacapi
