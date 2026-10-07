@@ -181,9 +181,6 @@ importers:
       '@fastify/sensible':
         specifier: ^6.0.6
         version: 6.0.6
-      '@ocfl/ocfl':
-        specifier: ^0.4.0
-        version: 0.4.0
       '@ocfl/ocfl-fs':
         specifier: ^0.4.0
         version: 0.4.0
@@ -208,6 +205,9 @@ importers:
       hash-wasm:
         specifier: ^4.12.0
         version: 4.12.0
+      prisma:
+        specifier: ^7.10.0
+        version: 7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
       ro-crate:
         specifier: ^3.7.2
         version: 3.7.2
@@ -224,6 +224,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^21.2.3
         version: 21.2.3
+      '@ocfl/ocfl':
+        specifier: ^0.4.0
+        version: 0.4.0
       '@types/node':
         specifier: ^24.19.1
         version: 24.19.1
@@ -236,9 +239,6 @@ importers:
       pino-pretty:
         specifier: ^13.2.0
         version: 13.2.0
-      prisma:
-        specifier: ^7.10.0
-        version: 7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
