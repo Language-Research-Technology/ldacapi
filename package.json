@@ -9,7 +9,7 @@
   },
   "scripts": {
     "postinstall": "prisma generate",
-    "test": "NODE_ENV=test prisma migrate reset -f && vitest run",
+    "test": "vitest run",
     "dev": "node --env-file-if-exists=.env --watch src/index.ts",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
