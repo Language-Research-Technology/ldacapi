@@ -1,7 +1,0 @@
-/// API access token for users
-model Test {
-  userId               String     @db.VarChar(255)
-  token                String     @db.VarChar(1024)
-  expireAt             DateTime
-  @@id([userId, token])
-}

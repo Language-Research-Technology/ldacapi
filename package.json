@@ -8,11 +8,12 @@
     "node": ">=24.0.0"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "test": "NODE_ENV=test prisma migrate reset -f && vitest run",
     "dev": "node --env-file-if-exists=.env --watch src/index.ts",
-    "db:reset": "prisma migrate reset -f && prisma generate && prisma db push",
-    "migrate": "prisma migrate dev",
-    "db:sync": "prisma generate && prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset",
     "db:console:bash": "docker compose exec db bash",
     "db:console": "docker compose exec db psql -U ldacapi -d ldacapi",
     "lint:biome": "biome check",
@@ -50,7 +51,6 @@
     "lefthook": "^2.1.16",
     "pino-pretty": "^13.2.0",
     "prisma": "^7.10.0",
-    "prisma-json-types-generator": "^5.1.1",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   }
