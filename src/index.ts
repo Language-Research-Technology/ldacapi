@@ -24,8 +24,6 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
   queryBuilderOptions: { aggregations: config.search.aggregations as unknown as Record<string, AggregationContainer> },
   accessTransformer: accessTransformer,
   fileAccessTransformer,
-  // arocapi doesn't support this option yet
-  // resolveValidLicenses,
   entityTransformers: [
     (entity) => ({
       ...entity,
