@@ -12,7 +12,6 @@ import { log } from './utils.ts';
 export type LdacapiOptions = {
   prisma: PrismaClient;
   opensearch: Client;
-  disableCors?: boolean;
   accessTransformer: AccessTransformer;
   entityTransformers?: EntityTransformer[];
   aggregations?: Record<string, unknown>;

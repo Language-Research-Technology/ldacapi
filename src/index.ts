@@ -20,7 +20,6 @@ const prefix = config.prefix || '';
 const appOpt: Options & LdacapiOptions & RegisterOptions = {
   prisma,
   opensearch,
-  disableCors: true,
   // OpenSearch's TermsAggregationFields type omits `field`
   queryBuilderOptions: { aggregations: config.search.aggregations as unknown as Record<string, AggregationContainer> },
   accessTransformer: accessTransformer,
