@@ -28,14 +28,6 @@ const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: Lda
   repository = await initRepository('ocfl', { opensearchClient: options.opensearch });
   fastify.decorate('repository', repository);
 
-  fastify.get('/', async function handler(_request, _replyy) {
-    const routes = fastify.routes.keys().toArray();
-    return {
-      about: 'Example implementation of mounting an ROCrate API in a fastify app',
-      routes,
-    };
-  });
-
   const { version } = pkg;
   fastify.register(adminRoute, { prefix: '/admin', repository });
   fastify.register(fileRoute, { prefix: '/dav', repository, prisma: options.prisma, signatures });

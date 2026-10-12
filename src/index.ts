@@ -1,7 +1,6 @@
 //import config from '../prisma.config.ts';
 import { Readable } from 'node:stream';
 import cors from '@fastify/cors';
-import fastifyRoutes from '@fastify/routes';
 import fastifySensible from '@fastify/sensible';
 import { Client } from '@opensearch-project/opensearch';
 import type { AggregationContainer } from '@opensearch-project/opensearch/api/_types/_common.aggregations.js';
@@ -67,7 +66,6 @@ fastify.register(fastifySensible);
 fastify.register(cors, {
   methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 });
-fastify.register(fastifyRoutes, { prefix });
 fastify.register(arocapi, appOpt);
 fastify.register(ldacapi, appOpt);
 fastify.register(auth, { prefix: config.prefixAuth || prefix });
