@@ -3,6 +3,7 @@ import type { AccessTransformer, EntityTransformer, FileHandler, FileMetadata } 
 import type { FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
+import { config } from './configuration.ts';
 import type { File, PrismaClient } from './generated/prisma/client.ts';
 import { initRepository, type Repository } from './repository.ts';
 import { admin as adminRoute } from './routes/admin.ts';
@@ -57,7 +58,7 @@ export const fileHandler: FileHandler = {
     }
     return {
       type: 'redirect',
-      url: `/api/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?${params}`,
+      url: `${config.prefix || ''}/dav/${encodeURIComponent(crateId)}/${encodeURI(storagePath)}?${params}`,
     };
   },
   head: async (file) => fileMetadata(file),
