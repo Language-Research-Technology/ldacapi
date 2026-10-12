@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import * as z from 'zod';
 import type { PrismaClient } from '../generated/prisma/client.ts';
+import { parseRange } from '../range.ts';
 import type { Repository } from '../repository.ts';
 
 type FileRouteOptions = {
@@ -76,7 +77,19 @@ export const fileRoute: FastifyPluginAsync<FileRouteOptions> = async (fastify, o
             reply.header('X-Accel-Redirect', path);
             return reply.code(200).send();
           } else {
-            reply.header('Content-Length', file.size.toString());
+            const size = Number(file.size);
+            reply.header('Accept-Ranges', 'bytes');
+            const range = parseRange(request.headers.range, size);
+            if (range === 'unsatisfiable') {
+              reply.header('Content-Range', `bytes */${size}`);
+              return reply.rangeNotSatisfiable();
+            }
+            if (range) {
+              reply.header('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+              reply.header('Content-Length', (range.end - range.start + 1).toString());
+              return reply.code(206).send(await rf.stream(range));
+            }
+            reply.header('Content-Length', size.toString());
 
             // if (metadata.etag) {
             //   reply.header('ETag', metadata.etag);

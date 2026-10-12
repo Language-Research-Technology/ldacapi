@@ -1,7 +1,9 @@
+import type { ByteRange } from './range.ts';
+
 interface RepositoryFile {
   /** The file path relative to the repository root */
   path: string;
-  stream: () => Promise<ReadableStream>;
+  stream: (range?: ByteRange) => Promise<ReadableStream>;
 }
 
 export const State = {

@@ -7,6 +7,7 @@ import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
+import type { ByteRange } from './range.ts';
 import { State } from './repository.ts';
 import { log } from './utils.ts';
 
@@ -199,7 +200,7 @@ export async function getFile(entityId: string, storagePath: string) {
     //console.log(file);
     return {
       path: `${repository.objectRoot(crateId)}/${file.contentPath}`,
-      stream: async () => file.stream(),
+      stream: async (range?: ByteRange) => file.stream(range),
     };
   } catch (error) {
     log.error(error);
