@@ -1,7 +1,7 @@
+import { crc32 } from 'node:zlib';
 import type { OcflObject, OcflObjectFile } from '@ocfl/ocfl';
 import ocfl from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
-import { createCRC32 } from 'hash-wasm';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
@@ -9,8 +9,6 @@ import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
 import { State } from './repository.ts';
 import { log, PromiseQueue } from './utils.ts';
-
-const crc32 = await createCRC32();
 
 const { defaultLicense, defaultMetadataLicense } = config;
 
@@ -53,11 +51,11 @@ export function createStorage() {
 }
 
 async function calculateCrc32(file: OcflObjectFile) {
-  crc32.init();
+  let crc = 0;
   for await (const chunk of await file.stream()) {
-    crc32.update(chunk);
+    crc = crc32(chunk, crc);
   }
-  return crc32.digest('hex');
+  return crc.toString(16).padStart(8, '0');
 }
 
 function wrap(ocflObject: OcflObject): CrateObject {
