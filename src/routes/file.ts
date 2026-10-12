@@ -27,7 +27,7 @@ export const fileRoute: FastifyPluginAsync<FileRouteOptions> = async (fastify, o
         }),
         querystring: z.object({
           signature: z.string().optional(),
-          disposition: z.string().optional(),
+          disposition: z.enum(['inline', 'attachment']).default('inline'),
           filename: z.string().optional(),
         }),
       },
@@ -65,10 +65,9 @@ export const fileRoute: FastifyPluginAsync<FileRouteOptions> = async (fastify, o
             return reply.notFound(`File not found: ${crateId}/${filePath}`);
           }
 
-          const disposition = request.query.disposition || 'attachment';
           const filename = request.query.filename || file.filename || filePath.split('/').pop() || 'file';
           // filename can contain unicode chars which aren't valid raw header bytes; use RFC 5987 encoding
-          reply.header('Content-Disposition', `${disposition}; filename*=UTF-8''${encodeURIComponent(filename)}`);
+          reply.header('Content-Disposition', `${request.query.disposition}; filename*=UTF-8''${encodeURIComponent(filename)}`);
           reply.header('Content-Type', file.mediaType);
           if (request.headers.via?.includes('nginx')) {
             // try to auto-detect nginx proxy using `via` header
