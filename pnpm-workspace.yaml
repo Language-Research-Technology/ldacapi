@@ -9,4 +9,4 @@ allowBuilds:
   prisma: true
   lefthook: true
 minimumReleaseAgeExclude:
-  - arocapi@5.0.0-beta.1
+  - arocapi@5.0.0-beta.2

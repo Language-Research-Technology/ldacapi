@@ -14,14 +14,12 @@ export type LdacapiOptions = {
   opensearch: Client;
   accessTransformer: AccessTransformer;
   entityTransformers?: EntityTransformer[];
-  aggregations?: Record<string, unknown>;
 };
 
 let repository: Repository;
 const signatures = new Map<string, string>();
 
 const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: LdacapiOptions) => {
-  const aggregations = Object.keys(options.aggregations || {});
   fastify.setValidatorCompiler(validatorCompiler);
   fastify.setSerializerCompiler(serializerCompiler);
   repository = await initRepository('ocfl', { opensearchClient: options.opensearch });
@@ -32,18 +30,6 @@ const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: Lda
   fastify.register(fileRoute, { prefix: '/dav', repository, prisma: options.prisma, signatures });
 
   fastify.get('/version', async () => ({ version }));
-  fastify.get('/capabilities', async () => ({
-    apiVersion: '0.0.0',
-    deposit: {
-      supported: false,
-    },
-    tombstonePolicy: '404',
-    extensions: {},
-    search: {
-      filters: Object.fromEntries(aggregations.map((name) => [name, { type: 'string' }])),
-      facets: Object.fromEntries(aggregations.map((name) => [name, {}])),
-    },
-  }));
 };
 
 export default ldacapi;

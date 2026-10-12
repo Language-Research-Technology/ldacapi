@@ -57,7 +57,6 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
     }),
   },
   prefix,
-  aggregations: config.search.aggregations,
 };
 fastify.decorateRequest('userLicenses', null);
 fastify.decorateRequest('userId', null);
