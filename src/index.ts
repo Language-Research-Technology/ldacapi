@@ -14,6 +14,8 @@ import { prisma } from './prisma.ts';
 import { auth } from './routes/auth.ts';
 import { fastify } from './utils.ts';
 
+const serialiseRoCrate = (entity: { meta: { rocrate: unknown } }) => JSON.stringify(entity.meta.rocrate, null, 2);
+
 const opensearch = new Client({ node: config.opensearchUrl });
 const prefix = config.prefix || '';
 
@@ -39,7 +41,7 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
   // Required: RO-Crate handler for serving RO-Crate metadata
   roCrateHandler: {
     get: async (entity) => {
-      const jsonString = JSON.stringify(entity.meta.rocrate, null, 2);
+      const jsonString = serialiseRoCrate(entity);
       return {
         type: 'stream' as 'stream',
         stream: Readable.from([jsonString]),
@@ -51,7 +53,7 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
     },
     head: async (entity) => ({
       contentType: 'application/ld+json',
-      contentLength: Buffer.byteLength(JSON.stringify(entity.meta.rocrate)),
+      contentLength: Buffer.byteLength(serialiseRoCrate(entity)),
     }),
   },
   prefix,
