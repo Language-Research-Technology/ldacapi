@@ -1,7 +1,7 @@
 import bearerAuthPlugin from '@fastify/bearer-auth';
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { z } from 'zod/v4';
+import * as z from 'zod';
 //import { getIndexerState, createIndex, deleteIndex } from '../ocfl.ts';
 import { config } from '../configuration.ts';
 import { type Repository, State } from '../repository.ts';

@@ -1,5 +1,5 @@
 import { dirname, join, resolve } from 'node:path';
-import { z } from 'zod';
+import * as z from 'zod';
 
 type Env = Record<string, string | undefined>;
 
