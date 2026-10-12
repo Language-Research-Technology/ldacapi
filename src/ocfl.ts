@@ -8,7 +8,7 @@ import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
 import { State } from './repository.ts';
-import { log, PromiseQueue } from './utils.ts';
+import { log } from './utils.ts';
 
 const { defaultLicense, defaultMetadataLicense } = config;
 
@@ -150,27 +150,14 @@ export async function createIndex(crateId?: string | RegExp, type?: string | str
   if (typeof crateId === 'string') {
     await indexObject(repository.object(crateId), types, force);
   } else {
-    // process IO in parallel
-    const pq = new PromiseQueue(4, async (ocflObject: OcflObject) => indexObject(ocflObject, types, force));
-    if (crateId instanceof RegExp) {
-      // if crateId pattern is specified, index just the object and the subcollections and child objects
-      // by checking just the structure implied in the crate id
-      for await (const ocflObject of repository) {
-        await ocflObject.load();
-        if (ocflObject.id.match(crateId)) {
-          setState(ocflObject.id, types, State.QUEUED);
-          await pq.enqueue(ocflObject);
-        }
+    for await (const ocflObject of repository) {
+      await ocflObject.load();
+      if (crateId && !ocflObject.id.match(crateId)) {
+        continue;
       }
-    } else {
-      // otherwise, index everything
-      for await (const ocflObject of repository) {
-        await ocflObject.load();
-        setState(ocflObject.id, types, State.QUEUED);
-        await pq.enqueue(ocflObject);
-      }
+      setState(ocflObject.id, types, State.QUEUED);
+      await indexObject(ocflObject, types, force);
     }
-    await pq.done();
   }
   log.debug('Indexing finished');
 }

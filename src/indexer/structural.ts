@@ -1,7 +1,7 @@
 import { type Entity, ROCrate } from 'ro-crate';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
-import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
+import { firstStringOrId, log as plog } from '../utils.ts';
 import { type BaseOptions, type CrateFile, Indexer, RecordType } from './indexer.ts';
 
 const log = plog.child({ module: 'indexer/structural' });
@@ -27,17 +27,6 @@ export class StructuralIndexer extends Indexer {
     //const objectRoot = ocflObject.root;
     //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
-    const pq = new PromiseQueue(4, async ({ entity, file }: IndexRecord) => {
-      try {
-        await prisma.entity.create({ data: entity });
-        if (file) {
-          await prisma.file.create({ data: file });
-        }
-      } catch (error) {
-        log.error(`Error indexing ${crateId} ${entity.id}: ${(error as Error).message}`);
-      }
-    });
-
     // rename all @id first
     const descriptorId = crate.descriptor['@id'];
     for (const entity of crate.entities()) {
@@ -97,9 +86,15 @@ export class StructuralIndexer extends Indexer {
           },
         };
       }
-      await pq.enqueue(param);
+      try {
+        await prisma.entity.create({ data: param.entity });
+        if (param.file) {
+          await prisma.file.create({ data: param.file });
+        }
+      } catch (error) {
+        log.error(`Error indexing ${crateId} ${entityId}: ${(error as Error).message}`);
+      }
     }
-    await pq.done();
 
     log.info(`Indexed ${crateId}: entities=${count}`);
   }

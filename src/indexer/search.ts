@@ -2,7 +2,7 @@ import { Client, errors } from '@opensearch-project/opensearch';
 import type { Bulk_RequestBody, Indices_Create_RequestBody, Search_Request, Search_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
-import { firstStringOrId, PromiseQueue, log as plog } from '../utils.ts';
+import { firstStringOrId, log as plog } from '../utils.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
 import { Indexer, RecordType } from './indexer.ts';
 import { dataTypeMapper, mapDefaultProperties, propertyMapper } from './search_mapper.ts';
@@ -197,26 +197,26 @@ export class SearchIndexer extends Indexer {
         log.error(result.body);
       }
       // index bigger data such as file content in a separate step to manage payload size
-      const pq = new PromiseQueue(4, async (entity: Entity) => {
-        log.debug(`Processing deferred entity: ${entity['@id']}`);
-        const entityTypes: string[] = entity['@type'];
-        const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
-        let doc: Record<string, unknown> = {};
-        for (const mapper of matchedIndexers) {
-          doc = await mapper({ properties, entity, record: doc, crate, crateObject });
-        }
-        //console.log(doc);
-        const result = await this.client.update({
-          index: elastic.entityIndex,
-          id: deriveId(entity['@id']),
-          body: { doc, doc_as_upsert: true },
-        });
-        log.debug(`Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
-      });
       for (const entity of deferredEntities) {
-        await pq.enqueue(entity);
+        log.debug(`Processing deferred entity: ${entity['@id']}`);
+        try {
+          const entityTypes: string[] = entity['@type'];
+          const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
+          let doc: Record<string, unknown> = {};
+          for (const mapper of matchedIndexers) {
+            doc = await mapper({ properties, entity, record: doc, crate, crateObject });
+          }
+          const result = await this.client.update({
+            index: elastic.entityIndex,
+            id: deriveId(entity['@id']),
+            body: { doc, doc_as_upsert: true },
+          });
+          log.debug(`Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
+        } catch (error) {
+          log.error(`Error indexing deferred entity ${entity['@id']}`);
+          log.error(error);
+        }
       }
-      await pq.done();
       await this.client.indices.refresh({ index: elastic.entityIndex });
     } catch (error) {
       log.error(`Error indexing ${crate.rootId}`);
