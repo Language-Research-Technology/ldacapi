@@ -64,10 +64,6 @@
       {
         "route": "list?entityType=http%3A%2F%2Fpcdm.org%2Fmodels%23Object",
         "display": "Items"
-      },
-      {
-        "route": "list?entityType=http%3A%2F%2Fpcdm.org%2Fmodels%23Object,http%3A%2F%2Fpcdm.org%2Fmodels%23Collection",
-        "display": "Both"
       }
     ],
     "search": {
