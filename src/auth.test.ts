@@ -1,49 +1,39 @@
+import type { BaseEntity, RequestContext } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { fileAccessTransformer } from './auth.ts';
-import { prisma } from './prisma.ts';
+import { describe, expect, it } from 'vitest';
+import { access, isAuthenticated } from './auth.ts';
 
 const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
 const RESTRICTED = 'https://example.org/licenses/restricted';
-const OPEN_ID = 'http://test/auth/open.txt';
-const RESTRICTED_ID = 'http://test/auth/restricted.txt';
-const ids = [OPEN_ID, RESTRICTED_ID];
 
-const createFile = async (id: string, contentLicenseId: string) => {
-  await prisma.entity.create({
-    data: { id, name: id, description: '', entityType: 'http://schema.org/MediaObject', metadataLicenseId: OPEN, contentLicenseId },
-  });
-  const file = await prisma.file.create({ data: { id, filename: id.split('/').pop() ?? '', mediaType: 'text/plain', size: 1 } });
-  return { id: file.id, filename: file.filename, mediaType: file.mediaType, size: Number(file.size) };
-};
+const entity = (metadataLicenseId: string, contentLicenseId: string): BaseEntity => ({
+  id: 'http://test/auth/entity',
+  entityType: 'http://schema.org/MediaObject',
+  name: 'entity',
+  description: '',
+  memberOf: null,
+  rootCollection: null,
+  metadataLicenseId,
+  contentLicenseId,
+});
 
-const fakeRequest = () => {
-  const decorators = new Map<string, unknown>();
-  return {
-    headers: {},
-    getDecorator: (name: string) => decorators.get(name) ?? null,
-    setDecorator: (name: string, value: unknown) => decorators.set(name, value),
-  } as unknown as FastifyRequest;
-};
+const anonymous = () => ({ request: { headers: {} } as FastifyRequest }) as RequestContext;
 
-const cleanup = async () => {
-  await prisma.file.deleteMany({ where: { id: { in: ids } } });
-  await prisma.entity.deleteMany({ where: { id: { in: ids } } });
-};
-
-describe('fileAccessTransformer', () => {
-  beforeAll(cleanup);
-  afterAll(cleanup);
-
-  it('grants content access when the file entity has an open licence', async () => {
-    const file = await createFile(OPEN_ID, OPEN);
-    const result = await fileAccessTransformer(file, { request: fakeRequest() });
-    expect(result).toEqual({ ...file, access: { content: true } });
+describe('access', () => {
+  it('grants metadata and content under open licences', async () => {
+    expect(await access(entity(OPEN, OPEN), anonymous())).toEqual({ metadata: true, content: true });
   });
 
-  it('denies content access when the file entity has a restricted licence', async () => {
-    const file = await createFile(RESTRICTED_ID, RESTRICTED);
-    const result = await fileAccessTransformer(file, { request: fakeRequest() });
-    expect(result.access.content).toBe(false);
+  it('denies content under a restricted licence and offers an enrolment link', async () => {
+    const result = await access(entity(OPEN, RESTRICTED), anonymous());
+    expect(result).toMatchObject({ metadata: true, content: false });
+    expect(result).toHaveProperty('contentAuthorizationUrl');
+    expect(result).not.toHaveProperty('metadataAuthorizationUrl');
+  });
+});
+
+describe('isAuthenticated', () => {
+  it('treats a request without a bearer token as anonymous', async () => {
+    expect(await isAuthenticated(anonymous())).toBe(false);
   });
 });

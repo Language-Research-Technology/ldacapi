@@ -1,5 +1,5 @@
 import type { Client } from '@opensearch-project/opensearch';
-import type { AccessTransformer, EntityTransformer, FileHandler, FileMetadata } from 'arocapi';
+import type { FileHandler, FileMetadata } from 'arocapi';
 import type { FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
@@ -13,8 +13,6 @@ import { log } from './utils.ts';
 export type LdacapiOptions = {
   prisma: PrismaClient;
   opensearch: Client;
-  accessTransformer: AccessTransformer;
-  entityTransformers?: EntityTransformer[];
 };
 
 let repository: Repository;

@@ -1,7 +1,6 @@
-import type { AuthorisedEntity, AuthorisedFile, StandardEntity, StandardFile } from 'arocapi';
+import { type IsAuthenticated, LicenceAccess, type RequestContext } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
 import { config } from './configuration.ts';
-import { prisma } from './prisma.ts';
 
 const openLicenses = new Set(config.openLicenses);
 
@@ -23,47 +22,25 @@ function enrollmentUrl(licenseId: string): string {
   return renderTemplate(encodeURIComponent(licenseId));
 }
 
-export async function accessTransformer(entity: StandardEntity, { request }: { request: FastifyRequest }): Promise<AuthorisedEntity> {
-  const { metadataLicenseId, contentLicenseId } = entity;
-  const canAccessMetadata = await checkLicense(request, metadataLicenseId);
-  const canAccessContent = await checkLicense(request, contentLicenseId);
-  if (!canAccessMetadata) {
-    entity.description = '[Access is restricted]';
-  }
-  return {
-    ...entity,
-    access: {
-      metadata: canAccessMetadata,
-      content: canAccessContent,
-      ...(!canAccessMetadata && { metadataAuthorizationUrl: enrollmentUrl(metadataLicenseId) }),
-      ...(!canAccessContent && { contentAuthorizationUrl: enrollmentUrl(contentLicenseId) }),
-    },
-  };
-}
+export const access = LicenceAccess({ hasLicence, authorisationUrl: enrollmentUrl });
 
-export async function fileAccessTransformer(file: StandardFile, { request }: { request: FastifyRequest }): Promise<AuthorisedFile> {
-  const entity = await prisma.entity.findUnique({ where: { id: file.id }, select: { contentLicenseId: true } });
-  const contentLicenseId = entity?.contentLicenseId ?? '';
-  const canAccessContent = await checkLicense(request, contentLicenseId);
-  return {
-    ...file,
-    access: {
-      content: canAccessContent,
-      ...(!canAccessContent && { contentAuthorizationUrl: enrollmentUrl(contentLicenseId) }),
-    },
-  };
-}
+export const isAuthenticated: IsAuthenticated = async ({ request }) => Boolean(await authenticateUser(request));
 
-async function checkLicense(request: FastifyRequest, licenseId: string): Promise<boolean> {
+async function hasLicence(licenseId: string, { request }: RequestContext): Promise<boolean> {
   if (openLicenses.has(licenseId)) {
     return true;
   }
-  let userLicenses = request.getDecorator<Promise<string[] | undefined> | null>('userLicenses');
-  if (!userLicenses) {
-    userLicenses = fetchUserLicenses(request);
-    request.setDecorator('userLicenses', userLicenses);
+  return (await userLicenses(request))?.includes(licenseId) ?? false;
+}
+
+const userLicensesByRequest = new WeakMap<FastifyRequest, Promise<string[] | undefined>>();
+function userLicenses(request: FastifyRequest): Promise<string[] | undefined> {
+  let licenses = userLicensesByRequest.get(request);
+  if (!licenses) {
+    licenses = fetchUserLicenses(request);
+    userLicensesByRequest.set(request, licenses);
   }
-  return (await userLicenses)?.includes(licenseId) ?? false;
+  return licenses;
 }
 
 async function fetchUserLicenses(request: FastifyRequest): Promise<string[] | undefined> {
@@ -88,27 +65,29 @@ async function fetchUserLicenses(request: FastifyRequest): Promise<string[] | un
   return data.map((item: RemsUserEntitlement) => item.resource);
 }
 
-async function authenticateUser(request: FastifyRequest): Promise<string | undefined> {
-  let userId = request.getDecorator<string>('userId');
-  if (userId) {
-    return userId;
+const userIdsByRequest = new WeakMap<FastifyRequest, Promise<string | undefined>>();
+function authenticateUser(request: FastifyRequest): Promise<string | undefined> {
+  let userId = userIdsByRequest.get(request);
+  if (!userId) {
+    userId = fetchUserId(request);
+    userIdsByRequest.set(request, userId);
   }
-  if (config.oidc.userinfoEndpoint) {
-    const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      const token = authHeader.split(' ')[1];
-      const res = await fetch(config.oidc.userinfoEndpoint, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (res.ok) {
-        ({ sub: userId } = await res.json());
-        if (userId) {
-          request.setDecorator('userId', userId);
-          return userId;
-        }
-      }
-    }
+  return userId;
+}
+
+async function fetchUserId(request: FastifyRequest): Promise<string | undefined> {
+  const authHeader = request.headers.authorization;
+  if (!config.oidc.userinfoEndpoint || !authHeader?.startsWith('Bearer ')) {
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  const res = await fetch(config.oidc.userinfoEndpoint, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (res.ok) {
+    const { sub } = await res.json();
+    return sub || undefined;
   }
 }

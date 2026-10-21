@@ -5,10 +5,10 @@ import fastifySensible from '@fastify/sensible';
 import { Client } from '@opensearch-project/opensearch';
 import type { AggregationContainer } from '@opensearch-project/opensearch/api/_types/_common.aggregations.js';
 import type { Options } from 'arocapi';
-import arocapi from 'arocapi';
+import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
 import type { RegisterOptions } from 'fastify';
 import ldacapi, { fileHandler, type LdacapiOptions } from './app.ts';
-import { accessTransformer, fileAccessTransformer } from './auth.ts';
+import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { prisma } from './prisma.ts';
 import { auth } from './routes/auth.ts';
@@ -24,8 +24,10 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
   opensearch,
   // OpenSearch's TermsAggregationFields type omits `field`
   queryBuilderOptions: { aggregations: config.search.aggregations as unknown as Record<string, AggregationContainer> },
-  accessTransformer: accessTransformer,
-  fileAccessTransformer,
+  access,
+  isAuthenticated,
+  entityVisibilityFilter: AllVisibleEntityFilter,
+  searchVisibilityFilter: AllVisibleSearchFilter,
   entityTransformers: [
     (entity) => ({
       ...entity,
@@ -58,8 +60,8 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
   },
   prefix,
 };
-fastify.decorateRequest('userLicenses', null);
-fastify.decorateRequest('userId', null);
+fastify.setErrorHandler(errorHandler);
+fastify.setNotFoundHandler(notFoundHandler);
 fastify.register(fastifySensible);
 fastify.register(cors, {
   methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
