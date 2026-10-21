@@ -1,4 +1,4 @@
-import type { ROCrate } from 'ro-crate';
+import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { firstStringOrId, log as plog } from '../utils.ts';
 
@@ -53,6 +53,17 @@ export class Indexer {
     }
   }
 
+  /** Rename each entity's @id to its unique id; idempotent, as indexers share the crate */
+  deriveUniqueEntityIds(crate: ROCrate) {
+    const descriptorId = crate.descriptor['@id'];
+    for (const entity of crate.entities()) {
+      const id = this.deriveUniqueEntityId(crate.rootId, entity['@id']);
+      if (entity['@id'] !== descriptorId && id !== entity['@id']) {
+        entity['@id'] = id;
+      }
+    }
+  }
+
   async init() {}
 
   async count(_crateId?: string): Promise<number> {
@@ -86,6 +97,7 @@ export class Indexer {
       //logger.debug('index ' + ocflObject.root);
       //console.log(this.__state);
       log.info(`Indexing ${crateId}`);
+      this.deriveUniqueEntityIds(crate);
       try {
         await this._index({ crateObject, crate, license, metadataLicense });
       } catch (error) {
@@ -106,3 +118,13 @@ export class Indexer {
 }
 
 export const RecordType: Record<string, string> = config.indexType;
+
+/** The entity's first type that we index, if it conforms to that type's profile */
+export function recordType(entity: Entity): string | undefined {
+  const type = entity['@type'].find((t: string) => t in RecordType);
+  const profile = type && RecordType[type];
+  if (profile && !entity.conformsTo?.some((c: { '@id': string }) => c['@id'] === profile)) {
+    return;
+  }
+  return type;
+}

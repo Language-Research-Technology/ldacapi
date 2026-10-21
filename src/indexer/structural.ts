@@ -2,7 +2,7 @@ import { type Entity, ROCrate } from 'ro-crate';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId, log as plog } from '../utils.ts';
-import { type BaseOptions, type CrateFile, Indexer, RecordType } from './indexer.ts';
+import { type BaseOptions, type CrateFile, Indexer, RecordType, recordType } from './indexer.ts';
 
 const log = plog.child({ module: 'indexer/structural' });
 
@@ -27,28 +27,10 @@ export class StructuralIndexer extends Indexer {
     //const objectRoot = ocflObject.root;
     //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
-    // rename all @id first
-    const descriptorId = crate.descriptor['@id'];
     for (const entity of crate.entities()) {
-      if (entity['@id'] === descriptorId) {
-        continue;
-      }
-      const entityId = this.deriveUniqueEntityId(crateId, entity['@id']);
-      if (entityId !== entity['@id']) {
-        entity['@id'] = entityId;
-      }
-    }
-    for (const entity of crate.entities()) {
-      const entityType = entity['@type'].find((t: string) => t in RecordType); // only the first matching entity type is used
+      const entityType = recordType(entity);
       if (!entityType) {
         continue;
-      }
-      const mustHaveConformsTo = RecordType[entityType];
-      if (mustHaveConformsTo) {
-        const conformsTo = entity.conformsTo?.find((c: { '@id': string }) => c['@id'] === mustHaveConformsTo);
-        if (!conformsTo) {
-          continue;
-        }
       }
       log.debug(`Indexing ${crateId} ${entity['@id']}`);
       count++;
