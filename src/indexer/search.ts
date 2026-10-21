@@ -1,352 +1,219 @@
-import { Client, errors } from '@opensearch-project/opensearch';
-import type { Bulk_RequestBody, Indices_Create_RequestBody, Search_Request, Search_RequestBody } from '@opensearch-project/opensearch/api/index.d.ts';
+import type { Client } from '@opensearch-project/opensearch';
+import type { FieldDeclarations, GeoPoint, SearchDocument } from 'arocapi';
+import { OpenSearchBackend } from 'arocapi/opensearch';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { firstStringOrId, log as plog } from '../utils.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
-import { Indexer, RecordType } from './indexer.ts';
-import { dataTypeMapper, mapDefaultProperties, propertyMapper } from './search_mapper.ts';
+import { Indexer, recordType } from './indexer.ts';
+import { pickSingleMemberOf } from './structural.ts';
 
 const log = plog.child({ module: 'indexer/search' });
 
-/**
- * Notes:
- * Index properties:
- * - id must exists and be the same as the id used in postgres
- */
-type searchParams = {
-  index?: string;
-  searchBody: Search_RequestBody;
-  filterPath?: string | string[];
-  explain?: boolean;
-};
+const fields = {
+  name: { type: 'text', label: 'Name', weight: 3, advanced: true, sort: true },
+  description: { type: 'text', label: 'Description', advanced: true },
+  text: { type: 'text', label: 'Text', advanced: true },
+  type: { type: 'keyword', label: 'Record Type', facet: true },
+  inLanguage: { type: 'keyword', label: 'Language', advanced: true, facet: true },
+  communicationMode: { type: 'keyword', label: 'Communication Mode', facet: true },
+  linguisticGenre: { type: 'keyword', label: 'Linguistic Genre', facet: true },
+  annotationType: { type: 'keyword', label: 'Annotation Type', facet: true },
+  encodingFormat: { type: 'keyword', label: 'File Format', facet: true },
+  rootCollection: { type: 'keyword', label: 'Collection', facet: true },
+  memberOf: { type: 'keyword', label: 'Member Of', facet: true },
+  license: { type: 'keyword', label: 'License', facet: true },
+  datePublished: { type: 'date', label: 'Date Published', filter: true, sort: true },
+  dateCreated: { type: 'date', label: 'Date Created', filter: true },
+  temporalCoverage: { type: 'date', label: 'Temporal Coverage', filter: true },
+  location: { type: 'geo' },
+} as const satisfies FieldDeclarations;
+
+type Document = SearchDocument<typeof fields>;
+
+export const createSearchBackend = (client: Client) => OpenSearchBackend({ client, fields, indexName: config.search.entityIndex });
+
+type SearchBackend = ReturnType<typeof createSearchBackend>;
 
 type SearchOptions = BaseOptions & {
-  searchSettings: typeof config.search & { log?: string };
-  client?: Client | undefined;
+  client: Client;
+  search: SearchBackend;
 };
+
+const values = (entity: Entity, name: string): unknown[] => [...(entity[name] ?? []), ...(entity[`ldac:${name}`] ?? [])];
+
+/** Linked entities by name, falling back to their id; literals as they are */
+const labels = (entity: Entity, name: string) => {
+  const found = values(entity, name).map((value) => {
+    if (typeof value !== 'object' || value === null) {
+      return typeof value === 'string' ? value : undefined;
+    }
+    const { name, '@id': id, '@value': literal } = value as { name?: unknown[]; '@id'?: string; '@value'?: unknown };
+    return [name?.[0], literal, id].find((v): v is string => typeof v === 'string');
+  });
+  return [...new Set(found.filter((v): v is string => !!v))];
+};
+
+const DATE = /^\d{4}(-\d{2}(-\d{2}([Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})?)?)?)?$/;
+
+/** The start of each date or date range (`2001/2005`) */
+const dates = (entity: Entity, name: string) =>
+  labels(entity, name)
+    .map((value) => (value.split('/')[0] ?? '').trim())
+    .filter((value) => DATE.test(value));
+
+const WKT_POINT = /(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/;
+
+function pointOf(place: Record<string, unknown[] | undefined>): GeoPoint | undefined {
+  const lat = Number(place.latitude?.[0]);
+  const lng = Number(place.longitude?.[0]);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    return { lat, lng };
+  }
+  for (const geo of [...(place.geo ?? []), ...(place.asWKT ?? [])]) {
+    if (typeof geo === 'string') {
+      const match = WKT_POINT.exec(geo);
+      if (match) {
+        return { lat: Number(match[2]), lng: Number(match[1]) };
+      }
+    } else if (geo && typeof geo === 'object') {
+      const point = pointOf(geo as Record<string, unknown[] | undefined>);
+      if (point) {
+        return point;
+      }
+    }
+  }
+}
+
+/** The first point of the entity's first place: the search backend holds one per entity */
+function location(entity: Entity) {
+  for (const place of [...values(entity, 'contentLocation'), ...values(entity, 'spatialCoverage')]) {
+    const point = typeof place === 'object' && place !== null ? pointOf(place as Record<string, unknown[] | undefined>) : undefined;
+    if (point) {
+      return point;
+    }
+  }
+}
 
 function isText(entity: Entity) {
   return entity.encodingFormat?.some((ef: unknown) => typeof ef === 'string' && ef.startsWith('text/'));
 }
 
-type MapperParams = {
-  properties?: Record<string, unknown>;
-  entity: Entity;
-  record: Record<string, unknown>;
-  crate: ROCrate;
-  crateObject?: CrateObject;
-  /** An entity queue to be indexed one-by-one separately */
-  deferredEntities?: Entity[];
-};
-
-/** The function mapped here may return an array of entities to be processed in batch  */
-const typeMapper: Record<string, (params: MapperParams) => Record<string, unknown>> = Object.fromEntries(
-  Object.entries(RecordType).map(([k, _v]) => [k, ({ record }) => record]),
-);
-
-const batchedTypeIndexer: Record<string, (params: MapperParams) => Promise<Record<string, unknown>>> = {
-  File: async ({ entity, record, crate, crateObject }) => {
-    //todo: check licence if it allows indexing content
-    if (isText(entity)) {
-      const entityId = entity['@id'] as string;
-      const filepath = entityId.startsWith(crate.rootId) ? entityId.replace(`${crate.rootId}/`, '') : entityId;
-      try {
-        //log.debug(filepath);
-        record._text = (await crateObject?.text(filepath)) || '';
-        log.info(`Indexing File: ${filepath}`);
-      } catch (e) {
-        log.error(`Cannot read file: ${filepath}`);
-        log.error(e);
-        record._error = 'file_not_found';
-      }
+/** One entity's search document; File entities with text content include it */
+export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string): Promise<Document> {
+  const id: string = entity['@id'];
+  const [datePublished] = dates(entity, 'datePublished');
+  const memberOf = pickSingleMemberOf(entity);
+  const point = location(entity);
+  const doc: Document = {
+    id,
+    name: entity.name?.join('; ') || id,
+    description: labels(entity, 'description'),
+    type: entity['@type'],
+    inLanguage: labels(entity, 'inLanguage'),
+    communicationMode: labels(entity, 'communicationMode'),
+    linguisticGenre: labels(entity, 'linguisticGenre'),
+    annotationType: labels(entity, 'annotationType'),
+    encodingFormat: labels(entity, 'encodingFormat'),
+    rootCollection: crate.rootId,
+    ...(memberOf && { memberOf }),
+    license: firstStringOrId(entity.license) || license,
+    ...(datePublished && { datePublished }),
+    dateCreated: dates(entity, 'dateCreated'),
+    temporalCoverage: dates(entity, 'temporalCoverage'),
+    ...(point && { location: point }),
+  };
+  if (isText(entity)) {
+    const path = id.startsWith(crate.rootId) ? id.replace(`${crate.rootId}/`, '') : id;
+    try {
+      doc.text = await crateObject.text(path);
+      log.info(`Indexing File: ${path}`);
+    } catch (error) {
+      log.error(`Cannot read file ${path}: ${(error as Error).message}`);
     }
-    return record;
-  },
-};
+  }
+  return doc;
+}
 
 export class SearchIndexer extends Indexer {
-  conf: SearchOptions['searchSettings'];
   client: Client;
-  propertyMapper = { ...propertyMapper };
-  //  conformsTo;
+  search: SearchBackend;
+  indexName: string;
+
   constructor(opt: SearchOptions) {
     super(opt);
-    this.conf = opt.searchSettings;
-    this.client = opt.client || new Client({ node: config.opensearchUrl });
-    // this.conformsTo = {
-    //   [configuration.api.conformsTo.collection]: mapCollection,
-    //   [configuration.api.conformsTo.object]: mapObject
-    //};
-    const { properties } = this.conf.create.mappings;
-    for (const [name, mapping] of Object.entries(properties)) {
-      const mapper = 'type' in mapping ? dataTypeMapper[mapping.type] : undefined;
-      if (mapper && !this.propertyMapper[name]) {
-        this.propertyMapper[name] = mapper;
-      }
-    }
+    this.client = opt.client;
+    this.search = opt.search;
+    this.indexName = config.search.entityIndex;
   }
 
+  /** arocapi creates the index with its mapping only, so a template supplies our settings */
   async init() {
-    log.debug('Configure OpenSearch Cluster');
-    try {
-      const elastic = this.conf;
-      await this.client.cluster.putSettings({ body: elastic.cluster });
-      if (elastic?.log === 'debug') {
-        const config = await this.client.cluster.getSettings();
-        log.debug(`Current cluster setting: ${JSON.stringify(config)}`);
-      }
-    } catch (e) {
-      log.error('configureCluster');
-      log.error(e);
-    }
-    await this.ensureIndex();
-  }
-
-  /** Writing to a missing index auto-creates it without our mappings, so create it first and fail if we can't */
-  async ensureIndex() {
-    try {
-      await this.client.indices.create({
-        index: this.conf.entityIndex,
-        body: this.conf.create as Indices_Create_RequestBody,
-      });
-    } catch (error) {
-      if (!(error instanceof errors.ResponseError && error.body.error?.type === 'resource_already_exists_exception')) {
-        throw error;
-      }
-    }
+    await this.client.indices.putIndexTemplate({
+      name: this.indexName,
+      body: {
+        index_patterns: [this.indexName],
+        template: { settings: { index: { auto_expand_replicas: '0-1', max_result_window: 100000 } } },
+      },
+    });
+    await this.search.createIndex();
   }
 
   async delete(crateId?: string) {
-    try {
-      if (crateId) {
-        await this.client.deleteByQuery({
-          index: this.conf.entityIndex,
-          body: { query: { prefix: { rocrateRootId: { value: crateId } } } },
-        });
-      } else {
-        await this.client.indices.delete({ index: this.conf.entityIndex });
-      }
-      log.debug(`Index ${crateId || '<all>'} deleted`);
-    } catch (error) {
-      if (!(error instanceof errors.ResponseError && error.statusCode === 404)) {
-        log.error(error);
-      }
+    if (crateId) {
+      await this.client.deleteByQuery({ index: this.indexName, refresh: true, body: { query: { term: { rootCollection: crateId } } } });
+    } else {
+      await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }
+    log.debug(`Index ${crateId || '<all>'} deleted`);
   }
 
   async count(crateId?: string) {
     try {
       const res = await this.client.count({
-        index: this.conf.entityIndex,
-        ...(crateId && { body: { query: { prefix: { id: { value: crateId } } } } }),
+        index: this.indexName,
+        ...(crateId && { body: { query: { term: { rootCollection: crateId } } } }),
       });
       return res.body.count;
-    } catch (_e) {
-      //log.error(e);
+    } catch {
+      return 0;
     }
-    return 0;
   }
 
-  async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
-    await this.ensureIndex();
-    const elastic = this.conf;
-    const { properties } = elastic.create.mappings;
-    const operations: Bulk_RequestBody = [];
-    const deferredEntities: Entity[] = []; // for individual updates
-    const deriveId = (entityId: string) => this.deriveUniqueEntityId(crate.rootId, entityId);
-
+  async _index({ crateObject, crate, license }: Parameters<Indexer['_index']>[0]) {
+    await this.search.createIndex();
+    const docs: Document[] = [];
     for (const entity of crate.entities()) {
-      const entityTypes: string[] = entity['@type'];
-      const matchedMappers = entityTypes
-        .map((t) => (!RecordType[t] || entity.conformsTo?.find((c: { '@id': string }) => c['@id'] === RecordType[t]) ? typeMapper[t] : undefined))
-        .filter((fn) => !!fn);
-      if (matchedMappers.length) {
-        // create common index record
-        const _id = deriveId(entity['@id']);
-        // const license = resolveLicense(entity.license || parent?.license, crate, this.defaultLicense);
-        // if (!license) {
-        //   logger.error(`Skip indexing ${crateId} > ${entityId}, No License Found`);
-        //   return;
-        // }
-        // const metadataLicense = resolveMetadataLicense(crate, this.defaultMetadataLicense);
-        // doc._metadataIsPublic = metadataLicense?.metadataIsPublic;
-        // doc._metadataLicense = metadataLicense;
-        let record = createDoc(crate, entity, _id, license, metadataLicense, deferredEntities, this.propertyMapper);
-        log.debug(`Adding ${_id}`);
-        // add additional information to record based on type
-        for (const mapType of matchedMappers) {
-          record = mapType({ properties, entity, record, crate, crateObject });
-        }
-        //console.log(record);
-        operations.push({ update: { _index: elastic.entityIndex, _id } }, { doc: record, doc_as_upsert: true });
+      if (!recordType(entity)) {
+        continue;
+      }
+      const doc = await searchDocument(crate, crateObject, entity, license);
+      if (doc.text) {
+        // Indexed alone to keep each request small
+        await this.indexDocuments([doc]);
+      } else {
+        docs.push(doc);
       }
     }
+    await this.indexDocuments(docs);
+    await this.client.indices.refresh({ index: this.indexName });
+  }
+
+  /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest */
+  async indexDocuments(docs: Document[]) {
+    if (!docs.length) {
+      return;
+    }
     try {
-      //log.debug('Start bulk indexing');
-      //log.debug(operations);
-      const result = await this.client.bulk({
-        body: operations,
-        refresh: true, // setting this to true will update result immediately, but will degrade performance
-      });
-      //log.debug('Finish bulk indexing');
-      if (result.body.errors) {
-        log.error(`Bulk operation result errors:`);
-        const items = result.body.items.filter((item) => item.update?.error).map((item) => item.update?.error?.reason);
-        log.error(items.join('\n'));
-        log.error(result.body);
-      }
-      // index bigger data such as file content in a separate step to manage payload size
-      for (const entity of deferredEntities) {
-        log.debug(`Processing deferred entity: ${entity['@id']}`);
-        try {
-          const entityTypes: string[] = entity['@type'];
-          const matchedIndexers = entityTypes.map((t) => batchedTypeIndexer[t]).filter((fn) => !!fn);
-          let doc: Record<string, unknown> = {};
-          for (const mapper of matchedIndexers) {
-            doc = await mapper({ properties, entity, record: doc, crate, crateObject });
-          }
-          const result = await this.client.update({
-            index: elastic.entityIndex,
-            id: deriveId(entity['@id']),
-            body: { doc, doc_as_upsert: true },
-          });
-          log.debug(`Batched operation result: ${result.body._id} ${result.body.result} ${result.statusCode}`);
-        } catch (error) {
-          log.error(`Error indexing deferred entity ${entity['@id']}`);
-          log.error(error);
-        }
-      }
-      await this.client.indices.refresh({ index: elastic.entityIndex });
+      await this.search.index(docs);
     } catch (error) {
-      log.error(`Error indexing ${crate.rootId}`);
-      log.error(error);
-    }
-  }
-
-  async search({ index = this.conf.entityIndex, searchBody, filterPath, explain }: searchParams) {
-    try {
-      log.debug('----- searchBody ----');
-      log.debug(JSON.stringify(searchBody));
-      log.debug('----- searchBody ----');
-      const opts: Search_Request = {
-        index,
-        body: searchBody,
-      };
-      if (explain != null) {
-        opts.explain = explain;
+      if (docs.length === 1) {
+        log.error(`Error indexing ${docs[0]?.id}: ${(error as Error).message}`);
+        return;
       }
-      if (filterPath) {
-        opts.filter_path = filterPath;
+      for (const doc of docs) {
+        await this.indexDocuments([doc]);
       }
-      log.debug(JSON.stringify(opts));
-      const result = await this.client.search(opts);
-      return result.body;
-    } catch (e) {
-      log.error(e);
-      throw e;
     }
   }
 }
-
-/** Create entity basic record for bulk indexing */
-function createDoc(
-  crate: ROCrate,
-  entity: Entity,
-  _id: string,
-  license: string,
-  metadataLicense: string,
-  deferredEntities: Entity[],
-  propMapper: typeof propertyMapper = {},
-) {
-  const record: Record<string, unknown> = {
-    rocrateRootId: crate.rootId, // The id of the entity that represent the original rocrate in the repository
-    id: _id, // Prefixed entity id because each entity is being splited up logically into a separate rocrate doc
-    entityId: entity['@id'], // Original entity id
-    entityType: entity['@type'].map((t: string) => crate.getContextDefinition(t)),
-    //entityType: entity['@type'].map((t:string) => RecordType[t as keyof typeof RecordType]),
-    //memberOf: entity['pcdm:memberOf'] || entity.memberOf,
-    rootCollection: crate.rootId,
-    metadataLicenseId: metadataLicense,
-    contentLicenseId: firstStringOrId(entity.license) || license,
-    '@id': entity['@id'],
-  };
-  //handle inverse relations
-  crate.addValues(entity, 'isPartOf', entity['@reverse'].hasPart);
-  crate.addValues(entity, 'hasPart', entity['@reverse'].isPartOf);
-  crate.addValues(entity, 'pcdm:memberOf', entity['@reverse']['pcdm:hasMember']);
-  crate.addValues(entity, 'pcdm:hasMember', entity['@reverse']['pcdm:memberOf']);
-
-  for (const propName in entity) {
-    if (record[propName] == null && entity[propName] != null && entity[propName].length) {
-      //console.log(propName, entity[propName]);
-      const pm = propMapper[propName] || mapDefaultProperties;
-      const values = [];
-      for (const value of entity[propName]) {
-        const properties: Record<string, unknown> = {};
-        const res = pm(value, { deferredEntities, properties });
-        for (const name in properties) {
-          const vals = properties[name];
-          if (vals == null) {
-            continue;
-          }
-          if (record[name] == null) {
-            record[name] = vals;
-          } else {
-            record[name] = ([] as unknown[]).concat(record[name], vals);
-          }
-        }
-        if (res != null) {
-          values.push(res);
-        }
-      }
-      if (values.length) {
-        record[propName] = values;
-      }
-      //console.log(propName, record[propName]);
-    }
-  }
-  const _locations = record._locations as string[] | undefined;
-  if (_locations?.length) {
-    // index geolocation in a separate field to support geo search, this location name is hardcoded
-    const locations = [...new Set(_locations)];
-    if (locations.length === 1) {
-      record.location = locations[0];
-    } else {
-      record.location = `GEOMETRYCOLLECTION( ${locations.join(', ')} )`;
-    }
-  }
-  return record;
-}
-
-// /**
-//  * Find the license of an item with its id if not and id or undefined return a default license from
-//  * config, if passed an Id and not found it will also return a default license.
-//  */
-// function _resolveLicense(licenses: (string | { '@id': string })[], crate: ROCrate, defaultLicense?: Entity) {
-//   for (const license of licenses || []) {
-//     const id = typeof license === 'string' ? license : license['@id'];
-//     const entity = crate.getEntity(id);
-//     if (entity) {
-//       return entity;
-//     }
-//     log.warn(`Invalid license: ${id}`);
-//   }
-//   return defaultLicense;
-// }
-//
-// function _resolveMetadataLicense(crate: ROCrate, defaultMetadataLicense?: unknown) {
-//   const metadataDescriptorLicense = crate.getEntity('ro-crate-metadata.json')?.license || [];
-//   const license = metadataDescriptorLicense[0];
-//   if (license) {
-//     return {
-//       metadataIsPublic: license.metadataIsPublic?.[0] || false,
-//       name: license.name?.[0],
-//       id: license['@id'],
-//       description: license.description?.[0],
-//     };
-//   } else {
-//     //default to cc-by-4
-//     return defaultMetadataLicense;
-//   }
-// }

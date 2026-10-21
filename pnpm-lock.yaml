@@ -191,14 +191,14 @@ importers:
         specifier: ^7.10.0
         version: 7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
       arocapi:
-        specifier: 5.0.0-beta.5
-        version: 5.0.0-beta.5(@fastify/swagger@9.9.1)(@prisma/client@7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(openapi-types@12.1.3)
+        specifier: 5.0.0-beta.6
+        version: 5.0.0-beta.6(@fastify/swagger@9.9.1)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
       fastify:
-        specifier: ^5.12.5
-        version: 5.12.5
+        specifier: ^5.12.7
+        version: 5.12.7
       fastify-type-provider-zod:
         specifier: ^7.0.0
-        version: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.6)
+        version: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
       prisma:
         specifier: ^7.10.0
         version: 7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2)
@@ -207,7 +207,7 @@ importers:
         version: 3.7.2
       zod:
         specifier: ^4.6.5
-        version: 4.6.6
+        version: 4.6.7
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.5.15
@@ -1214,10 +1214,16 @@ packages:
     resolution: {integrity: sha512-VipTB0gXgGIFO2Rg9yEVN5wLt2AurJcZqDbgmYSwPwsykhLrQhs240/bfceev4w68lI8JshoOJIk9uW7tFzROw==}
     engines: {node: '>=22'}
 
-  arocapi@5.0.0-beta.5:
-    resolution: {integrity: sha512-NdDpbmUKmHcGcjS+k5cuKbc7L9mtN/E3jyGts1KcaiBVDckjziJIrvgn3JOeyikJafYZckFmcAOwaFcT+pZVzw==}
+  arocapi@5.0.0-beta.6:
+    resolution: {integrity: sha512-4Aa54yb/5C3jYNERQMSohw3mYWjkU73CbLHRrdcnQ0fwZgRwWUysTUwYrbD/ApWVOgk5A0t8kpPCGUe/8Tmbkg==}
+    engines: {node: '>=22.18'}
     peerDependencies:
-      '@prisma/client': '>=6'
+      '@opensearch-project/opensearch': ^3.9.0
+      '@prisma/client': ^7.10.0
+      fastify: ^5.12.7
+    peerDependenciesMeta:
+      '@opensearch-project/opensearch':
+        optional: true
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -1425,11 +1431,6 @@ packages:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
 
-  dotenv@18.0.7:
-    resolution: {integrity: sha512-QEvMEF8ca3GNZJJnAbOgxpj5ULhBvnMcURp+XKrtvqFNPgjBvYoswQ0Jl2cO7JzCjxZjJhr9ZuIEhlrRxMft/Q==}
-    engines: {node: '>=12'}
-    hasBin: true
-
   effect@3.20.0:
     resolution: {integrity: sha512-qMLfDJscrNG8p/aw+IkT9W7fgj50Z4wG5bLBy0Txsxz8iUHjDIkOgO3SV0WZfnQbNG2VJYb0b+rDLMrhM4+Krw==}
 
@@ -1516,8 +1517,8 @@ packages:
       openapi-types: ^12.1.3
       zod: '>=4.1.5'
 
-  fastify@5.12.5:
-    resolution: {integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==}
+  fastify@5.12.7:
+    resolution: {integrity: sha512-v4pEPsTRPuqlDIYiQFB+BHjVN4SdHX9u0ABk0ZDUKbbdY1vsNryUd1j4Z+jQEZajvYIVk047Kimva9/AJ79GYw==}
 
   fastq@1.20.3:
     resolution: {integrity: sha512-XKv5nnLs6nLF71NgiKJLIZFLkPyIEuOselLG7ujZnGrRfQK8HpvY+WqKhAJUAdLomwVHErVS4LfxFlPq0/FTAw==}
@@ -2388,8 +2389,8 @@ packages:
   zeptomatch@2.1.0:
     resolution: {integrity: sha512-KiGErG2J0G82LSpniV0CtIzjlJ10E04j02VOudJsPyPwNZgGnRKQy7I1R7GMyg/QswnE4l7ohSGrQbQbjXPPDA==}
 
-  zod@4.6.6:
-    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
+  zod@4.6.7:
+    resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
 
 snapshots:
 
@@ -3246,22 +3247,19 @@ snapshots:
 
   argue-cli@3.2.0: {}
 
-  arocapi@5.0.0-beta.5(@fastify/swagger@9.9.1)(@prisma/client@7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(openapi-types@12.1.3):
+  arocapi@5.0.0-beta.6(@fastify/swagger@9.9.1)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
     dependencies:
       '@fastify/sensible': 6.0.7
-      '@opensearch-project/opensearch': 3.9.0
       '@prisma/client': 7.10.0(prisma@7.10.0(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
-      '@prisma/config': 7.10.0
       content-disposition: 3.0.0
-      dotenv: 18.0.7
-      fastify: 5.12.5
-      fastify-type-provider-zod: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.6)
-      zod: 4.6.6
+      fastify: 5.12.7
+      fastify-type-provider-zod: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
+      zod: 4.6.7
+    optionalDependencies:
+      '@opensearch-project/opensearch': 3.9.0
     transitivePeerDependencies:
       - '@fastify/swagger'
-      - magicast
       - openapi-types
-      - supports-color
 
   assertion-error@2.0.1: {}
 
@@ -3438,8 +3436,6 @@ snapshots:
 
   dotenv@17.4.2: {}
 
-  dotenv@18.0.7: {}
-
   effect@3.20.0:
     dependencies:
       '@standard-schema/spec': 1.1.0
@@ -3508,15 +3504,15 @@ snapshots:
 
   fastify-plugin@6.0.0: {}
 
-  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.5)(openapi-types@12.1.3)(zod@4.6.6):
+  fastify-type-provider-zod@7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7):
     dependencies:
       '@fastify/error': 4.2.0
       '@fastify/swagger': 9.9.1
-      fastify: 5.12.5
+      fastify: 5.12.7
       openapi-types: 12.1.3
-      zod: 4.6.6
+      zod: 4.6.7
 
-  fastify@5.12.5:
+  fastify@5.12.7:
     dependencies:
       '@fastify/ajv-compiler': 4.0.6
       '@fastify/error': 4.2.0
@@ -3681,7 +3677,7 @@ snapshots:
       tinyglobby: 0.2.17
       unbash: 5.0.0
       yaml: 2.9.1
-      zod: 4.6.6
+      zod: 4.6.7
 
   lefthook-darwin-arm64@2.2.1:
     optional: true
@@ -4316,4 +4312,4 @@ snapshots:
       grammex: 3.1.13
       graphmatch: 1.1.1
 
-  zod@4.6.6: {}
+  zod@4.6.7: {}

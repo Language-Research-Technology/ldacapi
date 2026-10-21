@@ -313,7 +313,7 @@
     "aggregations": [
       {
         "display": "Collection",
-        "name": "root"
+        "name": "rootCollection"
       },
       {
         "display": "Member Of",
@@ -325,7 +325,7 @@
       },
       {
         "display": "Record Type",
-        "name": "@type"
+        "name": "type"
       },
       {
         "display": "Language",

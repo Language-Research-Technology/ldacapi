@@ -5,7 +5,7 @@ import type { Client } from '@opensearch-project/opensearch';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
-import { SearchIndexer } from './indexer/search.ts';
+import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
 import type { ByteRange } from './range.ts';
 import { State } from './repository.ts';
@@ -17,7 +17,7 @@ const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof 
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 
-export async function init(opts: { opensearchClient?: Client }) {
+export async function init(opts: { opensearchClient: Client; search?: ReturnType<typeof createSearchBackend> }) {
   log.info('Initializing OCFL repository and indexers');
   INDEXER = {
     structural: await StructuralIndexer.create({
@@ -27,8 +27,8 @@ export async function init(opts: { opensearchClient?: Client }) {
     search: await SearchIndexer.create({
       defaultLicense,
       defaultMetadataLicense,
-      searchSettings: config.search,
       client: opts.opensearchClient,
+      search: opts.search ?? createSearchBackend(opts.opensearchClient),
     }),
   };
   repository = createStorage();

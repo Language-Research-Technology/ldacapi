@@ -29,5 +29,6 @@ export default async function setup() {
     await admin.$disconnect();
     const opensearch = new Client({ node: config.opensearchUrl });
     await opensearch.indices.delete({ index: entityIndex, ignore_unavailable: true });
+    await opensearch.indices.deleteIndexTemplate({ name: entityIndex }).catch(() => {});
   };
 }

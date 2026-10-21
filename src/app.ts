@@ -5,6 +5,7 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 import pkg from '../package.json' with { type: 'json' };
 import { config } from './configuration.ts';
 import type { File, PrismaClient } from './generated/prisma/client.ts';
+import type { createSearchBackend } from './indexer/search.ts';
 import { initRepository, type Repository } from './repository.ts';
 import { admin as adminRoute } from './routes/admin.ts';
 import { fileRoute } from './routes/file.ts';
@@ -13,6 +14,7 @@ import { log } from './utils.ts';
 export type LdacapiOptions = {
   prisma: PrismaClient;
   opensearch: Client;
+  search: ReturnType<typeof createSearchBackend>;
 };
 
 let repository: Repository;
@@ -21,7 +23,7 @@ const signatures = new Map<string, string>();
 const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: LdacapiOptions) => {
   fastify.setValidatorCompiler(validatorCompiler);
   fastify.setSerializerCompiler(serializerCompiler);
-  repository = await initRepository('ocfl', { opensearchClient: options.opensearch });
+  repository = await initRepository('ocfl', { opensearchClient: options.opensearch, search: options.search });
   fastify.decorate('repository', repository);
 
   const { version } = pkg;

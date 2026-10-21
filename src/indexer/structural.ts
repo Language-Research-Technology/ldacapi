@@ -110,7 +110,7 @@ export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   return newCrate.toJSON();
 }
 
-function pickSingleMemberOf(entity: Entity) {
+export function pickSingleMemberOf(entity: Entity) {
   return (
     entity['pcdm:memberOf']?.[0]['@id'] ||
     entity.memberOf?.[0]['@id'] ||

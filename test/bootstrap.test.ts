@@ -39,7 +39,7 @@ describe('seed and index', () => {
     const opensearch = new Client({ node: config.opensearchUrl });
     const indexed = await Promise.all(
       crateIds.map(async (id) => {
-        const { body } = await opensearch.count({ index: config.search.entityIndex, body: { query: { term: { rocrateRootId: id } } } });
+        const { body } = await opensearch.count({ index: config.search.entityIndex, body: { query: { term: { rootCollection: id } } } });
         return body.count > 0;
       }),
     );

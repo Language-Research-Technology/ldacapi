@@ -14,8 +14,9 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
 - **OCFL storage**: crates live in an [OCFL](https://ocfl.io/) repository on
   disk (`src/ocfl.ts`).
 - **Indexing**: crates are read from OCFL into the database (the structural
-  index, used by arocapi's entity and file routes) and into OpenSearch (the
-  search index) (`src/indexer/`).
+  index, used by arocapi's entity and file routes) and, as one search
+  document per entity, into arocapi's OpenSearch search backend
+  (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
 - **Admin API**: list, rebuild and delete indexes (`src/routes/admin.ts`).
 - **Access control**: licences are checked against REMS, with sign-in through
   an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
@@ -126,13 +127,6 @@ migration named after the arocapi version:
 
 ```sh
 pnpm db:migrate --name arocapi-<version>
-```
-
-A database created with `prisma db push` (before migrations existed) needs a
-one-off baseline before `pnpm db:deploy` will work:
-
-```sh
-pnpm exec prisma migrate resolve --applied 20261007004001_arocapi-4.0.1
 ```
 
 ## Tests
