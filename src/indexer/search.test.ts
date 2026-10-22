@@ -21,7 +21,7 @@ const crateWith = async (entity: Record<string, unknown>) => {
   return { crate, entity: crate.getEntity('data.txt') };
 };
 
-const crateObject: CrateObject = { root: '/', text: async () => 'hello world', file: async () => ({ size: 11, crc32: '' }) };
+const crateObject: CrateObject = { id: '', root: '/', text: async () => 'hello world', file: async () => ({ size: 11, crc32: '' }) };
 
 describe('searchDocument', () => {
   it('flattens an entity into declared fields', async () => {

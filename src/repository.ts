@@ -1,10 +1,4 @@
-import type { ByteRange } from './range.ts';
-
-interface RepositoryFile {
-  /** The file path relative to the repository root */
-  path: string;
-  stream: (range?: ByteRange) => Promise<ReadableStream>;
-}
+import type { StorageBackend } from 'arocapi';
 
 export const State = {
   INDEXED: 'indexed',
@@ -22,7 +16,7 @@ export interface Repository {
   createIndex(crateId?: string | RegExp, type?: string, force?: boolean): Promise<void>;
   deleteIndex(crateId?: string, type?: string | string[]): Promise<void>;
   objects(prefix?: string, refresh?: boolean): AsyncIterable<{ id: string; path: string; name: string }>;
-  getFile(entityId: string, storagePath?: string): Promise<RepositoryFile>;
+  storage(): StorageBackend;
 }
 
 /** Load or initialize a repository */

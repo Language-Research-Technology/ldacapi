@@ -1,6 +1,6 @@
 import type { Client } from '@opensearch-project/opensearch';
 import type { FieldDeclarations, GeoPoint, SearchDocument } from 'arocapi';
-import { OpenSearchBackend } from 'arocapi/opensearch';
+import { OpenSearchBackend } from 'arocapi/search/opensearch';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { firstStringOrId, log as plog } from '../utils.ts';

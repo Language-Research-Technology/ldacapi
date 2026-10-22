@@ -2,12 +2,13 @@ import { crc32 } from 'node:zlib';
 import type { OcflObject, OcflObjectFile } from '@ocfl/ocfl';
 import ocfl from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
+import type { StorageBackend } from 'arocapi';
+import { OcflStorage } from 'arocapi/storage/ocfl';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
-import type { ByteRange } from './range.ts';
 import { State } from './repository.ts';
 import { log } from './utils.ts';
 
@@ -16,6 +17,7 @@ const { defaultLicense, defaultMetadataLicense } = config;
 const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof State] | undefined } } = {};
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
+let backend: StorageBackend;
 
 export async function init(opts: { opensearchClient: Client; search?: ReturnType<typeof createSearchBackend> }) {
   log.info('Initializing OCFL repository and indexers');
@@ -34,9 +36,18 @@ export async function init(opts: { opensearchClient: Client; search?: ReturnType
   repository = createStorage();
   try {
     await repository.load();
+    backend = await OcflStorage({ root: config.ocfl.root });
   } catch (e) {
+    if (await repository.exists()) {
+      throw e;
+    }
     throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. In development, run \`pnpm seed\` to create it.`, { cause: e });
   }
+}
+
+/** arocapi's storage backend over the repository */
+export function storage() {
+  return backend;
 }
 
 export function createStorage() {
@@ -68,6 +79,7 @@ function wrap(ocflObject: OcflObject): CrateObject {
     return file;
   };
   return {
+    id: ocflObject.id,
     root: ocflObject.root,
     async text(path: string) {
       return await getInventoryFile(path).text();
@@ -190,20 +202,5 @@ export async function* objects(prefix?: string, refresh?: boolean) {
     } catch (error) {
       log.error(error);
     }
-  }
-}
-
-export async function getFile(entityId: string, storagePath: string) {
-  const crateId = storagePath && entityId.endsWith(`/${storagePath}`) ? entityId.slice(0, -storagePath.length - 1) : entityId;
-  try {
-    const object = repository.object(crateId);
-    await object.load();
-    const file = object.getFile({ logicalPath: storagePath });
-    return {
-      path: `${repository.objectRoot(crateId)}/${file.contentPath}`,
-      stream: async (range?: ByteRange) => file.stream(range),
-    };
-  } catch (error) {
-    log.error(error);
   }
 }

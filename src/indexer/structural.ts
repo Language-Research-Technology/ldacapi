@@ -1,3 +1,4 @@
+import type { OcflStorageMeta } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
@@ -46,22 +47,19 @@ export class StructuralIndexer extends Indexer {
         },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
-        const storagePath = entity['@id'].match(/.+:.+/) ? entity['@id'].replace(`${crateId}/`, '') : entity['@id'];
+        const ocflPath = entity['@id'].match(/.+:.+/) ? entity['@id'].replace(`${crateId}/`, '') : entity['@id'];
         let f: CrateFile = { size: -1, crc32: '' };
         try {
-          f = await crateObject.file(storagePath);
+          f = await crateObject.file(ocflPath);
         } catch (error) {
           log.error(`[${crateId}] ${(error as Error).message}`);
         }
         param.file = {
           id: entityId,
-          filename: storagePath.split('/').pop(),
+          filename: ocflPath.split('/').pop(),
           mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
           size: +(entity.contentSize?.[0] ?? f.size),
-          meta: {
-            storagePath,
-            crc32: f.crc32,
-          },
+          meta: { ocflObject: crateObject.id, ocflPath, crc32: f.crc32 } satisfies OcflStorageMeta & { crc32: string },
         };
       }
       try {

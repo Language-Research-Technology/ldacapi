@@ -16,6 +16,8 @@ export interface CrateFile {
 }
 
 export interface CrateObject {
+  /** The id of the OCFL object holding the crate */
+  id: string;
   /** The absolute path of the root directory of the crate */
   root: string;
   /** The text content of a file within the crate */

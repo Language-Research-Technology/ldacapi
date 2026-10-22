@@ -1,27 +1,28 @@
-import { Readable } from 'node:stream';
 import cors from '@fastify/cors';
 import fastifySensible from '@fastify/sensible';
 import { Client } from '@opensearch-project/opensearch';
 import type { Options } from 'arocapi';
 import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
+import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
 import type { RegisterOptions } from 'fastify';
-import ldacapi, { fileHandler, type LdacapiOptions } from './app.ts';
+import ldacapi, { type LdacapiOptions } from './app.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { createSearchBackend } from './indexer/search.ts';
 import { prisma } from './prisma.ts';
+import { initRepository } from './repository.ts';
 import { auth } from './routes/auth.ts';
 import { fastify } from './utils.ts';
 
-const serialiseRoCrate = (entity: { meta: { rocrate: unknown } }) => JSON.stringify(entity.meta.rocrate, null, 2);
-
 const opensearch = new Client({ node: config.opensearchUrl });
 const prefix = config.prefix || '';
+const search = createSearchBackend(opensearch);
+const repository = await initRepository('ocfl', { opensearchClient: opensearch, search });
 
 const appOpt: Options & LdacapiOptions & RegisterOptions = {
   prisma,
-  opensearch,
-  search: createSearchBackend(opensearch),
+  repository,
+  search,
   access,
   isAuthenticated,
   entityVisibilityFilter: AllVisibleEntityFilter,
@@ -37,25 +38,7 @@ const appOpt: Options & LdacapiOptions & RegisterOptions = {
       },
     }),
   ],
-  fileHandler,
-  // Required: RO-Crate handler for serving RO-Crate metadata
-  roCrateHandler: {
-    get: async (entity) => {
-      const jsonString = serialiseRoCrate(entity);
-      return {
-        type: 'stream' as 'stream',
-        stream: Readable.from([jsonString]),
-        metadata: {
-          contentType: 'application/ld+json',
-          contentLength: Buffer.byteLength(jsonString),
-        },
-      };
-    },
-    head: async (entity) => ({
-      contentType: 'application/ld+json',
-      contentLength: Buffer.byteLength(serialiseRoCrate(entity)),
-    }),
-  },
+  storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
   prefix,
 };
 fastify.setErrorHandler(errorHandler);

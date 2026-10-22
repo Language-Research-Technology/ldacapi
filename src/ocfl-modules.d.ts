@@ -1,6 +1,5 @@
 declare module '@ocfl/ocfl' {
   export interface OcflObjectFile {
-    contentPath?: string;
     size?: string;
     fixity?: Record<string, string>;
     text(encoding?: string): Promise<string>;
@@ -22,7 +21,6 @@ declare module '@ocfl/ocfl' {
     create(): Promise<void>;
     exists(): Promise<boolean>;
     object(id: string): OcflObject;
-    objectRoot(id: string): string;
   }
 }
 
