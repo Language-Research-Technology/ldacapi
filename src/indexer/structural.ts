@@ -1,11 +1,12 @@
 import type { OcflStorageMeta } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
 import type { Prisma } from '../generated/prisma/client.ts';
+import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
-import { firstStringOrId, log as plog } from '../utils.ts';
+import { firstStringOrId } from '../utils.ts';
 import { type BaseOptions, type CrateFile, Indexer, RecordType, recordType } from './indexer.ts';
 
-const log = plog.child({ module: 'indexer/structural' });
+const log = logger.child({ module: 'indexer/structural' });
 
 type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
@@ -29,7 +30,7 @@ export class StructuralIndexer extends Indexer {
       if (!entityType) {
         continue;
       }
-      log.debug(`Indexing ${crateId} ${entity['@id']}`);
+      log.debug({ crateId, entityId: entity['@id'] }, 'Indexing entity');
       count++;
       const entityId = entity['@id'];
       const rocrate = entityAsCrate(crate, entity, license);
@@ -53,7 +54,7 @@ export class StructuralIndexer extends Indexer {
           try {
             f = await crateObject.file(ocflPath);
           } catch (error) {
-            log.error(`[${crateId}] ${(error as Error).message}`);
+            log.error({ err: error, crateId, entityId, ocflPath }, 'Cannot read file');
           }
         }
         param.file = {
@@ -70,18 +71,18 @@ export class StructuralIndexer extends Indexer {
           await prisma.file.create({ data: param.file });
         }
       } catch (error) {
-        log.error(`Error indexing ${crateId} ${entityId}: ${(error as Error).message}`);
+        log.error({ err: error, crateId, entityId }, 'Error indexing entity');
       }
     }
 
-    log.info(`Indexed ${crateId}: entities=${count}`);
+    log.info({ crateId, entities: count }, 'Indexed crate');
   }
 
   async delete(crateId?: string) {
     const where = crateId ? { id: { startsWith: crateId } } : {};
     await prisma.file.deleteMany({ where });
     await prisma.entity.deleteMany({ where });
-    log.debug(`Index ${crateId || '<all>'} deleted`);
+    log.debug({ crateId }, 'Index deleted');
   }
 
   async count(crateId?: string) {

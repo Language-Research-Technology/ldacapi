@@ -9,8 +9,10 @@ import { config } from './configuration.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
+import { logger } from './logger.ts';
 import { State } from './repository.ts';
-import { log } from './utils.ts';
+
+const log = logger.child({ module: 'ocfl' });
 
 const { defaultLicense, defaultMetadataLicense } = config;
 
@@ -133,7 +135,7 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
     return;
   }
   try {
-    log.debug(`Found OFCL object: ${ocflObject.id}`);
+    log.debug({ crateId: ocflObject.id }, 'Found OCFL object');
     const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
     const rawCrate = JSON.parse(jsonContent);
     const crate = await ROCrate.create(rawCrate);
@@ -148,14 +150,14 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
           const crateObject = wrap(ocflObject);
           await indexer.index({ crateObject, crate });
         } catch (error) {
-          log.error(error);
+          log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
         } finally {
           setState(ocflObject.id, t);
         }
       }
     }
-  } catch (e) {
-    log.error(e);
+  } catch (error) {
+    log.error({ err: error, crateId: ocflObject.id }, 'Error reading object');
   }
 }
 
@@ -200,7 +202,7 @@ export async function* objects(prefix?: string, refresh?: boolean) {
       const name = jsonParsed['@graph'].find((e: RawEntity) => e['@id'] === inv.id)?.name?.toString();
       yield { id: inv.id, name, path: ocflObject.root, state: await getState(inv.id) };
     } catch (error) {
-      log.error(error);
+      log.error({ err: error, path: ocflObject.root }, 'Error reading object');
     }
   }
 }

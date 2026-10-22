@@ -7,7 +7,6 @@ import { config } from '../configuration.ts';
 import { type Repository, State } from '../repository.ts';
 
 export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository }> = async (fastify, opts) => {
-  //console.log(opts);
   const repo = opts.repository;
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   app.register(bearerAuthPlugin, { keys: [config.tokenAdmin] });
@@ -67,16 +66,9 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository 
         } else if (type && state[type] === State.DELETING) {
           throw fastify.httpErrors.conflict('Deleting is in progress.');
         }
-        try {
-          repo.createIndex(crateId ? new RegExp(`^${crateId}`) : undefined, type, force);
-        } catch (e) {
-          const err = e as Error;
-          app.log.error(err);
-          return fastify.httpErrors.internalServerError({
-            message: `Error indexing [${type}] ${err.message}`,
-            stack: err.stack,
-          });
-        }
+        repo
+          .createIndex(crateId ? new RegExp(`^${crateId}`) : undefined, type, force)
+          .catch((err) => request.log.error({ err, crateId, type }, 'Indexing failed'));
         return reply.status(202).send(State.QUEUED);
       } else {
         throw fastify.httpErrors.notFound('Indexer does not exist');
@@ -101,7 +93,7 @@ export const admin: FastifyPluginAsync<{ prefix: string; repository: Repository 
       if (crateId === 'all' || crateId === '*') {
         crateId = undefined;
       }
-      repo.deleteIndex(crateId, type);
+      repo.deleteIndex(crateId, type).catch((err) => request.log.error({ err, crateId, type }, 'Deleting index failed'));
       return reply.send({ message: 'Deleting' });
     },
   );

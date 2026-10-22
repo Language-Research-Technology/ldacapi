@@ -2,9 +2,9 @@ import formbody from '@fastify/formbody';
 import type { FastifyPluginAsync } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { config } from '../configuration.ts';
-import { log as plog } from '../utils.ts';
+import { logger } from '../logger.ts';
 
-const log = plog.child({ module: 'auth' });
+const log = logger.child({ module: 'auth' });
 
 /**
  * This module implements the OpenID Connect (OIDC) authentication standard minimally by acting as a thin proxy for the actual OIDC provider.
@@ -30,12 +30,10 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
         }
       })
       .catch((error) => {
-        log.error(error);
+        log.error({ err: error }, 'Failed to fetch OpenID configuration');
       });
   }
 
-  //let openidConfig: Record<string, string>;
-  //console.log(opts);
   const app = fastify.withTypeProvider<ZodTypeProvider>();
   app.register(formbody);
 
@@ -82,7 +80,6 @@ export const auth: FastifyPluginAsync = async (fastify, _opts) => {
     }
     const incoming = request.body as Record<string, string>;
     incoming.client_secret = config.oidc.clientSecret;
-    //console.log(incoming);
     if (incoming.client_id !== config.oidc.clientId) {
       return reply.badRequest('Invalid client_id');
     }

@@ -3,12 +3,13 @@ import type { FieldDeclarations, GeoPoint, SearchDocument } from 'arocapi';
 import { OpenSearchBackend } from 'arocapi/search/opensearch';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
-import { firstStringOrId, log as plog } from '../utils.ts';
+import { logger } from '../logger.ts';
+import { firstStringOrId } from '../utils.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
 import { Indexer, recordType } from './indexer.ts';
 import { pickSingleMemberOf } from './structural.ts';
 
-const log = plog.child({ module: 'indexer/search' });
+const log = logger.child({ module: 'indexer/search' });
 
 const fields = {
   name: { type: 'text', label: 'Name', weight: 3, advanced: true, sort: true },
@@ -126,9 +127,9 @@ export async function searchDocument(crate: ROCrate, crateObject: CrateObject, e
   if (path && isText(entity)) {
     try {
       doc.text = await crateObject.text(path);
-      log.info(`Indexing File: ${path}`);
+      log.debug({ crateId: crate.rootId, path }, 'Indexing file text');
     } catch (error) {
-      log.error(`Cannot read file ${path}: ${(error as Error).message}`);
+      log.error({ err: error, crateId: crate.rootId, path }, 'Cannot read file');
     }
   }
   return doc;
@@ -164,7 +165,7 @@ export class SearchIndexer extends Indexer {
     } else {
       await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }
-    log.debug(`Index ${crateId || '<all>'} deleted`);
+    log.debug({ crateId }, 'Index deleted');
   }
 
   async count(crateId?: string) {
@@ -207,7 +208,7 @@ export class SearchIndexer extends Indexer {
       await this.search.index(docs);
     } catch (error) {
       if (docs.length === 1) {
-        log.error(`Error indexing ${docs[0]?.id}: ${(error as Error).message}`);
+        log.error({ err: error, entityId: docs[0]?.id }, 'Error indexing document');
         return;
       }
       for (const doc of docs) {

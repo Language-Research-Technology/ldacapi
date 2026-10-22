@@ -1,8 +1,9 @@
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
-import { firstStringOrId, log as plog } from '../utils.ts';
+import { logger } from '../logger.ts';
+import { firstStringOrId } from '../utils.ts';
 
-const log = plog.child({ module: 'indexer' });
+const log = logger.child({ module: 'indexer' });
 
 export type BaseOptions = {
   defaultLicense?: string;
@@ -114,24 +115,23 @@ export class Indexer {
     const crateId = crate.rootId;
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
     const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
-    const warnPrefix = `[${crateObject.root}]`;
     if (!rootDataset) {
-      log.warn(`${warnPrefix} Skipped: Does not contain an ROCrate with a valid root dataset.`);
+      log.warn({ path: crateObject.root }, 'Skipped: Does not contain an ROCrate with a valid root dataset');
     } else if (crateId === './') {
-      log.warn(`${warnPrefix} Skipped: Cannot process a crate with invalid identifier ('./').`);
+      log.warn({ path: crateObject.root }, "Skipped: Cannot process a crate with invalid identifier ('./')");
     } else if (!metadataLicense) {
-      log.warn(`${warnPrefix} Skipped: No metadata license found.`);
+      log.warn({ path: crateObject.root, crateId }, 'Skipped: No metadata license found');
     } else if (!license) {
-      log.warn(`${warnPrefix} Skipped: No license found.`);
+      log.warn({ path: crateObject.root, crateId }, 'Skipped: No license found');
     } else {
-      log.info(`Indexing ${crateId}`);
+      log.info({ crateId }, 'Indexing crate');
       const paths = this.deriveUniqueEntityIds(crate);
       try {
         await this._index({ crateObject, crate, paths, license, metadataLicense });
       } catch (error) {
-        log.error(`${warnPrefix} Error occurred while indexing: ${error}`);
+        log.error({ err: error, crateId, path: crateObject.root }, 'Error indexing crate');
       }
-      log.info(`Indexed ${crateId}`);
+      log.info({ crateId }, 'Indexed crate');
     }
   }
 

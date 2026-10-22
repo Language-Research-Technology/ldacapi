@@ -55,13 +55,11 @@ async function fetchUserLicenses(request: FastifyRequest): Promise<string[] | un
       accept: 'application/json',
     },
   });
-  console.log(res);
   if (!res.ok) {
-    request.log.error(`Failed to fetch user entitlements: ${res.status} ${res.statusText}`);
+    request.log.error({ status: res.status, statusText: res.statusText }, 'Failed to fetch user entitlements');
     return;
   }
   const data = await res.json();
-  console.log(data);
   return data.map((item: RemsUserEntitlement) => item.resource);
 }
 

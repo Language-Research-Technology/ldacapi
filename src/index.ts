@@ -4,15 +4,23 @@ import { Client } from '@opensearch-project/opensearch';
 import type { Options } from 'arocapi';
 import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
 import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
-import type { RegisterOptions } from 'fastify';
+import Fastify, { type RegisterOptions } from 'fastify';
 import ldacapi, { type LdacapiOptions } from './app.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { createSearchBackend } from './indexer/search.ts';
+import { logger } from './logger.ts';
 import { prisma } from './prisma.ts';
 import { initRepository } from './repository.ts';
 import { auth } from './routes/auth.ts';
-import { fastify } from './utils.ts';
+
+const fastify = Fastify({
+  loggerInstance: logger,
+  routerOptions: {
+    maxParamLength: config.maxParamLength,
+  },
+  trustProxy: true, // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
+});
 
 const opensearch = new Client({ node: config.opensearchUrl });
 const prefix = config.prefix || '';
@@ -54,13 +62,8 @@ fastify.register(auth, { prefix: config.prefixAuth || prefix });
 (async () => {
   try {
     await fastify.listen({ port: config.port, host: config.host });
-    if (config.isDev) {
-      fastify.log.info(`Server is running on development mode`);
-    }
-    fastify.log.debug(`Using database ${config.databaseUrl}`);
-    fastify.log.debug(`Using opensearch ${config.opensearchUrl}`);
   } catch (err) {
-    fastify.log.error(err);
+    fastify.log.error({ err }, 'Failed to start server');
     process.exit(1);
   }
 })();
