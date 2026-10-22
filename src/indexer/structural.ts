@@ -79,9 +79,8 @@ export class StructuralIndexer extends Indexer {
   }
 
   async delete(crateId?: string) {
-    const where = crateId ? { id: { startsWith: crateId } } : {};
-    await prisma.file.deleteMany({ where });
-    await prisma.entity.deleteMany({ where });
+    await prisma.file.deleteMany({ where: crateId ? { entity: { rootCollection: crateId } } : {} });
+    await prisma.entity.deleteMany({ where: crateId ? { rootCollection: crateId } : {} });
     log.debug({ crateId }, 'Index deleted');
   }
 
