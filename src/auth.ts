@@ -1,6 +1,9 @@
 import { type IsAuthenticated, LicenceAccess, type RequestContext } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
+import { createLocalJWKSet, errors, jwtVerify } from 'jose';
 import { config } from './configuration.ts';
+import { loadSigningKeys } from './oidc/keys.ts';
+import { prisma } from './prisma.ts';
 
 const openLicenses = new Set(config.openLicenses);
 
@@ -67,25 +70,39 @@ const userIdsByRequest = new WeakMap<FastifyRequest, Promise<string | undefined>
 function authenticateUser(request: FastifyRequest): Promise<string | undefined> {
   let userId = userIdsByRequest.get(request);
   if (!userId) {
-    userId = fetchUserId(request);
+    userId = verifyUserId(request);
     userIdsByRequest.set(request, userId);
   }
   return userId;
 }
 
-async function fetchUserId(request: FastifyRequest): Promise<string | undefined> {
+const publicKeys = async () => {
+  const { keys } = await loadSigningKeys(prisma);
+  return createLocalJWKSet({ keys: keys.map(({ d, p, q, dp, dq, qi, ...publicJwk }) => publicJwk) });
+};
+
+let verificationKeys: ReturnType<typeof publicKeys> | undefined;
+
+async function verifyUserId(request: FastifyRequest): Promise<string | undefined> {
   const authHeader = request.headers.authorization;
-  if (!config.oidc.userinfoEndpoint || !authHeader?.startsWith('Bearer ')) {
+  if (!config.auth.enabled || !authHeader?.startsWith('Bearer ')) {
     return;
   }
-  const token = authHeader.split(' ')[1];
-  const res = await fetch(config.oidc.userinfoEndpoint, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+  verificationKeys ??= publicKeys().catch((error) => {
+    verificationKeys = undefined;
+    throw error;
   });
-  if (res.ok) {
-    const { sub } = await res.json();
-    return sub || undefined;
+  try {
+    const { payload } = await jwtVerify(authHeader.slice('Bearer '.length), await verificationKeys, {
+      issuer: config.auth.issuer,
+      audience: config.auth.audience,
+      algorithms: ['RS256'],
+    });
+    return payload.sub || undefined;
+  } catch (error) {
+    if (error instanceof errors.JOSEError) {
+      return;
+    }
+    throw error;
   }
 }
