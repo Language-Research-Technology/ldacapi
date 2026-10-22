@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Readable } from 'node:stream';
-import { generateKeyPair, importJWK, type JWK, type JWTPayload, SignJWT } from 'jose';
+import { generateKeyPair, importJWK, type JWTPayload, SignJWT } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { Repository } from './repository.ts';
+import { buildTestApp, repositoryWithContent, type TestApp } from '../test/app.ts';
+import { generateSigningKey, type Jwk } from './oidc/keys.ts';
 
 const ISSUER = 'http://localhost:8080';
 const AUDIENCE = `${ISSUER}/api`;
@@ -17,28 +17,29 @@ const OPEN_FILE = 'http://test/licence/open.txt';
 const RESTRICTED_FILE = 'http://test/licence/restricted.txt';
 const RESTRICTED_ENTITY = 'http://test/licence/restricted';
 
-let app: ReturnType<typeof import('./app.ts').buildApp>;
-let prisma: typeof import('./prisma.ts').prisma;
-let signingKey: { key: CryptoKey | Uint8Array; kid: string };
+let app: TestApp;
+let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
+let prefix: string;
+// Signs with the first; the second is the previous key, kept so its tokens still verify
+const SIGNING_KEYS = [generateSigningKey(), generateSigningKey()];
+
+type SigningKey = { key: CryptoKey | Uint8Array; kid: string };
+const importSigningKey = async (jwk: Jwk): Promise<SigningKey> => ({ key: await importJWK(jwk, 'RS256'), kid: jwk.kid });
+let signingKey: SigningKey;
 
 // Stands in for both REMS (/entitlements) and the upstream provider (everything else)
 let server: Server;
 let received: IncomingMessage[] = [];
 
-const repository = {
-  storage: () => ({
-    content: () => ({ type: 'stream', open: () => Readable.from(['content']), contentLength: 7, contentType: 'text/plain' }),
-  }),
-} as unknown as Repository;
-
-const token = (claims: JWTPayload = {}, { key, kid } = signingKey) =>
+const token = (claims: JWTPayload = {}, { key, kid } = signingKey, typ = 'at+jwt') =>
   new SignJWT({ sub: ENTITLED, iss: ISSUER, aud: AUDIENCE, ...claims })
-    .setProtectedHeader({ alg: 'RS256', kid })
+    .setProtectedHeader({ alg: 'RS256', kid, typ })
     .setIssuedAt()
     .setExpirationTime(typeof claims.exp === 'number' ? claims.exp : '15m')
     .sign(key);
 
-const get = (path: string, bearer?: string) => app.inject({ method: 'GET', url: `/api${path}`, headers: bearer ? { authorization: `Bearer ${bearer}` } : {} });
+const get = (path: string, bearer?: string) =>
+  app.inject({ method: 'GET', url: `${prefix}${path}`, headers: bearer ? { authorization: `Bearer ${bearer}` } : {} });
 
 const file = (id: string, bearer?: string) => get(`/file/${encodeURIComponent(id)}`, bearer);
 
@@ -64,23 +65,22 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const fake = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  process.env.OIDC_ISSUER = ISSUER;
-  process.env.OIDC_UPSTREAM_ISSUER = fake;
-  process.env.OIDC_UPSTREAM_CLIENT_ID = 'ldacapi';
-  process.env.OIDC_UPSTREAM_CLIENT_SECRET = 'secret';
-  process.env.REMS_ENDPOINT = fake;
+  let config: Awaited<ReturnType<typeof buildTestApp>>['config'];
+  ({ app, prisma, config } = await buildTestApp(
+    {
+      OIDC_ISSUER: ISSUER,
+      OIDC_CLIENTS: JSON.stringify([{ client_id: 'oni', redirect_uris: ['http://localhost:5173/callback'] }]),
+      OIDC_UPSTREAM_ISSUER: fake,
+      OIDC_UPSTREAM_CLIENT_ID: 'ldacapi',
+      OIDC_UPSTREAM_CLIENT_SECRET: 'secret',
+      REMS_ENDPOINT: fake,
+      OIDC_SIGNING_KEYS: JSON.stringify({ keys: SIGNING_KEYS }),
+    },
+    { repository: repositoryWithContent },
+  ));
+  ({ prefix } = config);
 
-  // Imported after the environment is set, as configuration is read on import
-  const { config } = await import('./configuration.ts');
-  ({ prisma } = await import('./prisma.ts'));
-  const { buildApp } = await import('./app.ts');
-  const { loadSigningKeys } = await import('./oidc/keys.ts');
-  const { Client } = await import('@opensearch-project/opensearch');
-  const { createSearchBackend } = await import('./indexer/search.ts');
-  app = buildApp({ repository, search: createSearchBackend(new Client({ node: config.opensearchUrl })) });
-
-  const [jwk] = (await loadSigningKeys(prisma)).keys as [JWK];
-  signingKey = { key: await importJWK(jwk, 'RS256'), kid: jwk.kid as string };
+  signingKey = await importSigningKey(SIGNING_KEYS[0] as Jwk);
 
   await createFile(OPEN_FILE, OPEN);
   await createFile(RESTRICTED_FILE, RESTRICTED);
@@ -106,6 +106,12 @@ describe('licence checks with our access tokens', () => {
     expect(response.statusCode).toBe(200);
     expect(response.body).toBe('content');
     expect(remsRequests().map(({ url }) => url)).toEqual([`/entitlements?user=${ENTITLED}`]);
+  });
+
+  it('accepts a token signed with the previous signing key', async () => {
+    const response = await file(RESTRICTED_FILE, await token({}, await importSigningKey(SIGNING_KEYS[1] as Jwk)));
+
+    expect(response.statusCode).toBe(200);
   });
 
   it('refuses restricted content to a signed-in user without the entitlement', async () => {
@@ -140,6 +146,7 @@ describe('licence checks with our access tokens', () => {
     ],
     ['a token from another issuer', () => token({ iss: 'https://idp.example.org' })],
     ['a token for another audience', () => token({ aud: 'https://other.example.org/api' })],
+    ['a token that is not an access token', () => token({}, signingKey, 'JWT')],
   ];
 
   describe.each(anonymousTokens)('with %s', (_name, bearer) => {

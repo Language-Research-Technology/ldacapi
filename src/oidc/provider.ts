@@ -1,14 +1,10 @@
-import middie from '@fastify/middie';
-import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
-import fp from 'fastify-plugin';
-import Provider, { type Account, type Configuration, errors, type InteractionResults, type KoaContextWithOIDC } from 'oidc-provider';
-import type { IDToken } from 'openid-client';
-import { config } from '../configuration.ts';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest, onRequestHookHandler } from 'fastify';
+import Provider, { type ClientMetadata, type Configuration, errors, type InteractionResults, type KoaContextWithOIDC } from 'oidc-provider';
+import type { AuthConfig, OidcClient } from '../configuration.ts';
 import { logger } from '../logger.ts';
-import { prisma } from '../prisma.ts';
-import { PrismaAdapter } from './adapter.ts';
-import { loadSigningKeys } from './keys.ts';
+import { deleteExpired, PrismaAdapter } from './adapter.ts';
 import { createUpstream, type UpstreamChecks } from './upstream.ts';
+import { findAccount, saveUser } from './users.ts';
 
 const log = logger.child({ module: 'oidc' });
 
@@ -16,95 +12,93 @@ const routes = {
   authorization: '/oauth/authorize',
   token: '/oauth/token',
   jwks: '/oauth/jwks',
-  userinfo: '/oauth/userinfo',
   end_session: '/oauth/session/end',
   revocation: '/oauth/token/revocation',
 } satisfies Configuration['routes'];
 
-const providerPaths = ['/.well-known/openid-configuration', ...Object.values(routes)];
-
-const isProviderPath = (url = '') => {
-  const [path = ''] = url.split('?');
-  return providerPaths.some((providerPath) => path === providerPath || path.startsWith(`${providerPath}/`));
-};
-
 const DAY = 24 * 60 * 60;
 const epochTime = () => Math.floor(Date.now() / 1000);
-const SCOPES = 'openid profile email offline_access';
+const SCOPES = 'openid profile email';
+const SIGN_IN_EXPIRED = 'Sign-in has expired or was started elsewhere';
 
-const findAccount = async (_ctx: KoaContextWithOIDC, sub: string): Promise<Account | undefined> => {
-  const user = await prisma.user.findUnique({ where: { sub } });
-  if (!user) {
-    return undefined;
-  }
-  return {
-    accountId: sub,
-    claims: () => ({
-      sub,
-      name: user.name ?? undefined,
-      email: user.email ?? undefined,
-      given_name: user.givenName ?? undefined,
-      family_name: user.familyName ?? undefined,
-    }),
-  };
+const interactionPath = (uid: string) => `/oauth/interaction/${uid}`;
+
+// Signs out without a click only when the request names, by ID token, the user signed in; anyone else gets a button
+const logoutSource = async (ctx: KoaContextWithOIDC, form: string) => {
+  const hinted = ctx.oidc.entities.IdTokenHint?.payload.sub;
+  const confirmed = hinted !== undefined && hinted === ctx.oidc.session?.accountId;
+  ctx.set('Content-Security-Policy', "frame-ancestors 'none'");
+  ctx.set('X-Frame-Options', 'DENY');
+  ctx.body = `<!DOCTYPE html>
+<html>
+<head><title>Sign out</title></head>
+<body>
+  ${form}
+  <input type="hidden" form="op.logoutForm" name="logout" value="yes"/>
+  <button type="submit" form="op.logoutForm">Sign out</button>
+  ${confirmed ? "<script>document.getElementById('op.logoutForm').submit()</script>" : ''}
+</body>
+</html>`;
 };
 
-const str = (value: unknown) => (typeof value === 'string' ? value : null);
-
-const saveUser = ({ sub, ...claims }: IDToken) => {
-  const details = {
-    name: str(claims.name),
-    email: str(claims.email),
-    givenName: str(claims.given_name),
-    familyName: str(claims.family_name),
-  };
-  return prisma.user.upsert({ where: { sub }, create: { sub, ...details }, update: details });
-};
-
-// Clients come only from our configuration, so they get every scope they ask for without a consent screen
-const loadExistingGrant = async (ctx: KoaContextWithOIDC) => {
+// Clients come only from our configuration, so they get every scope they ask for that we support, without a consent screen
+const loadExistingGrant = (audience: string) => async (ctx: KoaContextWithOIDC) => {
   const { client, session, provider } = ctx.oidc;
   if (!client || !session?.accountId) {
     return undefined;
   }
-  const grantId = ctx.oidc.result?.consent?.grantId || session.grantIdFor(client.clientId);
-  const grant = (grantId && (await provider.Grant.find(grantId))) || new provider.Grant({ clientId: client.clientId, accountId: session.accountId });
-  grant.addOIDCScope(SCOPES);
-  grant.addResourceScope(config.auth.audience, SCOPES);
-  await grant.save();
+  const grantId = session.grantIdFor(client.clientId);
+  const existing = grantId ? await provider.Grant.find(grantId) : undefined;
+  const grant = existing ?? new provider.Grant({ clientId: client.clientId, accountId: session.accountId });
+  const scopes = () => [grant.getOIDCScope(), grant.getResourceScope(audience)].join('|');
+  const granted = scopes();
+  const requested = SCOPES.split(' ')
+    .filter((scope) => ctx.oidc.requestParamScopes.has(scope))
+    .join(' ');
+  grant.addOIDCScope(requested);
+  grant.addResourceScope(audience, requested);
+  if (!existing || scopes() !== granted) {
+    await grant.save();
+  }
   return grant;
 };
 
-const createProvider = async () => {
-  const { audience } = config.auth;
-  const provider = new Provider(config.auth.issuer, {
+const toClientMetadata = (client: OidcClient): ClientMetadata => (client.client_secret ? client : { ...client, token_endpoint_auth_method: 'none' });
+
+const createProvider = ({ issuer, audience, clients, signingKeys, cookieKeys }: AuthConfig) => {
+  const provider = new Provider(issuer, {
     adapter: PrismaAdapter,
-    clients: config.auth.clients,
-    jwks: (await loadSigningKeys(prisma)) as Configuration['jwks'],
+    clients: clients.map(toClientMetadata),
+    clientDefaults: { grant_types: ['authorization_code', 'refresh_token'] },
+    jwks: { keys: signingKeys },
+    cookies: { keys: cookieKeys },
     routes,
     findAccount,
-    loadExistingGrant,
+    loadExistingGrant: loadExistingGrant(audience),
     claims: {
-      openid: ['sub'],
       profile: ['name', 'given_name', 'family_name'],
       email: ['email'],
     },
     // ID tokens carry the profile and email claims even though an access token is issued too
     conformIdTokenClaims: false,
-    // Oni gets refresh tokens without having to send `prompt=consent` for `offline_access`
+    // Refresh tokens without `offline_access`, which would need `prompt=consent`
     issueRefreshToken: (_ctx, client) => client.grantTypeAllowed('refresh_token'),
+    // Every use issues a new refresh token, so its TTL is an idle timeout
+    rotateRefreshToken: true,
     ttl: {
-      Interaction: 60 * 60,
       Session: (_ctx, session) => Math.max(1, (session.loginTs ?? epochTime()) + 30 * DAY - epochTime()),
       Grant: 30 * DAY,
       RefreshToken: 14 * DAY,
     },
     interactions: {
-      url: (_ctx, interaction) => `/oauth/interaction/${interaction.uid}`,
+      url: (_ctx, interaction) => interactionPath(interaction.uid),
     },
     features: {
       devInteractions: { enabled: false },
+      // ID tokens carry the claims, and access tokens are for the API, not userinfo
+      userinfo: { enabled: false },
       revocation: { enabled: true },
+      rpInitiatedLogout: { logoutSource },
       resourceIndicators: {
         enabled: true,
         // Clients such as Oni send no `resource`, and should still get tokens for the API
@@ -125,26 +119,46 @@ const createProvider = async () => {
   return provider;
 };
 
-const queryOf = (url: string) => new URL(url, 'http://localhost').searchParams;
+const HOUR_MS = 60 * 60 * 1000;
 
-export const oidcProvider: FastifyPluginAsync = fp(async (fastify) => {
-  const provider = await createProvider();
+export const oidcProvider: FastifyPluginAsync<{ auth: AuthConfig }> = async (fastify, { auth }) => {
+  const provider = createProvider(auth);
   const callback = provider.callback();
-  const upstream = createUpstream({ ...config.auth.upstream, redirectUri: `${config.auth.issuer}/oauth/callback` });
+  const upstream = createUpstream({ ...auth.upstream, redirectUri: `${auth.issuer}/oauth/callback`, scope: SCOPES });
   const upstreamChecks = new PrismaAdapter('UpstreamChecks');
+  const issuer = new URL(auth.issuer);
+
+  // Endpoint URLs and cookie security follow our issuer, not the Host or X-Forwarded-* a request claims
+  fastify.addHook('onRequest', async (request) => {
+    request.raw.headers['x-forwarded-host'] = issuer.host;
+    request.raw.headers['x-forwarded-proto'] = issuer.protocol.slice(0, -1);
+  });
 
   fastify.addHook('onReady', (done) => {
     upstream.discover().catch((err: unknown) => {
       log.error(
         { err },
-        `Can't fetch the upstream provider's discovery document from OIDC_UPSTREAM_ISSUER (${config.auth.upstream.issuer}); sign-in will fail until it can`,
+        `Can't fetch the upstream provider's discovery document from OIDC_UPSTREAM_ISSUER (${auth.upstream.issuer}); sign-in will fail until it can`,
       );
     });
     done();
   });
 
-  await fastify.register(middie);
-  fastify.use((req, res, next) => (isProviderPath(req.url) ? callback(req, res) : next()));
+  const cleanup = setInterval(() => {
+    deleteExpired().catch((err: unknown) => log.error({ err }, "Can't delete expired OIDC provider state"));
+  }, HOUR_MS).unref();
+  fastify.addHook('onClose', async () => clearInterval(cleanup));
+
+  // Hands the request to oidc-provider before Fastify reads its body
+  const handOff: onRequestHookHandler = async (request, reply) => {
+    reply.hijack();
+    await callback(request.raw, reply.raw);
+  };
+  for (const path of ['/.well-known/openid-configuration', ...Object.values(routes)]) {
+    for (const url of [path, `${path}/*`]) {
+      fastify.route({ method: ['GET', 'POST'], url, onRequest: handOff, handler: async () => {} });
+    }
+  }
 
   // The interaction cookie is only sent to the interaction's own path, which proves the browser started it
   const interactionFor = async (request: FastifyRequest<{ Params: { uid: string } }>, reply: FastifyReply) => {
@@ -159,36 +173,40 @@ export const oidcProvider: FastifyPluginAsync = fp(async (fastify) => {
     }
   };
 
-  fastify.get<{ Params: { uid: string } }>('/oauth/interaction/:uid', async (request, reply) => {
+  fastify.get<{ Params: { uid: string } }>(interactionPath(':uid'), async (request, reply) => {
     const interaction = await interactionFor(request, reply);
     if (!interaction) {
-      return reply.badRequest('Sign-in has expired or was started elsewhere');
+      return reply.badRequest(SIGN_IN_EXPIRED);
     }
-    const { url, checks } = await upstream.authorizationUrl(interaction.uid);
-    await upstreamChecks.upsert(interaction.uid, { checks }, interaction.exp - epochTime());
-    return reply.redirect(url.toString(), 303);
+    // A reload or second tab reuses the checks, so whichever upstream response arrives still matches
+    const stored = await upstreamChecks.findOrInsert(interaction.uid, { checks: upstream.newChecks(interaction.uid) }, interaction.exp - epochTime());
+    const checks = stored?.checks as UpstreamChecks | undefined;
+    if (!checks) {
+      return reply.badRequest(SIGN_IN_EXPIRED);
+    }
+    return reply.redirect((await upstream.authorizationUrl(checks)).toString(), 303);
   });
 
   // The upstream provider's redirect URI is fixed, so send the browser on to the interaction it belongs to
-  fastify.get<{ Querystring: { state?: string } }>('/oauth/callback', async (request, reply) => {
+  fastify.get<{ Querystring: Record<string, string> }>('/oauth/callback', async (request, reply) => {
     const { state } = request.query;
     if (!state) {
       return reply.badRequest('Missing state');
     }
-    return reply.redirect(`/oauth/interaction/${encodeURIComponent(state)}/callback?${queryOf(request.url)}`, 303);
+    return reply.redirect(`${interactionPath(encodeURIComponent(state))}/callback?${new URLSearchParams(request.query)}`, 303);
   });
 
-  fastify.get<{ Params: { uid: string } }>('/oauth/interaction/:uid/callback', async (request, reply) => {
+  fastify.get<{ Params: { uid: string }; Querystring: Record<string, string> }>(`${interactionPath(':uid')}/callback`, async (request, reply) => {
     const interaction = await interactionFor(request, reply);
     const checks = interaction && ((await upstreamChecks.find(interaction.uid))?.checks as UpstreamChecks | undefined);
     if (!interaction || !checks) {
-      return reply.badRequest('Sign-in has expired or was started elsewhere');
+      return reply.badRequest(SIGN_IN_EXPIRED);
     }
     await upstreamChecks.destroy(interaction.uid);
 
     let result: InteractionResults;
     try {
-      const user = await saveUser(await upstream.claims(queryOf(request.url), checks));
+      const user = await saveUser(await upstream.claims(request.query, checks));
       result = { login: { accountId: user.sub } };
     } catch (err) {
       log.warn({ err }, 'Sign-in at the upstream provider failed');
@@ -197,4 +215,4 @@ export const oidcProvider: FastifyPluginAsync = fp(async (fastify) => {
     reply.hijack();
     await provider.interactionFinished(request.raw, reply.raw, result, { mergeWithLastSubmission: false });
   });
-});
+};

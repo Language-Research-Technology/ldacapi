@@ -5,24 +5,13 @@ model OidcPayload {
 
   payload    Json
   grantId    String?
-  userCode   String?
   uid        String?
   expiresAt  DateTime?
   consumedAt DateTime?
 
   @@id([model, id])
   @@index([grantId])
-  @@index([model, userCode])
+  @@index([expiresAt])
   @@index([model, uid])
   @@map("oidc_payload")
-}
-
-/// A private JWK that the provider signs tokens with
-model OidcSigningKey {
-  kid       String   @id
-  jwk       Json
-
-  createdAt DateTime @default(now())
-
-  @@map("oidc_signing_key")
 }

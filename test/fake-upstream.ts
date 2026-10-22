@@ -8,20 +8,32 @@ export type UpstreamUser = { sub: string; name?: string; email?: string; given_n
 type PendingCode = { redirectUri: string; nonce: string | undefined; codeChallenge: string; user: UpstreamUser };
 
 /** A minimal upstream OIDC provider on localhost: discovery, JWKS and a token endpoint */
-export const startFakeUpstream = async ({ clientId, clientSecret }: { clientId: string; clientSecret: string }) => {
+type FakeUpstreamOptions = {
+  clientId: string;
+  clientSecret: string;
+  /** How the client must authenticate at the token endpoint */
+  tokenEndpointAuthMethod?: 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt';
+};
+
+export const startFakeUpstream = async ({ clientId, clientSecret, tokenEndpointAuthMethod = 'client_secret_basic' }: FakeUpstreamOptions) => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'fake', alg: 'RS256', use: 'sig' };
   const codes = new Map<string, PendingCode>();
   let issuer = '';
 
-  const issueTokens = async (body: URLSearchParams, authorization = '') => {
-    const [id, secret] = Buffer.from(authorization.replace(/^Basic /, ''), 'base64')
-      .toString()
-      .split(':');
-    const presented = {
-      id: decodeURIComponent(id ?? '') || body.get('client_id'),
-      secret: decodeURIComponent(secret ?? '') || body.get('client_secret'),
-    };
+  const presentedClient = (body: URLSearchParams, authorization: string | undefined) => {
+    if (tokenEndpointAuthMethod === 'client_secret_post') {
+      return authorization ? {} : { id: body.get('client_id'), secret: body.get('client_secret') };
+    }
+    if (tokenEndpointAuthMethod !== 'client_secret_basic' || !authorization?.startsWith('Basic ') || body.has('client_secret')) {
+      return {};
+    }
+    const [id, secret] = Buffer.from(authorization.slice('Basic '.length), 'base64').toString().split(':');
+    return { id: decodeURIComponent(id ?? ''), secret: decodeURIComponent(secret ?? '') };
+  };
+
+  const issueTokens = async (body: URLSearchParams, authorization: string | undefined) => {
+    const presented = presentedClient(body, authorization);
     if (presented.id !== clientId || presented.secret !== clientSecret) {
       return { status: 401, json: { error: 'invalid_client' } };
     }
@@ -60,6 +72,7 @@ export const startFakeUpstream = async ({ clientId, clientSecret }: { clientId: 
         subject_types_supported: ['public'],
         id_token_signing_alg_values_supported: ['RS256'],
         code_challenge_methods_supported: ['S256'],
+        token_endpoint_auth_methods_supported: [tokenEndpointAuthMethod],
       });
     }
     if (req.url === '/jwks') {

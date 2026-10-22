@@ -172,9 +172,6 @@ importers:
       '@fastify/cors':
         specifier: ^11.3.1
         version: 11.3.1
-      '@fastify/middie':
-        specifier: ^9.3.6
-        version: 9.3.6
       '@fastify/sensible':
         specifier: ^6.0.7
         version: 6.0.7
@@ -196,9 +193,6 @@ importers:
       fastify:
         specifier: ^5.12.7
         version: 5.12.7
-      fastify-plugin:
-        specifier: ^6.0.1
-        version: 6.0.1
       fastify-type-provider-zod:
         specifier: ^7.0.0
         version: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
@@ -453,9 +447,6 @@ packages:
 
   '@fastify/merge-json-schemas@0.2.1':
     resolution: {integrity: sha512-OA3KGBCy6KtIvLf8DINC5880o5iBlDX4SxzLQS8HorJAbqluzLRn80UXU0bxZn7UOFhFgpRJDasfwn9nG4FG4A==}
-
-  '@fastify/middie@9.3.6':
-    resolution: {integrity: sha512-Uvl+1tDXriJsNv3GvC7IDKFVOvNGnsXp+YC6hxKKeMK/00L3NWzmNftI02nHz0xU0VPQlUbESHuGsUNIfn6CVQ==}
 
   '@fastify/proxy-addr@5.1.1':
     resolution: {integrity: sha512-zv07Y9GEuDsJPegZoDFd4SDWaZOW8N2pa0GSrYmKpId/tjt1Hgo3BjZBVjdVpfVrHaA+Qv5jawtS2O50J5xM9g==}
@@ -2075,9 +2066,6 @@ packages:
     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
     engines: {node: '>=8'}
 
-  path-to-regexp@8.4.2:
-    resolution: {integrity: sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==}
-
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
 
@@ -2779,14 +2767,6 @@ snapshots:
   '@fastify/merge-json-schemas@0.2.1':
     dependencies:
       dequal: 2.0.3
-
-  '@fastify/middie@9.3.6':
-    dependencies:
-      '@fastify/error': 4.2.0
-      fastify-plugin: 6.0.1
-      find-my-way: 9.9.0
-      path-to-regexp: 8.4.2
-      reusify: 1.1.0
 
   '@fastify/proxy-addr@5.1.1':
     dependencies:
@@ -4237,8 +4217,6 @@ snapshots:
   parseurl@1.3.3: {}
 
   path-key@3.1.1: {}
-
-  path-to-regexp@8.4.2: {}
 
   pathe@2.0.3: {}
 

@@ -1,6 +1,7 @@
+import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
-import type { ClientMetadata } from 'oidc-provider';
 import * as z from 'zod';
+import { generateCookieKey, generateSigningKey, type Jwk, SIGNING_ALG } from './oidc/keys.ts';
 
 type Env = Record<string, string | undefined>;
 
@@ -27,29 +28,53 @@ const oidcClient = z.strictObject({
   post_logout_redirect_uris: z.array(z.url()).optional(),
 });
 
-const isJson = (value: string) => {
+export type OidcClient = z.infer<typeof oidcClient>;
+
+const json = z.string().transform((value, ctx) => {
   try {
-    JSON.parse(value);
-    return true;
+    return JSON.parse(value) as unknown;
+  } catch {
+    ctx.addIssue({ code: 'custom', message: 'Invalid JSON' });
+    return z.NEVER;
+  }
+});
+
+const oidcClients = json.pipe(z.array(oidcClient));
+
+const privateRsaJwk = z.looseObject({ kty: z.literal('RSA'), kid: z.string().min(1), alg: z.literal(SIGNING_ALG) }).refine((jwk) => {
+  try {
+    const key = createPrivateKey({ key: jwk, format: 'jwk' });
+    const probe = Buffer.from('probe');
+    return verify('sha256', probe, createPublicKey(key), sign('sha256', probe, key));
   } catch {
     return false;
   }
-};
+}, 'Not a valid RSA private key');
 
-const oidcClients = z
+const signingKeys = json.pipe(z.object({ keys: z.array(privateRsaJwk).min(1, 'Needs at least one key') }));
+
+const cookieKeys = z
   .string()
-  .refine(isJson, 'Invalid JSON')
-  .transform((value) => JSON.parse(value))
-  .pipe(z.array(oidcClient))
-  .transform((clients) =>
-    clients.map(
-      (client): ClientMetadata => ({
-        ...client,
-        grant_types: ['authorization_code', 'refresh_token'],
-        ...(client.client_secret ? {} : { token_endpoint_auth_method: 'none' }),
-      }),
-    ),
-  );
+  .transform((value) => value.split(',').map((key) => key.trim()))
+  .pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')));
+
+const REQUIRED_WITH_UPSTREAM = 'Required when OIDC_UPSTREAM_ISSUER is set';
+
+const requiredWithUpstream = (production: boolean) => {
+  // Throwaway keys outside production, so sign-in works with no configuration
+  const key = <T extends object>(generate: () => T) => {
+    const required = z.custom<T>((value) => value !== undefined, 'Required in production when OIDC_UPSTREAM_ISSUER is set');
+    return production ? required : required.default(generate);
+  };
+  return z.object({
+    OIDC_ISSUER: z.string(REQUIRED_WITH_UPSTREAM),
+    OIDC_CLIENTS: z.array(oidcClient).min(1, 'Needs at least one client when OIDC_UPSTREAM_ISSUER is set'),
+    OIDC_UPSTREAM_CLIENT_ID: z.string(REQUIRED_WITH_UPSTREAM),
+    OIDC_UPSTREAM_CLIENT_SECRET: z.string(REQUIRED_WITH_UPSTREAM),
+    OIDC_SIGNING_KEYS: key<{ keys: Jwk[] }>(() => ({ keys: [generateSigningKey()] })),
+    OIDC_COOKIE_KEYS: key<string[]>(() => [generateCookieKey()]),
+  });
+};
 
 export function loadConfig(processEnv: Env) {
   const nodeEnv = z.enum(['development', 'test', 'production']).default('development').parse(processEnv.NODE_ENV);
@@ -57,6 +82,16 @@ export function loadConfig(processEnv: Env) {
 
   const devDefault = (value: string) => (nodeEnv === 'production' ? z.string() : z.string().default(value));
   const optional = z.string().default('');
+  const url = nodeEnv === 'production' ? z.url({ protocol: /^https$/, error: 'Must be an https URL in production' }) : z.url();
+  const origin = url.transform((value, ctx) => {
+    const { origin, pathname, search, hash } = new URL(value);
+    if (pathname !== '/' || search || hash) {
+      ctx.addIssue({ code: 'custom', message: 'Must be an origin, with no path, query or hash' });
+      return z.NEVER;
+    }
+    return origin;
+  });
+  const prefix = '/api';
 
   const result = z
     .object({
@@ -76,21 +111,45 @@ export function loadConfig(processEnv: Env) {
       REMS_KEY: optional,
       REMS_ENDPOINT: optional,
       ENROLLMENT_URL: optional,
-      OIDC_ISSUER: nodeEnv === 'production' ? z.url().optional() : z.url().default('http://localhost:8080'),
+      OIDC_ISSUER: nodeEnv === 'production' ? origin.optional() : origin.default('http://localhost:8080'),
       OIDC_CLIENTS: oidcClients.default([]),
-      OIDC_UPSTREAM_ISSUER: z.url().optional(),
-      OIDC_UPSTREAM_CLIENT_ID: optional,
-      OIDC_UPSTREAM_CLIENT_SECRET: optional,
+      OIDC_UPSTREAM_ISSUER: url.optional(),
+      OIDC_UPSTREAM_CLIENT_ID: z.string().optional(),
+      OIDC_UPSTREAM_CLIENT_SECRET: z.string().optional(),
+      OIDC_SIGNING_KEYS: signingKeys.optional(),
+      OIDC_COOKIE_KEYS: cookieKeys.optional(),
     })
-    .superRefine((env, ctx) => {
-      if (!env.OIDC_UPSTREAM_ISSUER) {
-        return;
+    .transform((env, ctx) => {
+      const {
+        OIDC_ISSUER,
+        OIDC_CLIENTS,
+        OIDC_UPSTREAM_ISSUER,
+        OIDC_UPSTREAM_CLIENT_ID,
+        OIDC_UPSTREAM_CLIENT_SECRET,
+        OIDC_SIGNING_KEYS,
+        OIDC_COOKIE_KEYS,
+        ...rest
+      } = env;
+      if (!OIDC_UPSTREAM_ISSUER) {
+        return { ...rest, auth: undefined };
       }
-      for (const key of ['OIDC_ISSUER', 'OIDC_UPSTREAM_CLIENT_ID', 'OIDC_UPSTREAM_CLIENT_SECRET'] as const) {
-        if (!env[key]) {
-          ctx.addIssue({ code: 'custom', path: [key], message: 'Required when OIDC_UPSTREAM_ISSUER is set' });
+      const required = requiredWithUpstream(nodeEnv === 'production').safeParse(env);
+      if (!required.success) {
+        for (const issue of required.error.issues) {
+          ctx.addIssue({ ...issue });
         }
+        return z.NEVER;
       }
+      const { data } = required;
+      const auth = {
+        issuer: data.OIDC_ISSUER,
+        audience: `${data.OIDC_ISSUER}${prefix}`,
+        clients: data.OIDC_CLIENTS,
+        upstream: { issuer: OIDC_UPSTREAM_ISSUER, clientId: data.OIDC_UPSTREAM_CLIENT_ID, clientSecret: data.OIDC_UPSTREAM_CLIENT_SECRET },
+        signingKeys: data.OIDC_SIGNING_KEYS.keys,
+        cookieKeys: data.OIDC_COOKIE_KEYS,
+      };
+      return { ...rest, auth };
     })
     // Treat empty values (e.g. `FOO=` in .env) as unset
     .safeParse(Object.fromEntries(Object.entries(processEnv).filter(([, value]) => value !== '')));
@@ -98,8 +157,6 @@ export function loadConfig(processEnv: Env) {
     throw new Error(`Invalid environment:\n${z.prettifyError(result.error)}`);
   }
   const env = result.data;
-  const prefix = '/api';
-  const issuer = (env.OIDC_ISSUER ?? '').replace(/\/$/, '');
 
   return {
     isDev,
@@ -124,20 +181,12 @@ export function loadConfig(processEnv: Env) {
       endpoint: env.REMS_ENDPOINT,
     },
     enrollmentUrl: env.ENROLLMENT_URL,
-    auth: {
-      enabled: Boolean(env.OIDC_UPSTREAM_ISSUER),
-      issuer,
-      audience: `${issuer}${prefix}`,
-      clients: env.OIDC_CLIENTS,
-      upstream: {
-        issuer: env.OIDC_UPSTREAM_ISSUER ?? '',
-        clientId: env.OIDC_UPSTREAM_CLIENT_ID,
-        clientSecret: env.OIDC_UPSTREAM_CLIENT_SECRET,
-      },
-    },
+    auth: env.auth,
     indexType,
     search: { entityIndex: env.ENTITY_INDEX },
   };
 }
 
 export const config = loadConfig(process.env);
+
+export type AuthConfig = NonNullable<typeof config.auth>;

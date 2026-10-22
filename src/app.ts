@@ -64,8 +64,8 @@ export function buildApp({ repository, search }: AppDeps) {
     prefix,
   });
   fastify.register(ldacapi, { prefix, repository });
-  if (config.auth.enabled) {
-    fastify.register(oidcProvider);
+  if (config.auth) {
+    fastify.register(oidcProvider, { auth: config.auth });
   }
 
   return fastify;

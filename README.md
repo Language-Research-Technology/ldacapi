@@ -46,18 +46,19 @@ No configuration is needed for development. To override a default, copy
 
 ## Scripts
 
-| Script            | Does                                                                             |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`        | Run the API, restarting on changes                                               |
-| `pnpm test`       | Run the tests (needs `docker compose up`)                                        |
-| `pnpm lint`       | Biome, Knip and TypeScript                                                       |
-| `pnpm bootstrap`  | `db:deploy`, `seed` and `index` in one go                                        |
-| `pnpm seed [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
-| `pnpm index`      | Rebuild both indexes from the OCFL repository                                    |
-| `pnpm db:migrate` | Create and apply a migration after a schema change                               |
-| `pnpm db:deploy`  | Apply pending migrations                                                         |
-| `pnpm db:reset`   | Drop and recreate the dev database                                               |
-| `pnpm db:console` | Open `psql` on the dev database                                                  |
+| Script               | Does                                                                             |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `pnpm dev`           | Run the API, restarting on changes                                               |
+| `pnpm test`          | Run the tests (needs `docker compose up`)                                        |
+| `pnpm lint`          | Biome, Knip and TypeScript                                                       |
+| `pnpm bootstrap`     | `db:deploy`, `seed` and `index` in one go                                        |
+| `pnpm seed [dir]`    | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
+| `pnpm index`         | Rebuild both indexes from the OCFL repository                                    |
+| `pnpm generate-keys` | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
+| `pnpm db:migrate`    | Create and apply a migration after a schema change                               |
+| `pnpm db:deploy`     | Apply pending migrations                                                         |
+| `pnpm db:reset`      | Drop and recreate the dev database                                               |
+| `pnpm db:console`    | Open `psql` on the dev database                                                  |
 
 ## Test data
 
@@ -117,6 +118,7 @@ set.
 | `OIDC_UPSTREAM_CLIENT_ID`, `OIDC_UPSTREAM_CLIENT_SECRET`   | none                                                  |
 | `OIDC_ISSUER`                                              | `http://localhost:8080`                               |
 | `OIDC_CLIENTS`                                             | `[]`                                                  |
+| `OIDC_SIGNING_KEYS`, `OIDC_COOKIE_KEYS`                    | generated at each start outside production            |
 
 With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL`, `TOKEN_ADMIN`
 and `OCFL_ROOT` have no defaults and must be set.
@@ -133,8 +135,10 @@ anonymous.
   `OIDC_UPSTREAM_CLIENT_SECRET` are the upstream provider's issuer URL and the
   client registered there. Register `<OIDC_ISSUER>/oauth/callback` (e.g.
   `http://localhost:8080/oauth/callback`) as that client's redirect URI.
-- `OIDC_ISSUER` is required in production when sign-in is on.
-- `OIDC_CLIENTS` lists the apps allowed to get tokens, as a JSON array of
+- `OIDC_ISSUER` is an origin, with no path. It is required, and must be https,
+  in production when sign-in is on.
+- `OIDC_CLIENTS` lists the apps allowed to get tokens, at least one when
+  sign-in is on, as a JSON array of
   `client_id`, `redirect_uris`, and optionally `post_logout_redirect_uris` and
   `client_secret`. Clients without a secret are public and must use PKCE. For
   the Oni in Docker Compose:
@@ -142,6 +146,26 @@ anonymous.
   ```sh
   OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]'
   ```
+
+- `OIDC_SIGNING_KEYS` is a JWKS, `{"keys":[…]}`, of private RSA keys that sign
+  our tokens; each needs a `kid` and `alg` `RS256`. `OIDC_COOKIE_KEYS` is a
+  comma-separated list of secrets, each at least 32 characters, that sign the
+  provider's cookies. The first key in each signs, and the rest only verify.
+  Both are required in production when sign-in is on. Elsewhere, if unset,
+  the API generates throwaway keys at each start, so every restart signs
+  everyone out. Generate them with `pnpm generate-keys`, which prints both
+  lines ready for `.env`. In development, run it once so `pnpm dev` restarts
+  keep you signed in:
+
+  ```sh
+  pnpm generate-keys >> .env
+  ```
+
+To rotate the signing key, put a new one (from `pnpm generate-keys`) first in
+`OIDC_SIGNING_KEYS`, keep the old one second, and deploy. Remove the old one
+after 15 minutes, once the access tokens it signed have expired. Rotate cookie
+keys the same way, removing the old one after the 30-day session lifetime, or
+straight away if everyone signing in again is acceptable.
 
 At startup the API fetches the upstream provider's discovery document, and
 logs an error naming `OIDC_UPSTREAM_ISSUER` if it can't. It keeps running and

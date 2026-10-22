@@ -38,14 +38,14 @@
     "lint:biome": "biome check",
     "lint:knip": "knip",
     "lint:tsc": "tsc",
-    "lint": "pnpm run --parallel /^lint:/"
+    "lint": "pnpm run --parallel /^lint:/",
+    "generate-keys": "node scripts/generate-keys.ts"
   },
   "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@12.14.0",
   "dependencies": {
     "@fastify/bearer-auth": "^10.1.4",
     "@fastify/cors": "^11.3.1",
-    "@fastify/middie": "^9.3.6",
     "@fastify/sensible": "^6.0.7",
     "@ocfl/ocfl-fs": "^0.4.0",
     "@opensearch-project/opensearch": "^3.9.0",
@@ -53,7 +53,6 @@
     "@prisma/client": "^7.10.1",
     "arocapi": "5.0.0-beta.7",
     "fastify": "^5.12.7",
-    "fastify-plugin": "^6.0.1",
     "fastify-type-provider-zod": "^7.0.0",
     "jose": "^6.2.13",
     "oidc-provider": "^9.12.2",

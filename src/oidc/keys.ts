@@ -1,23 +1,24 @@
-import { calculateJwkThumbprint, exportJWK, generateKeyPair, type JWK } from 'jose';
-import type { PrismaClient } from '../generated/prisma/client.ts';
+import { createHash, createPublicKey, generateKeyPairSync, type JsonWebKey, randomBytes } from 'node:crypto';
 
-// Arbitrary constant identifying the key-generation advisory lock
-const LOCK = 0x01dc_0001;
+/** The algorithm our tokens are signed with */
+export const SIGNING_ALG = 'RS256';
 
-const generateSigningKey = async (): Promise<JWK> => {
-  const { privateKey } = await generateKeyPair('RS256', { extractable: true });
-  const jwk = await exportJWK(privateKey);
-  return { ...jwk, kid: await calculateJwkThumbprint(jwk), alg: 'RS256', use: 'sig' };
+export type Jwk = JsonWebKey & { kid: string };
+
+// RFC 7638: the required members in lexicographic order
+const thumbprint = ({ e, kty, n }: JsonWebKey) => createHash('sha256').update(JSON.stringify({ e, kty, n })).digest('base64url');
+
+/** A private RSA JWK for signing our tokens */
+export const generateSigningKey = (): Jwk => {
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = privateKey.export({ format: 'jwk' });
+  return { ...jwk, kid: thumbprint(jwk), alg: SIGNING_ALG, use: 'sig' };
 };
 
-/** The private JWKS the provider signs with, generated and stored on first call */
-export const loadSigningKeys = (prisma: PrismaClient): Promise<{ keys: JWK[] }> =>
-  prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LOCK})`;
-    let rows = await tx.oidcSigningKey.findMany({ orderBy: { createdAt: 'asc' } });
-    if (rows.length === 0) {
-      const jwk = await generateSigningKey();
-      rows = [await tx.oidcSigningKey.create({ data: { kid: jwk.kid as string, jwk: jwk as object } })];
-    }
-    return { keys: rows.map((row) => row.jwk as JWK) };
-  });
+/** A secret for signing the provider's cookies */
+export const generateCookieKey = () => randomBytes(32).toString('base64url');
+
+/** The public JWKS that verifies tokens signed with `keys` */
+export const publicJwks = (keys: Jwk[]) => ({
+  keys: keys.map((jwk) => ({ ...createPublicKey({ key: jwk, format: 'jwk' }).export({ format: 'jwk' }), kid: jwk.kid, alg: SIGNING_ALG, use: 'sig' })),
+});

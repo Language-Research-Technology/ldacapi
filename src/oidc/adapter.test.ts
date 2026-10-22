@@ -1,6 +1,6 @@
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../prisma.ts';
-import { PrismaAdapter } from './adapter.ts';
+import { deleteExpired, PrismaAdapter } from './adapter.ts';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -11,79 +11,45 @@ afterAll(async () => {
 });
 
 describe('PrismaAdapter', () => {
-  it('finds what another instance stored', async () => {
-    await new PrismaAdapter('Session').upsert('session-1', { uid: 'uid-1', accountId: 'user-1' }, 60);
-
-    const adapter = new PrismaAdapter('Session');
-
-    expect(await adapter.find('session-1')).toEqual({ uid: 'uid-1', accountId: 'user-1' });
-    expect(await adapter.findByUid('uid-1')).toEqual({ uid: 'uid-1', accountId: 'user-1' });
-    expect(await new PrismaAdapter('Grant').find('session-1')).toBeUndefined();
-  });
-
-  it('replaces an existing entry', async () => {
-    const adapter = new PrismaAdapter('Grant');
-    await adapter.upsert('grant-1', { accountId: 'user-1' }, 60);
-
-    await adapter.upsert('grant-1', { accountId: 'user-2' }, 60);
-
-    expect(await adapter.find('grant-1')).toEqual({ accountId: 'user-2' });
-  });
-
   it('does not find expired entries', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
+    const adapter = new PrismaAdapter('Session');
+    await adapter.upsert('session-1', { uid: 'uid-1' }, 60);
+    await adapter.upsert('session-2', { uid: 'uid-2' });
+
+    vi.setSystemTime(Date.now() + 61_000);
+
+    expect(await adapter.find('session-1')).toBeUndefined();
+    expect(await adapter.findByUid('uid-1')).toBeUndefined();
+    expect(await adapter.find('session-2')).toEqual({ uid: 'uid-2' });
+  });
+
+  it('treats an expiry of zero as already expired', async () => {
+    const adapter = new PrismaAdapter('Session');
+    await adapter.upsert('session-3', { uid: 'uid-3' }, 0);
+
+    expect(await adapter.find('session-3')).toBeUndefined();
+  });
+
+  it('consumes an entry only once', async () => {
     const adapter = new PrismaAdapter('AuthorizationCode');
     await adapter.upsert('code-1', { grantId: 'grant-1' }, 60);
-    await adapter.upsert('code-2', { grantId: 'grant-1' });
+    await adapter.consume('code-1');
 
-    vi.setSystemTime(Date.now() + 61_000);
-
-    expect(await adapter.find('code-1')).toBeUndefined();
-    expect(await adapter.find('code-2')).toEqual({ grantId: 'grant-1' });
+    await expect(adapter.consume('code-1')).rejects.toMatchObject({ error: 'invalid_grant' });
   });
 
-  it('does not find an expired session by uid', async () => {
+  it('deletes expired entries', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    await new PrismaAdapter('Session').upsert('session-2', { uid: 'uid-2' }, 60);
+    const adapter = new PrismaAdapter('Grant');
+    await adapter.upsert('grant-1', { accountId: 'user-1' }, 60);
+    await adapter.upsert('grant-2', { accountId: 'user-1' }, 120);
+    await adapter.upsert('grant-3', { accountId: 'user-1' });
 
     vi.setSystemTime(Date.now() + 61_000);
+    await deleteExpired();
 
-    expect(await new PrismaAdapter('Session').findByUid('uid-2')).toBeUndefined();
-  });
-
-  it('finds by user code', async () => {
-    const adapter = new PrismaAdapter('DeviceCode');
-    await adapter.upsert('device-1', { userCode: 'ABCD-EFGH' }, 60);
-
-    expect(await adapter.findByUserCode('ABCD-EFGH')).toEqual({ userCode: 'ABCD-EFGH' });
-  });
-
-  it('marks an entry consumed', async () => {
-    const adapter = new PrismaAdapter('AuthorizationCode');
-    await adapter.upsert('code-3', { grantId: 'grant-2' }, 60);
-
-    await adapter.consume('code-3');
-
-    expect(await adapter.find('code-3')).toEqual({ grantId: 'grant-2', consumed: expect.any(Number) });
-  });
-
-  it('destroys an entry', async () => {
-    const adapter = new PrismaAdapter('Interaction');
-    await adapter.upsert('interaction-1', { uid: 'interaction-1' }, 60);
-
-    await adapter.destroy('interaction-1');
-
-    expect(await adapter.find('interaction-1')).toBeUndefined();
-  });
-
-  it('revokes by grant', async () => {
-    const adapter = new PrismaAdapter('AccessToken');
-    await adapter.upsert('at-1', { grantId: 'grant-3' }, 60);
-    await adapter.upsert('at-2', { grantId: 'grant-4' }, 60);
-
-    await adapter.revokeByGrantId('grant-3');
-
-    expect(await adapter.find('at-1')).toBeUndefined();
-    expect(await adapter.find('at-2')).toEqual({ grantId: 'grant-4' });
+    const left = await prisma.oidcPayload.findMany({ where: { model: 'Grant', id: { in: ['grant-1', 'grant-2', 'grant-3'] } } });
+    expect(left.map(({ id }) => id).sort()).toEqual(['grant-2', 'grant-3']);
   });
 });

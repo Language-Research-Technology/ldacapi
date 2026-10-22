@@ -2,8 +2,7 @@ import { type IsAuthenticated, LicenceAccess, type RequestContext } from 'arocap
 import type { FastifyRequest } from 'fastify';
 import { createLocalJWKSet, errors, jwtVerify } from 'jose';
 import { config } from './configuration.ts';
-import { loadSigningKeys } from './oidc/keys.ts';
-import { prisma } from './prisma.ts';
+import { publicJwks, SIGNING_ALG } from './oidc/keys.ts';
 
 const openLicenses = new Set(config.openLicenses);
 
@@ -76,27 +75,20 @@ function authenticateUser(request: FastifyRequest): Promise<string | undefined> 
   return userId;
 }
 
-const publicKeys = async () => {
-  const { keys } = await loadSigningKeys(prisma);
-  return createLocalJWKSet({ keys: keys.map(({ d, p, q, dp, dq, qi, ...publicJwk }) => publicJwk) });
-};
-
-let verificationKeys: ReturnType<typeof publicKeys> | undefined;
+const verificationKeys = config.auth && createLocalJWKSet(publicJwks(config.auth.signingKeys));
 
 async function verifyUserId(request: FastifyRequest): Promise<string | undefined> {
+  const { auth } = config;
   const authHeader = request.headers.authorization;
-  if (!config.auth.enabled || !authHeader?.startsWith('Bearer ')) {
+  if (!auth || !verificationKeys || !authHeader?.startsWith('Bearer ')) {
     return;
   }
-  verificationKeys ??= publicKeys().catch((error) => {
-    verificationKeys = undefined;
-    throw error;
-  });
   try {
-    const { payload } = await jwtVerify(authHeader.slice('Bearer '.length), await verificationKeys, {
-      issuer: config.auth.issuer,
-      audience: config.auth.audience,
-      algorithms: ['RS256'],
+    const { payload } = await jwtVerify(authHeader.slice('Bearer '.length), verificationKeys, {
+      issuer: auth.issuer,
+      audience: auth.audience,
+      algorithms: [SIGNING_ALG],
+      typ: 'at+jwt',
     });
     return payload.sub || undefined;
   } catch (error) {

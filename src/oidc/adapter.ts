@@ -1,18 +1,17 @@
-import type { Adapter, AdapterPayload } from 'oidc-provider';
+import { type Adapter, type AdapterPayload, errors } from 'oidc-provider';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
 
-const unexpired = () => ({ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] });
+/** Deletes every expired model instance */
+export const deleteExpired = () => prisma.oidcPayload.deleteMany({ where: { expiresAt: { lt: new Date() } } });
 
-type Row = { payload: Prisma.JsonValue; consumedAt: Date | null };
-
-const toPayload = (row: Row | null): AdapterPayload | undefined => {
-  if (!row) {
-    return undefined;
-  }
-  const payload = row.payload as AdapterPayload;
-  return row.consumedAt ? { ...payload, consumed: Math.floor(row.consumedAt.getTime() / 1000) } : payload;
-};
+const toRow = (payload: AdapterPayload, expiresIn?: number) => ({
+  payload: payload as Prisma.InputJsonObject,
+  grantId: payload.grantId ?? null,
+  uid: payload.uid ?? null,
+  expiresAt: expiresIn === undefined ? null : new Date(Date.now() + expiresIn * 1000),
+  consumedAt: null,
+});
 
 export class PrismaAdapter implements Adapter {
   private readonly model: string;
@@ -22,14 +21,7 @@ export class PrismaAdapter implements Adapter {
   }
 
   async upsert(id: string, payload: AdapterPayload, expiresIn?: number) {
-    const data = {
-      payload: payload as Prisma.InputJsonObject,
-      grantId: payload.grantId ?? null,
-      userCode: payload.userCode ?? null,
-      uid: payload.uid ?? null,
-      expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000) : null,
-      consumedAt: null,
-    };
+    const data = toRow(payload, expiresIn);
     await prisma.oidcPayload.upsert({
       where: { model_id: { model: this.model, id } },
       create: { model: this.model, id, ...data },
@@ -37,20 +29,30 @@ export class PrismaAdapter implements Adapter {
     });
   }
 
-  async find(id: string) {
-    return toPayload(await prisma.oidcPayload.findFirst({ where: { model: this.model, id, ...unexpired() } }));
+  /** Stores `payload` unless `id` already has one, and returns whichever is stored */
+  async findOrInsert(id: string, payload: AdapterPayload, expiresIn?: number) {
+    await prisma.oidcPayload.createMany({ data: { model: this.model, id, ...toRow(payload, expiresIn) }, skipDuplicates: true });
+    return this.find(id);
   }
 
-  async findByUid(uid: string) {
-    return toPayload(await prisma.oidcPayload.findFirst({ where: { model: this.model, uid, ...unexpired() } }));
+  find(id: string) {
+    return this.findBy({ id });
   }
 
-  async findByUserCode(userCode: string) {
-    return toPayload(await prisma.oidcPayload.findFirst({ where: { model: this.model, userCode, ...unexpired() } }));
+  findByUid(uid: string) {
+    return this.findBy({ uid });
+  }
+
+  // The device flow, the only user of user codes, is off
+  async findByUserCode(_userCode: string) {
+    return undefined;
   }
 
   async consume(id: string) {
-    await prisma.oidcPayload.updateMany({ where: { model: this.model, id }, data: { consumedAt: new Date() } });
+    const { count } = await prisma.oidcPayload.updateMany({ where: { model: this.model, id, consumedAt: null }, data: { consumedAt: new Date() } });
+    if (count === 0) {
+      throw new errors.InvalidGrant(`${this.model} already consumed`);
+    }
   }
 
   async destroy(id: string) {
@@ -59,5 +61,16 @@ export class PrismaAdapter implements Adapter {
 
   async revokeByGrantId(grantId: string) {
     await prisma.oidcPayload.deleteMany({ where: { model: this.model, grantId } });
+  }
+
+  private async findBy(where: { id: string } | { uid: string }): Promise<AdapterPayload | undefined> {
+    const row = await prisma.oidcPayload.findFirst({
+      where: { model: this.model, ...where, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+    });
+    if (!row) {
+      return undefined;
+    }
+    const payload = row.payload as AdapterPayload;
+    return row.consumedAt ? { ...payload, consumed: Math.floor(row.consumedAt.getTime() / 1000) } : payload;
   }
 }

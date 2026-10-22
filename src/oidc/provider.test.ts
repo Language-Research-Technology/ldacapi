@@ -1,49 +1,33 @@
-import { createHash, randomBytes } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Repository } from '../repository.ts';
+import { buildTestApp, type TestApp } from '../../test/app.ts';
+import { authorizationRequest, Browser } from '../../test/oidc.ts';
+import { generateSigningKey } from './keys.ts';
 
 const ISSUER = 'http://localhost:8080';
 const REDIRECT_URI = 'http://localhost:5173/callback';
 const ONI = { client_id: 'oni', redirect_uris: [REDIRECT_URI] };
+const SIGNING_KEYS = [generateSigningKey(), generateSigningKey()];
 
-let buildApp: typeof import('../app.ts').buildApp;
-let app: ReturnType<typeof buildApp>;
-let search: import('arocapi').SearchBackend;
-let prisma: typeof import('../prisma.ts').prisma;
-
-const repository = { storage: () => ({ content: {} }) } as unknown as Repository;
+let app: TestApp;
+let build: () => TestApp;
+let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
 
 const get = (url: string, target = app) => target.inject({ method: 'GET', url, headers: { host: 'localhost:8080' } });
 
-const authorize = (params: Record<string, string>) => {
-  const verifier = randomBytes(32).toString('base64url');
-  const query = new URLSearchParams({
-    client_id: ONI.client_id,
-    redirect_uri: REDIRECT_URI,
-    response_type: 'code',
-    scope: 'openid',
-    code_challenge: createHash('sha256').update(verifier).digest('base64url'),
-    code_challenge_method: 'S256',
-    ...params,
-  });
-  return get(`/oauth/authorize?${query}`);
+const authorize = async (params: Record<string, string>, browser = new Browser(app, ISSUER)) => {
+  const { url } = await authorizationRequest({ client_id: ONI.client_id, redirect_uri: REDIRECT_URI, scope: 'openid', ...params });
+  return browser.get(url);
 };
 
 beforeAll(async () => {
-  process.env.OIDC_ISSUER = ISSUER;
-  process.env.OIDC_CLIENTS = JSON.stringify([ONI]);
-  process.env.OIDC_UPSTREAM_ISSUER = 'https://idp.example.org';
-  process.env.OIDC_UPSTREAM_CLIENT_ID = 'ldacapi';
-  process.env.OIDC_UPSTREAM_CLIENT_SECRET = 'secret';
-
-  // Imported after the environment is set, as configuration is read on import
-  const { config } = await import('../configuration.ts');
-  ({ prisma } = await import('../prisma.ts'));
-  ({ buildApp } = await import('../app.ts'));
-  const { Client } = await import('@opensearch-project/opensearch');
-  const { createSearchBackend } = await import('../indexer/search.ts');
-  search = createSearchBackend(new Client({ node: config.opensearchUrl }));
-  app = buildApp({ repository, search });
+  ({ app, build, prisma } = await buildTestApp({
+    OIDC_ISSUER: ISSUER,
+    OIDC_CLIENTS: JSON.stringify([ONI]),
+    OIDC_UPSTREAM_ISSUER: 'https://idp.example.org',
+    OIDC_UPSTREAM_CLIENT_ID: 'ldacapi',
+    OIDC_UPSTREAM_CLIENT_SECRET: 'secret',
+    OIDC_SIGNING_KEYS: JSON.stringify({ keys: SIGNING_KEYS }),
+  }));
 });
 
 afterAll(async () => {
@@ -52,31 +36,38 @@ afterAll(async () => {
 });
 
 describe('OIDC provider', () => {
+  const endpoints = {
+    issuer: ISSUER,
+    authorization_endpoint: `${ISSUER}/oauth/authorize`,
+    token_endpoint: `${ISSUER}/oauth/token`,
+    jwks_uri: `${ISSUER}/oauth/jwks`,
+    end_session_endpoint: `${ISSUER}/oauth/session/end`,
+    revocation_endpoint: `${ISSUER}/oauth/token/revocation`,
+  };
+
   it('serves discovery with our issuer and endpoints under /oauth/', async () => {
     const response = await get('/.well-known/openid-configuration');
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      issuer: ISSUER,
-      authorization_endpoint: `${ISSUER}/oauth/authorize`,
-      token_endpoint: `${ISSUER}/oauth/token`,
-      jwks_uri: `${ISSUER}/oauth/jwks`,
-      userinfo_endpoint: `${ISSUER}/oauth/userinfo`,
-      end_session_endpoint: `${ISSUER}/oauth/session/end`,
-      revocation_endpoint: `${ISSUER}/oauth/token/revocation`,
-    });
+    expect(response.json()).toMatchObject(endpoints);
+    expect(response.json()).not.toHaveProperty('userinfo_endpoint');
   });
 
-  it('keeps its signing keys across app builds', async () => {
-    const first = await get('/oauth/jwks');
-    const other = buildApp({ repository, search });
-    const second = await get('/oauth/jwks', other);
-    await other.close();
+  it('lists endpoints at our issuer whatever host the request names', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/.well-known/openid-configuration',
+      headers: { host: 'evil.example.org', 'x-forwarded-host': 'evil.example.org', 'x-forwarded-proto': 'https' },
+    });
 
-    expect(first.json().keys).toHaveLength(1);
-    expect(first.json().keys[0]).toMatchObject({ kty: 'RSA', alg: 'RS256', use: 'sig' });
-    expect(first.json().keys[0]).not.toHaveProperty('d');
-    expect(second.json()).toEqual(first.json());
+    expect(response.json()).toMatchObject(endpoints);
+  });
+
+  it('lists the public half of every configured signing key at the discovered jwks_uri', async () => {
+    const { jwks_uri } = (await get('/.well-known/openid-configuration')).json();
+    const { keys } = (await get(new URL(jwks_uri).pathname)).json();
+
+    expect(keys).toEqual(SIGNING_KEYS.map(({ kty, n, e, kid }) => ({ kty, n, e, kid, alg: 'RS256', use: 'sig' })));
   });
 
   it('rejects an unknown client', async () => {
@@ -107,13 +98,21 @@ describe('OIDC provider', () => {
     expect(response.headers.location).toMatch(/^\/oauth\/interaction\/[\w-]+$/);
   });
 
-  it('resumes an authorisation request in another app build', async () => {
-    const started = await authorize({});
-    const uid = (started.headers.location as string).split('/').pop();
-    const cookie = started.cookies.map(({ name, value }) => `${name}=${value}`).join('; ');
-    const other = buildApp({ repository, search });
+  it('signs its cookies', async () => {
+    const response = await authorize({});
 
-    const resumed = await other.inject({ method: 'GET', url: `/oauth/authorize/${uid}`, headers: { host: 'localhost:8080', cookie } });
+    const names = (response.cookies as { name: string }[]).map(({ name }) => name);
+    expect(names).toContain('_interaction');
+    expect(names.filter((name) => !name.endsWith('.sig')).map((name) => `${name}.sig`)).toEqual(names.filter((name) => name.endsWith('.sig')));
+  });
+
+  it('resumes an authorisation request in another app build', async () => {
+    const browser = new Browser(app, ISSUER);
+    const started = await authorize({}, browser);
+    const uid = (started.headers.location as string).split('/').pop();
+    const other = build();
+
+    const resumed = await browser.get(`/oauth/authorize/${uid}`, other);
     await other.close();
 
     expect(resumed.statusCode).toBe(303);
