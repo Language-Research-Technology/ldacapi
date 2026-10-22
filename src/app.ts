@@ -9,6 +9,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { logger } from './logger.ts';
+import { oidcProvider } from './oidc/provider.ts';
 import { prisma } from './prisma.ts';
 import type { Repository } from './repository.ts';
 import { admin } from './routes/admin.ts';
@@ -64,6 +65,9 @@ export function buildApp({ repository, search }: AppDeps) {
     prefix,
   });
   fastify.register(ldacapi, { prefix, repository });
+  if (config.auth.enabled) {
+    fastify.register(oidcProvider);
+  }
   fastify.register(auth, { prefix: config.prefixAuth || prefix });
 
   return fastify;

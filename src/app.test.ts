@@ -18,4 +18,14 @@ describe('buildApp', () => {
     expect(response.json()).toEqual({ version: pkg.version });
     await app.close();
   });
+
+  it('has no OIDC provider without an upstream provider', async () => {
+    const app = buildApp({ repository, search });
+
+    for (const url of ['/.well-known/openid-configuration', '/oauth/jwks', '/oauth/authorize?client_id=oni']) {
+      expect((await app.inject({ method: 'GET', url })).statusCode, url).toBe(404);
+    }
+    expect((await app.inject({ method: 'POST', url: '/oauth/token' })).statusCode).toBe(404);
+    await app.close();
+  });
 });

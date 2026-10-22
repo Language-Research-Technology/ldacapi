@@ -1,0 +1,28 @@
+/// One oidc-provider model instance (Session, Grant, AuthorizationCode, …)
+model OidcPayload {
+  model      String
+  id         String
+
+  payload    Json
+  grantId    String?
+  userCode   String?
+  uid        String?
+  expiresAt  DateTime?
+  consumedAt DateTime?
+
+  @@id([model, id])
+  @@index([grantId])
+  @@index([model, userCode])
+  @@index([model, uid])
+  @@map("oidc_payload")
+}
+
+/// A private JWK that the provider signs tokens with
+model OidcSigningKey {
+  kid       String   @id
+  jwk       Json
+
+  createdAt DateTime @default(now())
+
+  @@map("oidc_signing_key")
+}
