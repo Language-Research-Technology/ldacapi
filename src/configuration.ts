@@ -36,7 +36,7 @@ export function loadConfig(processEnv: Env) {
       LDACAPI_PORT: z.coerce.number().int().default(8080),
       LDACAPI_HOST: z.string().default('localhost'),
       LDACAPI_MAX_PARAM_LENGTH: z.coerce.number().int().default(500),
-      LOG_LEVEL: z.string().default(isDev ? 'debug' : 'info'),
+      LOG_LEVEL: z.string().default({ development: 'debug', test: 'silent', production: 'info' }[nodeEnv]),
       ENTITY_INDEX: z.string().default(nodeEnv === 'test' ? 'entities_test' : 'entities'),
       DEFAULT_LICENSE: optional,
       DEFAULT_METADATA_LICENSE: optional,

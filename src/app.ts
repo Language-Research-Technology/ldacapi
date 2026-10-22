@@ -1,20 +1,70 @@
-import type { FastifyPluginAsync } from 'fastify';
+import cors from '@fastify/cors';
+import fastifySensible from '@fastify/sensible';
+import type { SearchBackend } from 'arocapi';
+import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
+import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
+import Fastify, { type FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
+import { access, isAuthenticated } from './auth.ts';
+import { config } from './configuration.ts';
+import { logger } from './logger.ts';
+import { prisma } from './prisma.ts';
 import type { Repository } from './repository.ts';
-import { admin as adminRoute } from './routes/admin.ts';
+import { admin } from './routes/admin.ts';
+import { auth } from './routes/auth.ts';
 
-export type LdacapiOptions = {
+type AppDeps = {
   repository: Repository;
+  search: SearchBackend;
 };
 
-const ldacapi: FastifyPluginAsync<LdacapiOptions> = async (fastify, options: LdacapiOptions) => {
+const ldacapi: FastifyPluginAsync<{ repository: Repository }> = async (fastify, { repository }) => {
   fastify.setValidatorCompiler(validatorCompiler);
   fastify.setSerializerCompiler(serializerCompiler);
-  const { version } = pkg;
-  fastify.register(adminRoute, { prefix: '/admin', repository: options.repository });
-
-  fastify.get('/version', async () => ({ version }));
+  fastify.register(admin, { prefix: '/admin', repository });
+  fastify.get('/version', async () => ({ version: pkg.version }));
 };
 
-export default ldacapi;
+export function buildApp({ repository, search }: AppDeps) {
+  const fastify = Fastify({
+    loggerInstance: logger,
+    routerOptions: {
+      maxParamLength: config.maxParamLength,
+    },
+    trustProxy: true, // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
+  });
+  const prefix = config.prefix || '';
+
+  fastify.setErrorHandler(errorHandler);
+  fastify.setNotFoundHandler(notFoundHandler);
+  fastify.register(fastifySensible);
+  fastify.register(cors, {
+    methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  });
+  fastify.register(arocapi, {
+    prisma,
+    search,
+    access,
+    isAuthenticated,
+    entityVisibilityFilter: AllVisibleEntityFilter,
+    searchVisibilityFilter: AllVisibleSearchFilter,
+    entityTransformers: [
+      (entity) => ({
+        ...entity,
+        accessControl: 'Public',
+        counts: {
+          collections: 0,
+          objects: 0,
+          files: 0,
+        },
+      }),
+    ],
+    storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
+    prefix,
+  });
+  fastify.register(ldacapi, { prefix, repository });
+  fastify.register(auth, { prefix: config.prefixAuth || prefix });
+
+  return fastify;
+}

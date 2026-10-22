@@ -13,11 +13,12 @@ describe('loadConfig', () => {
     expect(config.ocfl).toEqual({ root: resolve('storage/ocfl'), scratch: resolve('storage/scratch') });
   });
 
-  it('uses the test database and index in test', () => {
+  it('uses the test database and index, and logs nothing, in test', () => {
     const config = loadConfig({ NODE_ENV: 'test' });
 
     expect(config.databaseUrl).toBe('postgresql://ldacapi:ldacapi@localhost:5432/ldacapi_test');
     expect(config.search.entityIndex).toBe('entities_test');
+    expect(config.logLevel).toBe('silent');
   });
 
   it('reads values from the environment', () => {
