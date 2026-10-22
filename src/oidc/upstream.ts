@@ -32,6 +32,11 @@ export const createUpstream = ({ issuer, clientId, clientSecret, redirectUri }: 
   };
 
   return {
+    /** Fetches the upstream discovery document, which sign-ins then reuse; a failure is retried at the next sign-in */
+    async discover() {
+      await configuration();
+    },
+
     async authorizationUrl(state: string): Promise<{ url: URL; checks: UpstreamChecks }> {
       const codeVerifier = randomPKCECodeVerifier();
       const nonce = randomNonce();

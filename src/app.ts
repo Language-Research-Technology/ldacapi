@@ -13,7 +13,6 @@ import { oidcProvider } from './oidc/provider.ts';
 import { prisma } from './prisma.ts';
 import type { Repository } from './repository.ts';
 import { admin } from './routes/admin.ts';
-import { auth } from './routes/auth.ts';
 
 type AppDeps = {
   repository: Repository;
@@ -33,7 +32,7 @@ export function buildApp({ repository, search }: AppDeps) {
     routerOptions: {
       maxParamLength: config.maxParamLength,
     },
-    trustProxy: true, // this is required for auth module to work corractly when the app is behind a reverse proxy. The proxy must set the X-Forwarded-* headers correctly.
+    trustProxy: true, // Runs behind a reverse proxy, which must set the X-Forwarded-* headers
   });
   const prefix = config.prefix || '';
 
@@ -68,7 +67,6 @@ export function buildApp({ repository, search }: AppDeps) {
   if (config.auth.enabled) {
     fastify.register(oidcProvider);
   }
-  fastify.register(auth, { prefix: config.prefixAuth || prefix });
 
   return fastify;
 }

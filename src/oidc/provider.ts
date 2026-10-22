@@ -133,6 +133,16 @@ export const oidcProvider: FastifyPluginAsync = fp(async (fastify) => {
   const upstream = createUpstream({ ...config.auth.upstream, redirectUri: `${config.auth.issuer}/oauth/callback` });
   const upstreamChecks = new PrismaAdapter('UpstreamChecks');
 
+  fastify.addHook('onReady', (done) => {
+    upstream.discover().catch((err: unknown) => {
+      log.error(
+        { err },
+        `Can't fetch the upstream provider's discovery document from OIDC_UPSTREAM_ISSUER (${config.auth.upstream.issuer}); sign-in will fail until it can`,
+      );
+    });
+    done();
+  });
+
   await fastify.register(middie);
   fastify.use((req, res, next) => (isProviderPath(req.url) ? callback(req, res) : next()));
 

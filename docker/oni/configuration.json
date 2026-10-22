@@ -383,7 +383,7 @@
     },
     "oidc": {
       "endpoint": "http://localhost:8080",
-      "clientId": "REPLACE_ME",
+      "clientId": "oni",
       "scope": "openid profile email"
     }
   }

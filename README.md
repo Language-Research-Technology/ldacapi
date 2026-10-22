@@ -113,10 +113,43 @@ set.
 | `ENTITY_INDEX`                                             | `entities`                                            |
 | `DEFAULT_LICENSE`, `DEFAULT_METADATA_LICENSE`              | none                                                  |
 | `REMS_USER`, `REMS_KEY`, `REMS_ENDPOINT`, `ENROLLMENT_URL` | none                                                  |
-| `OIDC_ENDPOINT`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`    | none                                                  |
+| `OIDC_UPSTREAM_ISSUER`                                     | none (sign-in is off)                                 |
+| `OIDC_UPSTREAM_CLIENT_ID`, `OIDC_UPSTREAM_CLIENT_SECRET`   | none                                                  |
+| `OIDC_ISSUER`                                              | `http://localhost:8080`                               |
+| `OIDC_CLIENTS`                                             | `[]`                                                  |
 
 With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL`, `TOKEN_ADMIN`
 and `OCFL_ROOT` have no defaults and must be set.
+
+### Sign-in
+
+The API is an OIDC provider with `OIDC_ISSUER`, its public origin, as the
+issuer. It signs users in at the upstream provider, an external OIDC provider
+such as CILogon or AAF. Sign-in is on when `OIDC_UPSTREAM_ISSUER` is set;
+without it there is no discovery or `/oauth/*` route, and every request is
+anonymous.
+
+- `OIDC_UPSTREAM_ISSUER`, `OIDC_UPSTREAM_CLIENT_ID` and
+  `OIDC_UPSTREAM_CLIENT_SECRET` are the upstream provider's issuer URL and the
+  client registered there. Register `<OIDC_ISSUER>/oauth/callback` (e.g.
+  `http://localhost:8080/oauth/callback`) as that client's redirect URI.
+- `OIDC_ISSUER` is required in production when sign-in is on.
+- `OIDC_CLIENTS` lists the apps allowed to get tokens, as a JSON array of
+  `client_id`, `redirect_uris`, and optionally `post_logout_redirect_uris` and
+  `client_secret`. Clients without a secret are public and must use PKCE. For
+  the Oni in Docker Compose:
+
+  ```sh
+  OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]'
+  ```
+
+At startup the API fetches the upstream provider's discovery document, and
+logs an error naming `OIDC_UPSTREAM_ISSUER` if it can't. It keeps running and
+tries again at the next sign-in.
+
+Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
+`api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
+`client_id` in `OIDC_CLIENTS`.
 
 ## Database
 

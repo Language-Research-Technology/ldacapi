@@ -64,6 +64,13 @@ describe('loadConfig', () => {
     expect(config.auth.clients).toEqual([]);
   });
 
+  it('ignores the old relay variables', () => {
+    const config = loadConfig({ OIDC_ENDPOINT: 'https://cilogon.org', OIDC_CLIENT_ID: 'oni', OIDC_CLIENT_SECRET: 'secret' });
+
+    expect(config.auth.enabled).toBe(false);
+    expect(JSON.stringify(config)).not.toMatch(/cilogon|secret/);
+  });
+
   it('turns sign-in on with complete upstream settings', () => {
     const config = loadConfig({
       OIDC_ISSUER: 'https://api.example.org/',
