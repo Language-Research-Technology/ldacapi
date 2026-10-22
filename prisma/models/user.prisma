@@ -1,0 +1,13 @@
+/// A person who has signed in at the upstream provider, with their latest details from it
+model User {
+  sub        String   @id
+  name       String?
+  email      String?
+  givenName  String?
+  familyName String?
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("user")
+}

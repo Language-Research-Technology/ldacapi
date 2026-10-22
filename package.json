@@ -58,6 +58,7 @@
     "fastify-type-provider-zod": "^7.0.0",
     "jose": "^6.2.13",
     "oidc-provider": "^9.12.2",
+    "openid-client": "^6.8.8",
     "pino": "^10.4.0",
     "prisma": "^7.10.1",
     "ro-crate": "^3.7.2",
