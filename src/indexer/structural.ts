@@ -21,11 +21,7 @@ export class StructuralIndexer extends Indexer {
   }
 
   override async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
-    //await ocflObject.load();
     const crateId = crate.rootId;
-    //console.log(`${crateId} license: ${lic}`);
-    //const objectRoot = ocflObject.root;
-    //logger.info(`[structural] Indexing ${crateId}`);
     let count = 0;
     for (const entity of crate.entities()) {
       const entityType = recordType(entity);
@@ -83,11 +79,9 @@ export class StructuralIndexer extends Indexer {
 
   async delete(crateId?: string) {
     const where = crateId ? { id: { startsWith: crateId } } : {};
-    //const truncate = !crateId;
     await prisma.file.deleteMany({ where });
     await prisma.entity.deleteMany({ where });
     log.debug(`Index ${crateId || '<all>'} deleted`);
-    //await File.destroy({ truncate, where });
   }
 
   async count(crateId?: string) {

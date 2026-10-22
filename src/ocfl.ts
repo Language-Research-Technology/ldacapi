@@ -112,7 +112,6 @@ export async function getState(crateId: string, type?: string) {
         stateCache[crateId][name] = State.INDEXED;
       }
     }
-    //if (!StateCache[crateId]?.[name]) return State.NONE;
   }
   return type ? { [type]: stateCache[crateId]?.[type] } : (stateCache[crateId] ?? {});
 }
@@ -136,7 +135,6 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
           }
           const crateObject = wrap(ocflObject);
           await indexer.index({ crateObject, crate });
-          // counts[t]++;
         } catch (error) {
           log.error(error);
         } finally {
@@ -201,7 +199,6 @@ export async function getFile(entityId: string, storagePath: string) {
     const object = repository.object(crateId);
     await object.load();
     const file = object.getFile({ logicalPath: storagePath });
-    //console.log(file);
     return {
       path: `${repository.objectRoot(crateId)}/${file.contentPath}`,
       stream: async (range?: ByteRange) => file.stream(range),

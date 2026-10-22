@@ -44,9 +44,7 @@ export class Indexer {
   deriveUniqueEntityId(crateRootId: string, entityId: string) {
     if (entityId.startsWith(crateRootId)) {
       return entityId;
-    }
-    //else if (entityId.includes(':')) return crateRootId + '>>' + entityId;
-    else if (entityId.match(/.+:.+/)) {
+    } else if (entityId.match(/.+:.+/)) {
       return entityId;
     } else {
       return `${crateRootId}/${entityId}`;
@@ -94,8 +92,6 @@ export class Indexer {
     } else if (!license) {
       log.warn(`${warnPrefix} Skipped: No license found.`);
     } else {
-      //logger.debug('index ' + ocflObject.root);
-      //console.log(this.__state);
       log.info(`Indexing ${crateId}`);
       this.deriveUniqueEntityIds(crate);
       try {

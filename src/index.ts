@@ -1,4 +1,3 @@
-//import config from '../prisma.config.ts';
 import { Readable } from 'node:stream';
 import cors from '@fastify/cors';
 import fastifySensible from '@fastify/sensible';
