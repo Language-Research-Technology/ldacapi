@@ -1,6 +1,6 @@
 import { ROCrate } from 'ro-crate';
 import { describe, expect, it } from 'vitest';
-import type { CrateObject } from './indexer.ts';
+import { type CrateObject, Indexer } from './indexer.ts';
 import { searchDocument } from './search.ts';
 
 const ROOT = 'arcp://name,test';
@@ -18,22 +18,24 @@ const crateWith = async (entity: Record<string, unknown>) => {
       { '@id': 'data.txt', '@type': 'File', name: 'Data', encodingFormat: 'text/plain', ...entity },
     ],
   });
-  return { crate, entity: crate.getEntity('data.txt') };
+  const paths = new Indexer().deriveUniqueEntityIds(crate);
+  const id = `${ROOT}/data.txt`;
+  return { crate, entity: crate.getEntity(id), path: paths.get(id) };
 };
 
 const crateObject: CrateObject = { id: '', root: '/', text: async () => 'hello world', file: async () => ({ size: 11, crc32: '' }) };
 
 describe('searchDocument', () => {
   it('flattens an entity into declared fields', async () => {
-    const { crate, entity } = await crateWith({
+    const { crate, entity, path } = await crateWith({
       inLanguage: { '@id': '#lang' },
       'ldac:communicationMode': { '@id': 'https://w3id.org/ldac/terms#SpokenLanguage' },
       datePublished: '2001/2005',
       contentLocation: { '@id': '#place' },
     });
 
-    expect(await searchDocument(crate, crateObject, entity, LICENSE)).toMatchObject({
-      id: 'data.txt',
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, path)).toMatchObject({
+      id: `${ROOT}/data.txt`,
       name: 'Data',
       type: ['File'],
       inLanguage: ['English'],

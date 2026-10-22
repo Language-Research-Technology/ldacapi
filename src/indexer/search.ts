@@ -100,7 +100,7 @@ function isText(entity: Entity) {
 }
 
 /** One entity's search document; File entities with text content include it */
-export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string): Promise<Document> {
+export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string, path?: string): Promise<Document> {
   const id: string = entity['@id'];
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
@@ -123,8 +123,7 @@ export async function searchDocument(crate: ROCrate, crateObject: CrateObject, e
     temporalCoverage: dates(entity, 'temporalCoverage'),
     ...(point && { location: point }),
   };
-  if (isText(entity)) {
-    const path = id.startsWith(crate.rootId) ? id.replace(`${crate.rootId}/`, '') : id;
+  if (path && isText(entity)) {
     try {
       doc.text = await crateObject.text(path);
       log.info(`Indexing File: ${path}`);
@@ -180,14 +179,14 @@ export class SearchIndexer extends Indexer {
     }
   }
 
-  async _index({ crateObject, crate, license }: Parameters<Indexer['_index']>[0]) {
+  async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
     await this.search.createIndex();
     const docs: Document[] = [];
     for (const entity of crate.entities()) {
       if (!recordType(entity)) {
         continue;
       }
-      const doc = await searchDocument(crate, crateObject, entity, license);
+      const doc = await searchDocument(crate, crateObject, entity, license, paths.get(entity['@id']));
       if (doc.text) {
         // Indexed alone to keep each request small
         await this.indexDocuments([doc]);

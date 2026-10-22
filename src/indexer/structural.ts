@@ -21,7 +21,7 @@ export class StructuralIndexer extends Indexer {
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 
-  override async _index({ crateObject, crate, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
+  override async _index({ crateObject, crate, paths, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
     const crateId = crate.rootId;
     let count = 0;
     for (const entity of crate.entities()) {
@@ -47,19 +47,21 @@ export class StructuralIndexer extends Indexer {
         },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
-        const ocflPath = entity['@id'].match(/.+:.+/) ? entity['@id'].replace(`${crateId}/`, '') : entity['@id'];
+        const ocflPath = paths.get(entityId);
         let f: CrateFile = { size: -1, crc32: '' };
-        try {
-          f = await crateObject.file(ocflPath);
-        } catch (error) {
-          log.error(`[${crateId}] ${(error as Error).message}`);
+        if (ocflPath) {
+          try {
+            f = await crateObject.file(ocflPath);
+          } catch (error) {
+            log.error(`[${crateId}] ${(error as Error).message}`);
+          }
         }
         param.file = {
           id: entityId,
-          filename: ocflPath.split('/').pop(),
+          filename: (ocflPath ?? entityId).split('/').pop(),
           mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
           size: +(entity.contentSize?.[0] ?? f.size),
-          meta: { ocflObject: crateObject.id, ocflPath, crc32: f.crc32 } satisfies OcflStorageMeta & { crc32: string },
+          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath, crc32: f.crc32 } satisfies OcflStorageMeta & { crc32: string }) : {},
         };
       }
       try {

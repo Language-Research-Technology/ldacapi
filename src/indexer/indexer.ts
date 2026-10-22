@@ -10,6 +10,22 @@ export type BaseOptions = {
   name?: string;
 };
 
+/** A URI reference relative to the crate root as a decoded path, dropping any query or fragment */
+function crateRelativePath(ref: string) {
+  const path = new URL(ref, 'file:///').pathname.slice(1);
+  if (!path) {
+    return;
+  }
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Entity id → its path in the crate */
+export type LogicalPaths = Map<string, string>;
+
 export interface CrateFile {
   size: number;
   crc32: string;
@@ -53,15 +69,29 @@ export class Indexer {
     }
   }
 
-  /** Rename each entity's @id to its unique id; idempotent, as indexers share the crate */
+  /**
+   * Rename each entity's @id to its unique id, returning the path in the crate of each entity that has one
+   * Idempotent, as indexers share the crate
+   */
   deriveUniqueEntityIds(crate: ROCrate) {
     const descriptorId = crate.descriptor['@id'];
+    const prefix = `${crate.rootId}/`;
+    const paths: LogicalPaths = new Map();
     for (const entity of crate.entities()) {
-      const id = this.deriveUniqueEntityId(crate.rootId, entity['@id']);
-      if (entity['@id'] !== descriptorId && id !== entity['@id']) {
+      const original: string = entity['@id'];
+      if (original === descriptorId) {
+        continue;
+      }
+      const id = this.deriveUniqueEntityId(crate.rootId, original);
+      const path = id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length));
+      if (path) {
+        paths.set(id, path);
+      }
+      if (id !== original) {
         entity['@id'] = id;
       }
     }
+    return paths;
   }
 
   async init() {}
@@ -95,9 +125,9 @@ export class Indexer {
       log.warn(`${warnPrefix} Skipped: No license found.`);
     } else {
       log.info(`Indexing ${crateId}`);
-      this.deriveUniqueEntityIds(crate);
+      const paths = this.deriveUniqueEntityIds(crate);
       try {
-        await this._index({ crateObject, crate, license, metadataLicense });
+        await this._index({ crateObject, crate, paths, license, metadataLicense });
       } catch (error) {
         log.error(`${warnPrefix} Error occurred while indexing: ${error}`);
       }
@@ -105,7 +135,7 @@ export class Indexer {
     }
   }
 
-  async _index(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
+  async _index(_param: { crateObject: CrateObject; crate: ROCrate; paths: LogicalPaths; license: string; metadataLicense: string }) {
     throw new Error('Not Implemented');
   }
 
