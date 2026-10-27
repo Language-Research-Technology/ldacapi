@@ -9,8 +9,7 @@ import { authorizationRequest, Browser } from '../../test/oidc.ts';
 const ISSUER = 'http://localhost:8080';
 const AUDIENCE = `${ISSUER}/api`;
 const REDIRECT_URI = 'http://localhost:5173/callback';
-const POST_LOGOUT_REDIRECT_URI = 'http://localhost:5173/';
-const ONI = { client_id: 'oni', redirect_uris: [REDIRECT_URI], post_logout_redirect_uris: [POST_LOGOUT_REDIRECT_URI] };
+const ONI = { client_id: 'oni', redirect_uris: [REDIRECT_URI] };
 const RESTRICTED = 'https://example.org/licenses/restricted';
 const RESTRICTED_FILE = 'http://test/sign-in/restricted.txt';
 const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
@@ -227,40 +226,6 @@ describe('signing in at the upstream provider', () => {
     expect(claims.sub).toBe(ALICE.sub);
     expect(claims).not.toHaveProperty('name');
     expect(claims).not.toHaveProperty('email');
-  });
-
-  it('signs out without a confirmation page and returns to the client', async () => {
-    const { browser, redirect, verifier } = await signIn(ALICE);
-    const { id_token } = (await exchangeCode(redirect, verifier)).json();
-
-    const page = await browser.get(
-      `/oauth/session/end?${new URLSearchParams({ id_token_hint: id_token, post_logout_redirect_uri: POST_LOGOUT_REDIRECT_URI })}`,
-    );
-    expect(page.body).toContain('name="logout" value="yes"');
-    expect(page.body).toContain('.submit()');
-    expect(page.headers['content-security-policy']).toBe("frame-ancestors 'none'");
-    const xsrf = page.body.match(/name="xsrf" value="([^"]+)"/)?.[1] ?? '';
-    const signedOut = await browser.post('/oauth/session/end/confirm', { xsrf, logout: 'yes' });
-
-    expect(signedOut.statusCode).toBe(303);
-    expect(signedOut.headers.location).toBe(POST_LOGOUT_REDIRECT_URI);
-    const { url } = await authorizationRequest({ client_id: ONI.client_id, redirect_uri: REDIRECT_URI, scope: 'openid', prompt: 'none' });
-    const silent = new URL((await browser.follow(url)).headers.location as string);
-    expect(`${silent.origin}${silent.pathname}`).toBe(REDIRECT_URI);
-    expect(silent.searchParams.get('error')).toBe('login_required');
-  });
-
-  it('asks before signing out when the request does not name the signed-in user', async () => {
-    const { browser } = await signIn(ALICE);
-
-    const page = await browser.get(
-      `/oauth/session/end?${new URLSearchParams({ client_id: ONI.client_id, post_logout_redirect_uri: POST_LOGOUT_REDIRECT_URI })}`,
-    );
-
-    expect(page.statusCode).toBe(200);
-    expect(page.body).toContain('<button type="submit"');
-    expect(page.body).not.toContain('<script');
-    expect(page.headers['content-security-policy']).toBe("frame-ancestors 'none'");
   });
 
   it('refuses a code used twice', async () => {

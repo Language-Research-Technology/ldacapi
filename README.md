@@ -139,12 +139,11 @@ anonymous.
   in production when sign-in is on.
 - `OIDC_CLIENTS` lists the apps allowed to get tokens, at least one when
   sign-in is on, as a JSON array of
-  `client_id`, `redirect_uris`, and optionally `post_logout_redirect_uris` and
-  `client_secret`. Clients without a secret are public and must use PKCE. For
-  the Oni in Docker Compose:
+  `client_id`, `redirect_uris`, and optionally `client_secret`. Clients without
+  a secret are public and must use PKCE. For the Oni in Docker Compose:
 
   ```sh
-  OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]'
+  OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"]}]'
   ```
 
 - `OIDC_SIGNING_KEYS` is a JWKS, `{"keys":[…]}`, of private RSA keys that sign

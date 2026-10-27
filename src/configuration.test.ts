@@ -126,13 +126,13 @@ describe('loadConfig', () => {
     const config = loadConfig({
       ...UPSTREAM,
       OIDC_CLIENTS: JSON.stringify([
-        { client_id: 'oni', redirect_uris: ['https://oni.example.org/callback'], post_logout_redirect_uris: ['https://oni.example.org/'] },
+        { client_id: 'oni', redirect_uris: ['https://oni.example.org/callback'] },
         { client_id: 'portal', client_secret: 'secret', redirect_uris: ['https://portal.example.org/callback'] },
       ]),
     });
 
     expect(config.auth?.clients).toEqual([
-      { client_id: 'oni', redirect_uris: ['https://oni.example.org/callback'], post_logout_redirect_uris: ['https://oni.example.org/'] },
+      { client_id: 'oni', redirect_uris: ['https://oni.example.org/callback'] },
       { client_id: 'portal', client_secret: 'secret', redirect_uris: ['https://portal.example.org/callback'] },
     ]);
   });

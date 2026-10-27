@@ -2,7 +2,7 @@
 
 ## Context
 
-The ro-crate-api spec requires an API that protects data to implement OAuth2 on its own host, with OIDC discovery recommended. Clients such as Oni need to sign users in and get tokens that the API accepts. Users already have identities at an external OIDC provider, and REMS knows them by that provider's subject identifier.
+The ro-crate-api spec describes the OAuth2 authorisation code flow with OIDC discovery for user-facing clients, and leaves the provider implementation-specific. Oni signs users in as a public client with PKCE and reads the user's name and email from the ID token. Users already have identities at CILogon, which gives public clients only the `openid` scope; name and email need a confidential client, so something holding a client secret has to sit between Oni and CILogon. REMS knows users by CILogon's subject identifier. The API must check a bearer token on every request without calling another service.
 
 ## Decision
 

@@ -41,7 +41,6 @@ describe('OIDC provider', () => {
     authorization_endpoint: `${ISSUER}/oauth/authorize`,
     token_endpoint: `${ISSUER}/oauth/token`,
     jwks_uri: `${ISSUER}/oauth/jwks`,
-    end_session_endpoint: `${ISSUER}/oauth/session/end`,
     revocation_endpoint: `${ISSUER}/oauth/token/revocation`,
   };
 
