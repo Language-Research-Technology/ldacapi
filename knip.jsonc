@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema-jsonc.json",
-  // src/ocfl.ts is loaded dynamically by initRepository()
-  "entry": ["src/ocfl.ts"],
+  // src/ocfl.ts is loaded dynamically by initRepository(); admin.js is served to browsers
+  "entry": ["src/ocfl.ts", "src/admin/public/admin.js"],
   "tags": ["-lintignore"]
 }

@@ -69,7 +69,7 @@ export function buildApp({ repository, search }: AppDeps) {
   );
   if (config.auth) {
     fastify.register(oidcProvider, { auth: config.auth });
-    fastify.register(adminPages, { prefix: '/admin', auth: config.auth, adminUsers: config.adminUsers });
+    fastify.register(adminPages, { prefix: '/admin', auth: config.auth, adminUsers: config.adminUsers, repository });
   } else {
     fastify.log.warn('The admin pages are off because sign-in is off; set OIDC_UPSTREAM_ISSUER to turn them on');
   }

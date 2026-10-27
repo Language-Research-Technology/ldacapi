@@ -6,7 +6,9 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { decodeJwt } from 'jose';
 import type { AuthConfig } from '../configuration.ts';
 import { logger } from '../logger.ts';
+import type { Repository } from '../repository.ts';
 import { derivedKey } from './client.ts';
+import { cratesPage } from './crates.ts';
 import { type Html, html } from './html.ts';
 import { layout } from './layout.ts';
 import { createSignIn, type SignInTransaction } from './sign-in.ts';
@@ -40,10 +42,10 @@ const displayName = (idToken: string) => {
   return typeof name === 'string' && name ? name : sub;
 };
 
-type AdminOptions = { auth: AuthConfig; adminUsers: string[] };
+type AdminOptions = { auth: AuthConfig; adminUsers: string[]; repository: Repository };
 
 /** The admin pages, for users whose `sub` is in `adminUsers` */
-export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, adminUsers }) => {
+export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, adminUsers, repository }) => {
   const issuer = new URL(auth.issuer);
   const signIn = createSignIn(fastify, auth);
   const admins = new Set(adminUsers);
@@ -114,7 +116,8 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
 
     pages.get('/', async (request, reply) => {
       const user = displayName(request.session.get('admin')?.idToken ?? '');
-      return send(reply, layout({ title: 'Admin', user, body: html`<p>You are signed in as ${user}, and you are an admin.</p>` }));
+      const objects = await Array.fromAsync(repository.objects());
+      return send(reply, layout({ title: 'Crates', user, ...cratesPage(objects) }));
     });
   });
 };
