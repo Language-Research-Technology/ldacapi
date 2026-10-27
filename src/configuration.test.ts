@@ -209,6 +209,34 @@ describe('loadConfig', () => {
     });
   });
 
+  it('reads admins from ADMIN_USERS as a comma-separated list, nobody when unset', () => {
+    expect(loadConfig({ ADMIN_USERS: ' alice@upstream , ,bob@upstream ' }).adminUsers).toEqual(['alice@upstream', 'bob@upstream']);
+    expect(loadConfig({}).adminUsers).toEqual([]);
+  });
+
+  describe('ADMIN_ORIGIN', () => {
+    const signIn = { ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' };
+
+    it('defaults to admin.localhost outside production', () => {
+      expect(loadConfig({}).adminOrigin).toBe('http://admin.localhost:8080');
+      expect(loadConfig({ NODE_ENV: 'test' }).adminOrigin).toBe('http://admin.localhost:8080');
+    });
+
+    it('is unset by default in production, and read as an origin', () => {
+      expect(loadConfig({ ...PRODUCTION, ...signIn }).adminOrigin).toBeUndefined();
+      expect(loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'https://admin.example.org/' }).adminOrigin).toBe('https://admin.example.org');
+    });
+
+    it('rejects an ADMIN_ORIGIN that is not an origin, or not https in production', () => {
+      expect(() => loadConfig({ ADMIN_ORIGIN: 'https://admin.example.org/admin' })).toThrow(/origin[\s\S]*ADMIN_ORIGIN/);
+      expect(() => loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'http://admin.example.org' })).toThrow(/https[\s\S]*ADMIN_ORIGIN/);
+    });
+
+    it('rejects an ADMIN_ORIGIN that is the issuer’s origin', () => {
+      expect(() => loadConfig({ ...signIn, ADMIN_ORIGIN: 'https://api.example.org' })).toThrow(/OIDC_ISSUER[\s\S]*ADMIN_ORIGIN/);
+    });
+  });
+
   it('rejects an unknown NODE_ENV', () => {
     expect(() => loadConfig({ NODE_ENV: 'staging' })).toThrow();
   });

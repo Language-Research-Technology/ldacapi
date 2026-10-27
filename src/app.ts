@@ -63,12 +63,26 @@ export function buildApp({ repository, search }: AppDeps) {
     },
     { prefix },
   );
-  const { auth } = config;
+  const { auth, adminOrigin } = config;
   if (auth) {
-    fastify.register(oidcProvider, { auth: { ...auth, clients: [...auth.clients, adminClient(auth)] } });
-    fastify.register(adminPages, { prefix: ADMIN_PATH, auth, adminUsers: config.adminUsers, repository });
+    const clients = adminOrigin ? [...auth.clients, adminClient(auth, adminOrigin)] : auth.clients;
+    fastify.register(oidcProvider, { auth: { ...auth, clients } });
+  }
+  if (auth && adminOrigin) {
+    fastify.register(adminPages, { prefix: ADMIN_PATH, auth, origin: adminOrigin, adminUsers: config.adminUsers, repository });
+    // Nothing but the admin pages answers on the admin origin, so no crate file can run script there
+    const adminHost = new URL(adminOrigin).host;
+    fastify.addHook('onRequest', async (request, reply) => {
+      if (request.headers.host === adminHost && request.routeOptions.url && !request.routeOptions.url.startsWith(ADMIN_PATH)) {
+        return reply.callNotFound();
+      }
+    });
   } else {
-    fastify.log.warn('The admin pages are off because sign-in is off; set OIDC_UPSTREAM_ISSUER to turn them on');
+    fastify.log.warn(
+      auth
+        ? 'The admin pages are off because ADMIN_ORIGIN is not set'
+        : 'The admin pages are off because sign-in is off; set OIDC_UPSTREAM_ISSUER to turn them on',
+    );
   }
 
   return fastify;

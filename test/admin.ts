@@ -5,6 +5,7 @@ import { startFakeUpstream, type UpstreamUser } from './fake-upstream.ts';
 import { Browser } from './oidc.ts';
 
 export const ISSUER = 'http://localhost:8080';
+export const ADMIN = 'http://admin.localhost:8080';
 const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
 export const ALICE: UpstreamUser = { sub: 'alice@upstream', name: 'Alice' };
 export const PEOPLE = 'arcp://name,people';
@@ -66,7 +67,7 @@ export const adminTestbed = () => {
 
     /** Signs `user` in to the admin pages in a new browser, returning the page it lands on */
     async signInAsAdmin(app: TestApp, user: UpstreamUser) {
-      const browser = new Browser(app, ISSUER);
+      const browser = new Browser(app, ADMIN, ISSUER);
       const toUpstream = await browser.follow('/admin/');
       const page = await browser.follow(upstream.signIn(toUpstream.headers.location as string, user));
       return { browser, page };

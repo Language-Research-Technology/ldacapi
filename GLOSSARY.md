@@ -21,5 +21,5 @@ A user who can use the admin pages, currently one whose `sub` is in `ADMIN_USERS
 _Avoid_: Administrator, superuser, staff
 
 **Admin pages**:
-The server-rendered admin UI at `/admin/`.
+The server-rendered admin UI at `/admin/` on the admin origin (`ADMIN_ORIGIN`).
 _Avoid_: Portal, admin API

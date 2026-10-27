@@ -121,6 +121,7 @@ export function loadConfig(processEnv: Env) {
       OIDC_UPSTREAM_CLIENT_SECRET: z.string().optional(),
       OIDC_SIGNING_KEYS: signingKeys.optional(),
       OIDC_COOKIE_KEYS: cookieKeys.optional(),
+      ADMIN_ORIGIN: nodeEnv === 'production' ? origin.optional() : origin.default('http://admin.localhost:8080'),
       ADMIN_USERS: commaList.default([]),
     })
     .transform((env, ctx) => {
@@ -145,6 +146,10 @@ export function loadConfig(processEnv: Env) {
         return z.NEVER;
       }
       const { data } = required;
+      if (rest.ADMIN_ORIGIN === data.OIDC_ISSUER) {
+        ctx.addIssue({ code: 'custom', path: ['ADMIN_ORIGIN'], message: 'Must differ from OIDC_ISSUER, so the admin pages are on their own origin' });
+        return z.NEVER;
+      }
       const auth = {
         issuer: data.OIDC_ISSUER,
         audience: `${data.OIDC_ISSUER}${prefix}`,
@@ -185,6 +190,7 @@ export function loadConfig(processEnv: Env) {
     },
     enrollmentUrl: env.ENROLLMENT_URL,
     auth: env.auth,
+    adminOrigin: env.ADMIN_ORIGIN,
     adminUsers: env.ADMIN_USERS,
     indexType,
     search: { entityIndex: env.ENTITY_INDEX },

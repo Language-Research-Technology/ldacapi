@@ -17,9 +17,9 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
   index, used by arocapi's entity and file routes) and, as one search
   document per entity, into arocapi's OpenSearch search backend
   (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
-- **Admin pages**: server-rendered pages at `/admin/` where admins, who sign in
-  through our own OIDC provider, see and rebuild or delete indexes
-  (`src/admin/`).
+- **Admin pages**: server-rendered pages at `/admin/` on their own origin,
+  where admins, who sign in through our own OIDC provider, see and rebuild or
+  delete indexes (`src/admin/`).
 - **Access control**: licences are checked against REMS, with sign-in through
   an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
 - **File downloads**: short-lived signed URLs that stream files out of OCFL
@@ -99,6 +99,7 @@ set.
 | `OIDC_ISSUER`                                              | `http://localhost:8080`                               |
 | `OIDC_CLIENTS`                                             | `[]`                                                  |
 | `OIDC_SIGNING_KEYS`, `OIDC_COOKIE_KEYS`                    | generated at each start outside production            |
+| `ADMIN_ORIGIN`                                             | `http://admin.localhost:8080` outside production      |
 | `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
 With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
@@ -158,10 +159,22 @@ Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 
 ### Admin pages
 
-The admin pages are at `<OIDC_ISSUER>/admin/`. They are on only when sign-in
-is; otherwise startup logs a warning and `/admin/` is not found. Visiting them
-signs you in through our own OIDC provider, as Oni does, so you need no other
-password or key.
+The admin pages are at `<ADMIN_ORIGIN>/admin/`. `ADMIN_ORIGIN` is an origin,
+with no path, such as `https://admin.example.org`, and must differ from
+`OIDC_ISSUER`: crate files are served on the API's origin with their own
+content type, so HTML or SVG in a crate could run script there, and a separate
+origin keeps that away from admin. It defaults to `http://admin.localhost:8080`
+outside production, which browsers resolve to this machine; in production it
+must be https. The admin pages are on only when sign-in is and `ADMIN_ORIGIN`
+is set; otherwise startup logs a warning and `/admin/` is not found. On the
+admin origin only `/admin/` is served, and on any other host `/admin/` is not
+found. Visiting them signs you in through our own OIDC provider, as Oni does,
+so you need no other password or key.
+
+The admin pages run in the API's process, so the reverse proxy must route the
+admin hostname to the API too, and pass the browser's `Host` header through
+unchanged: the API tells the two origins apart by `Host`, not by
+`X-Forwarded-Host`.
 
 `ADMIN_USERS` is a comma-separated list of the `sub`s of admins. Anyone else who
 signs in gets a page saying they aren't an admin, showing the `sub` to add.

@@ -38,14 +38,14 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 
 const send = (reply: FastifyReply, page: Html, status = 200) => reply.code(status).type('text/html; charset=utf-8').send(page.toString());
 
-type AdminOptions = { auth: AuthConfig; adminUsers: string[]; repository: Repository };
+type AdminOptions = { auth: AuthConfig; origin: string; adminUsers: string[]; repository: Repository };
 
 /** The admin pages, for users whose `sub` is in `adminUsers` */
-export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, adminUsers, repository }) => {
-  const issuer = new URL(auth.issuer);
-  const signIn = createSignIn(fastify, auth);
+export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, origin, adminUsers, repository }) => {
+  const { host, protocol } = new URL(origin);
+  const signIn = createSignIn(fastify, auth, origin);
   const admins = new Set(adminUsers);
-  const cookie = { path: ADMIN_PATH, httpOnly: true, secure: issuer.protocol === 'https:', sameSite: 'lax' } as const;
+  const cookie = { path: ADMIN_PATH, httpOnly: true, secure: protocol === 'https:', sameSite: 'lax' } as const;
   const session = (sessionName: string, cookieName: string, purpose: string, seconds: number) => ({
     sessionName,
     cookieName,
@@ -55,9 +55,13 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
   });
   const home = `${ADMIN_PATH}/`;
 
+  fastify.addHook('onRoute', (route) => {
+    route.constraints = { ...route.constraints, host };
+  });
+
   fastify.addHook('onRequest', async (request, reply) => {
     reply.header('content-security-policy', CSP).header('x-frame-options', 'DENY');
-    if (request.method === 'POST' && request.headers.origin !== issuer.origin) {
+    if (request.method === 'POST' && request.headers.origin !== origin) {
       return reply.forbidden('Cross-origin request refused');
     }
   });

@@ -9,9 +9,9 @@ import { adminClient, adminPostLogoutRedirectUri, adminRedirectUri } from './cli
 export type SignInTransaction = UpstreamChecks & { returnTo: string };
 
 /** Signs admins in at our own provider, reaching its token endpoint in-process rather than through our public URL */
-export const createSignIn = (fastify: FastifyInstance, auth: AuthConfig) => {
+export const createSignIn = (fastify: FastifyInstance, auth: AuthConfig, adminOrigin: string) => {
   const { issuer } = auth;
-  const client = adminClient(auth);
+  const client = adminClient(auth, adminOrigin);
   const configuration = new Configuration(
     {
       issuer,
@@ -38,7 +38,7 @@ export const createSignIn = (fastify: FastifyInstance, auth: AuthConfig) => {
     }
     return new Response(response.body, { status: response.statusCode, headers: responseHeaders });
   };
-  const flow = createUpstream({ configuration, redirectUri: adminRedirectUri(issuer), scope: client.scope });
+  const flow = createUpstream({ configuration, redirectUri: adminRedirectUri(adminOrigin), scope: client.scope });
 
   return {
     async start(returnTo: string) {
@@ -53,7 +53,7 @@ export const createSignIn = (fastify: FastifyInstance, auth: AuthConfig) => {
     },
 
     signOutUrl(idToken: string) {
-      return buildEndSessionUrl(configuration, { id_token_hint: idToken, post_logout_redirect_uri: adminPostLogoutRedirectUri(issuer) });
+      return buildEndSessionUrl(configuration, { id_token_hint: idToken, post_logout_redirect_uri: adminPostLogoutRedirectUri(adminOrigin) });
     },
   };
 };
