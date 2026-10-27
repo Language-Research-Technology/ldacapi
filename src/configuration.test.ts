@@ -18,7 +18,6 @@ const PRODUCTION = {
   NODE_ENV: 'production',
   DATABASE_URL: 'postgresql://prod/ldacapi',
   OPENSEARCH_URL: 'http://search:9200',
-  TOKEN_ADMIN: 'secret',
   OCFL_ROOT: '/data/ocfl',
 };
 
@@ -42,10 +41,9 @@ describe('loadConfig', () => {
   });
 
   it('reads values from the environment', () => {
-    const config = loadConfig({ LDACAPI_PORT: '9000', TOKEN_ADMIN: 'secret', ENTITY_INDEX: 'other' });
+    const config = loadConfig({ LDACAPI_PORT: '9000', ENTITY_INDEX: 'other' });
 
     expect(config.port).toBe(9000);
-    expect(config.tokenAdmin).toBe('secret');
     expect(config.search.entityIndex).toBe('other');
   });
 
@@ -55,11 +53,12 @@ describe('loadConfig', () => {
   });
 
   it('treats empty values as unset', () => {
-    expect(loadConfig({ TOKEN_ADMIN: '' }).tokenAdmin).toBe('1234-1234-1234-1234');
+    expect(loadConfig({ OPENSEARCH_URL: '' }).opensearchUrl).toBe('http://localhost:9200');
   });
 
-  it('requires connection details, the admin token and OCFL root in production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*TOKEN_ADMIN[\s\S]*OCFL_ROOT/);
+  it('requires connection details and OCFL root in production', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*OCFL_ROOT/);
+    expect(() => loadConfig({ NODE_ENV: 'production' })).not.toThrow(/TOKEN_ADMIN/);
   });
 
   it('starts in production once the required values are set', () => {

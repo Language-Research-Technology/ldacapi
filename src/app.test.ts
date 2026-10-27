@@ -70,4 +70,14 @@ describe('buildApp', () => {
     expect((await app.inject({ method: 'POST', url: `${config.prefix}/token` })).statusCode).toBe(404);
     await app.close();
   });
+
+  it('has no admin API', async () => {
+    const app = buildApp({ repository, search });
+    const headers = { authorization: 'Bearer 1234-1234-1234-1234' };
+
+    for (const method of ['GET', 'POST', 'DELETE'] as const) {
+      expect((await app.inject({ method, url: `${config.prefix}/admin/index/`, headers })).statusCode, method).toBe(404);
+    }
+    await app.close();
+  });
 });

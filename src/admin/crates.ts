@@ -34,11 +34,25 @@ const buildTree = (objects: RepositoryObject[]) => {
   return sort(roots);
 };
 
+const BUTTON = 'cursor-pointer rounded border px-2 py-0.5 text-sm';
+const INDEX_BUTTON = `${BUTTON} border-zinc-300 bg-white hover:border-amber-500 hover:bg-amber-50`;
+const DELETE_BUTTON = `${BUTTON} border-red-300 bg-white text-red-700 hover:bg-red-50`;
+
+/** A form posting `crateId` (none for every crate) to an action */
+const actionForm = (action: 'index' | 'delete', label: string, crateId?: string, { force = false, confirm }: { force?: boolean; confirm?: string } = {}) =>
+  html`<form method="post" action="/admin/${action}" class="inline"${confirm && html` data-confirm="${confirm}"`}>${crateId && html`<input type="hidden" name="crateId" value="${crateId}">`}${force && html`<input type="hidden" name="force" value="true">`}<button type="submit" class="${action === 'delete' ? DELETE_BUTTON : INDEX_BUTTON}">${label}</button></form>`;
+
+const crateActions = (crate: Crate) => {
+  const indexed = Object.values(crate.state).includes(State.INDEXED);
+  return html`<span class="crate-actions">${actionForm('index', indexed ? 'Reindex' : 'Index', crate.id, { force: indexed })} ${actionForm('delete', 'Delete', crate.id, { confirm: `Delete the indexes of ${crate.name ?? crate.id}?` })}</span>`;
+};
+
 const renderCrates = (crates: Crate[]): Html => html`<ul>
 ${crates.map(
   (crate) => html`<li data-id="${crate.id}" data-name="${crate.name ?? crate.id}">
   <span class="crate-name">${crate.name ?? crate.id}</span> <code>${crate.id}</code>
   ${Object.entries(INDEXES).map(([index, label]) => html`<span class="index-state">${label}: ${crate.state[index] ?? 'not indexed'}</span> `)}
+  ${crateActions(crate)}
   ${crate.children.length > 0 && renderCrates(crate.children)}
 </li>
 `,
@@ -50,7 +64,8 @@ export const cratesPage = (objects: RepositoryObject[]) => {
   const body =
     objects.length === 0
       ? html`<p>The repository has no crates.</p>`
-      : html`<p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
+      : html`<p class="mb-4 flex gap-2">${actionForm('index', 'Index all')} ${actionForm('delete', 'Delete all', undefined, { confirm: 'Delete every index?' })}</p>
+    <p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
     <div id="crates">${renderCrates(buildTree(objects))}</div>`;
   return { head: changing ? html`<meta http-equiv="refresh" content="${REFRESH_SECONDS}">` : undefined, body };
 };

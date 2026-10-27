@@ -7,6 +7,7 @@ import { decodeJwt } from 'jose';
 import type { AuthConfig } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import type { Repository } from '../repository.ts';
+import { deleteIndexes, type Flash, indexCrates } from './actions.ts';
 import { derivedKey } from './client.ts';
 import { cratesPage } from './crates.ts';
 import { type Html, html } from './html.ts';
@@ -21,6 +22,7 @@ declare module '@fastify/secure-session' {
   interface SessionData {
     admin: AdminSession;
     transaction: SignInTransaction;
+    flash: Flash;
   }
 }
 
@@ -116,8 +118,21 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
 
     pages.get('/', async (request, reply) => {
       const user = displayName(request.session.get('admin')?.idToken ?? '');
+      const flash = request.session.get('flash');
+      request.session.set('flash', undefined);
       const objects = await Array.fromAsync(repository.objects());
-      return send(reply, layout({ title: 'Crates', user, ...cratesPage(objects) }));
+      return send(reply, layout({ title: 'Crates', user, flash, ...cratesPage(objects) }));
+    });
+
+    pages.post<{ Body: { crateId?: string; force?: string } }>('/index', async (request, reply) => {
+      const { crateId, force } = request.body ?? {};
+      request.session.set('flash', await indexCrates(repository, request.log, crateId || undefined, Boolean(force)));
+      return reply.redirect('/admin/', 303);
+    });
+
+    pages.post<{ Body: { crateId?: string } }>('/delete', async (request, reply) => {
+      request.session.set('flash', deleteIndexes(repository, request.log, request.body?.crateId || undefined));
+      return reply.redirect('/admin/', 303);
     });
   });
 };

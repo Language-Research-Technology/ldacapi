@@ -1,3 +1,4 @@
+import type { Flash } from './actions.ts';
 import { type Html, html } from './html.ts';
 
 type LayoutOptions = {
@@ -5,11 +6,13 @@ type LayoutOptions = {
   /** Who is signed in, if anyone */
   user?: string | undefined;
   body: Html;
+  /** The outcome of the last action */
+  flash?: Flash | undefined;
   /** More of the `<head>`, such as a refresh */
   head?: Html | undefined;
 };
 
-export const layout = ({ title, user, body, head }: LayoutOptions) => html`<!DOCTYPE html>
+export const layout = ({ title, user, body, flash, head }: LayoutOptions) => html`<!DOCTYPE html>
 <html lang="en" class="bg-zinc-100 text-zinc-900 antialiased">
 <head>
   <meta charset="utf-8">
@@ -37,6 +40,10 @@ export const layout = ({ title, user, body, head }: LayoutOptions) => html`<!DOC
   </header>
   <main class="mx-auto max-w-5xl px-6 py-8">
     <h1 class="mb-6 text-2xl font-bold tracking-tight">${title}</h1>
+    ${
+      flash &&
+      html`<p role="status" class="mb-6 rounded border px-4 py-3 ${flash.accepted ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-red-300 bg-red-50 text-red-900'}">${flash.message}</p>`
+    }
     ${body}
   </main>
 </body>

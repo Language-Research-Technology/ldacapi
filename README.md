@@ -17,9 +17,9 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
   index, used by arocapi's entity and file routes) and, as one search
   document per entity, into arocapi's OpenSearch search backend
   (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
-- **Admin API**: list, rebuild and delete indexes (`src/routes/admin.ts`).
-- **Admin pages**: server-rendered pages at `/admin/` for admins, who sign in
-  through our own OIDC provider (`src/admin/`).
+- **Admin pages**: server-rendered pages at `/admin/` where admins, who sign in
+  through our own OIDC provider, see and rebuild or delete indexes
+  (`src/admin/`).
 - **Access control**: licences are checked against REMS, with sign-in through
   an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
 - **File downloads**: short-lived signed URLs that stream files out of OCFL
@@ -73,28 +73,6 @@ The indexer skips a crate that has no metadata licence (the `license` of
 `ro-crate-metadata.json`) or no content licence (the `license` of the root
 dataset) unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set.
 
-## Admin API
-
-The admin routes need the admin token (`TOKEN_ADMIN`, `1234-1234-1234-1234` in
-development) as a bearer token.
-
-```sh
-TOKEN=1234-1234-1234-1234
-
-# Index state of every crate, or of one crate
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/<crateId>
-
-# Re-index everything, or one crate (optionally one index: structural or search)
-curl -X POST -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/admin/index/?force'
-curl -X POST -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/admin/index/<crateId>/<index>?force'
-
-# Delete the indexes of one crate
-curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/<crateId>
-```
-
-URL-encode crate ids, which are usually URIs.
-
 ## Configuration
 
 Configuration comes only from environment variables, validated at startup
@@ -107,7 +85,6 @@ set.
 | `NODE_ENV`                                                 | `development`                                         |
 | `DATABASE_URL`                                             | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 | `OPENSEARCH_URL`                                           | `http://localhost:9200`                               |
-| `TOKEN_ADMIN`                                              | `1234-1234-1234-1234`                                 |
 | `OCFL_ROOT`                                                | `storage/ocfl`                                        |
 | `OCFL_SCRATCH`                                             | `scratch` beside `OCFL_ROOT`                          |
 | `LDACAPI_PORT`                                             | `8080`                                                |
@@ -124,8 +101,8 @@ set.
 | `OIDC_SIGNING_KEYS`, `OIDC_COOKIE_KEYS`                    | generated at each start outside production            |
 | `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
-With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL`, `TOKEN_ADMIN`
-and `OCFL_ROOT` have no defaults and must be set.
+With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
+have no defaults and must be set.
 
 ### Sign-in
 
@@ -191,6 +168,12 @@ signs in gets a page saying they aren't an admin, showing the `sub` to add.
 Every request checks the list, so removing someone takes effect as soon as the
 API restarts. An admin session lasts 8 hours, and signing out of the admin
 pages also ends the session at our provider.
+
+The crates page shows every crate's state in each index, and can index,
+reindex or delete one crate's indexes, or index or delete all of them.
+Indexing a crate also indexes the crates under it. A crate that is already
+indexed needs reindexing, and indexing is refused while a delete is in
+progress. The page reloads itself until the work finishes.
 
 The admin pages are a client of our provider that needs no entry in
 `OIDC_CLIENTS`; their client secret and session keys are derived from

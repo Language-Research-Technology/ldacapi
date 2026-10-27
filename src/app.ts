@@ -4,7 +4,6 @@ import type { SearchBackend } from 'arocapi';
 import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
 import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
 import Fastify, { type FastifyPluginAsync } from 'fastify';
-import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
 import { adminPages } from './admin/plugin.ts';
 import { access, isAuthenticated } from './auth.ts';
@@ -13,17 +12,13 @@ import { logger } from './logger.ts';
 import { oidcProvider } from './oidc/provider.ts';
 import { prisma } from './prisma.ts';
 import type { Repository } from './repository.ts';
-import { admin } from './routes/admin.ts';
 
 type AppDeps = {
   repository: Repository;
   search: SearchBackend;
 };
 
-const ldacapi: FastifyPluginAsync<{ repository: Repository }> = async (fastify, { repository }) => {
-  fastify.setValidatorCompiler(validatorCompiler);
-  fastify.setSerializerCompiler(serializerCompiler);
-  fastify.register(admin, { prefix: '/admin', repository });
+const ldacapi: FastifyPluginAsync = async (fastify) => {
   fastify.get('/version', async () => ({ version: pkg.version }));
 };
 
@@ -63,7 +58,7 @@ export function buildApp({ repository, search }: AppDeps) {
         ],
         storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
       });
-      api.register(ldacapi, { repository });
+      api.register(ldacapi);
     },
     { prefix },
   );
