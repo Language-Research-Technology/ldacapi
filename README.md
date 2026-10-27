@@ -180,13 +180,18 @@ unchanged: the API tells the two origins apart by `Host`, not by
 signs in gets a page saying they aren't an admin, showing the `sub` to add.
 Every request checks the list, so removing someone takes effect as soon as the
 API restarts. An admin session lasts 8 hours, and signing out of the admin
-pages also ends the session at our provider.
+pages also ends the session at our provider, ending on a signed-out page with a
+link to sign in again.
 
-The crates page shows every crate's state in each index, and can index,
-reindex or delete one crate's indexes, or index or delete all of them.
-Indexing a crate also indexes the crates under it. A crate that is already
-indexed needs reindexing, and indexing is refused while a delete is in
-progress. The page reloads itself until the work finishes.
+The crates page shows every crate's state in each index. It can index,
+reindex or delete one crate's indexes, or index, reindex or delete all of them.
+An action on a crate covers the crate and the crates under it: those whose id
+is the crate's id followed by `/`. A crate that is already indexed needs
+reindexing. Indexing is refused while any crate it covers is being deleted,
+deleting is refused while any crate it covers is queued or indexing, and an
+action on a crate that isn't in the repository is refused. The page reloads
+itself until the work finishes. Each action, accepted or refused, is logged at
+`info` with the admin's `sub`.
 
 The admin pages are a client of our provider that needs no entry in
 `OIDC_CLIENTS`; their client secret and session keys are derived from

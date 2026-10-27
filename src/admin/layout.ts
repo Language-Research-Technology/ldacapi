@@ -7,7 +7,6 @@ type LayoutOptions = {
   /** Who is signed in, if anyone */
   user?: string | undefined;
   body: Html;
-  /** The outcome of the last action */
   flash?: Flash | undefined;
   /** More of the `<head>`, such as a refresh */
   head?: Html | undefined;

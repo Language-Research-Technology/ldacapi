@@ -7,7 +7,7 @@ export const State = {
   QUEUED: 'queued',
 } as const;
 
-type IndexState = (typeof State)[keyof typeof State];
+export type IndexState = (typeof State)[keyof typeof State];
 
 /** Whether any index is in one of `values` */
 export const hasState = (state: Partial<Record<string, IndexState>>, ...values: IndexState[]) =>
@@ -22,7 +22,7 @@ export type RepositoryObject = { id: string; path: string; name?: string | undef
 export interface Repository {
   init(): Promise<void>;
   getState(crateId: string, type?: string): Promise<Record<string, IndexState>>;
-  createIndex(crateId?: string | RegExp, type?: string, force?: boolean): Promise<void>;
+  createIndex(crateIds?: string | string[] | RegExp, type?: string, force?: boolean): Promise<void>;
   deleteIndex(crateId?: string, type?: string | string[]): Promise<void>;
   objects(prefix?: string, refresh?: boolean): AsyncIterable<RepositoryObject>;
   storage(): StorageBackend;

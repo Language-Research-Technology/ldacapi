@@ -41,6 +41,17 @@ describe('signing in to the admin pages', () => {
     expect(page.body).toContain('Alice &lt;Admin&gt;');
   });
 
+  it('sends a POST with no session to sign in, then to the admin home page', async () => {
+    const browser = new Browser(app, ADMIN, ISSUER);
+
+    const posted = await browser.post('/admin/index', {});
+    expect(posted.statusCode).toBe(303);
+    const page = await signIn(browser, posted.headers.location as string, ALICE);
+
+    expect(browser.url).toBe('/admin/');
+    expect(page.statusCode).toBe(200);
+  });
+
   it('lets in a user already signed in at our provider without visiting the upstream provider', async () => {
     const browser = new Browser(app, ADMIN, ISSUER);
     const { url } = await authorizationRequest({ client_id: 'oni', redirect_uri: 'http://localhost:5173/callback', scope: 'openid' });
@@ -105,7 +116,7 @@ describe('signing in to the admin pages', () => {
     expect((await browser.get('/admin/')).statusCode).toBe(303);
   });
 
-  it('signs out of the admin pages and our provider', async () => {
+  it('signs out of the admin pages and our provider, ending on a page that doesn’t sign in again', async () => {
     const browser = new Browser(app, ADMIN, ISSUER);
     await signIn(browser, '/admin/', ALICE);
 
@@ -115,15 +126,26 @@ describe('signing in to the admin pages', () => {
     const endSession = new URL(signedOut.headers.location as string);
     expect(`${endSession.origin}${endSession.pathname}`).toBe(`${ISSUER}/oauth/session/end`);
     expect(endSession.searchParams.get('id_token_hint')).toEqual(expect.any(String));
-    expect(endSession.searchParams.get('post_logout_redirect_uri')).toBe(`${ADMIN}/admin/`);
+    expect(endSession.searchParams.get('post_logout_redirect_uri')).toBe(`${ADMIN}/admin/signed-out`);
     expect(browser.cookie('admin_session')).toBeUndefined();
 
     const confirm = await browser.get(endSession.toString());
     const xsrf = confirm.body.match(/name="xsrf" value="([^"]+)"/)?.[1] ?? '';
-    const backToAdmin = await browser.post(`${ISSUER}/oauth/session/end/confirm`, { xsrf, logout: 'yes' });
-    expect(backToAdmin.headers.location).toBe(`${ADMIN}/admin/`);
+    const toAdmin = await browser.post(`${ISSUER}/oauth/session/end/confirm`, { xsrf, logout: 'yes' });
+    expect(toAdmin.headers.location).toBe(`${ADMIN}/admin/signed-out`);
+    const page = await browser.follow(toAdmin.headers.location as string);
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toMatch(/<a [^>]*href="\/admin\/"[^>]*>Sign in<\/a>/);
+
     const again = await browser.follow('/admin/');
     expect(new URL(again.headers.location as string).origin).toBe(testbed.upstream.issuer);
+  });
+
+  it('sends a sign-out with no session to the signed-out page', async () => {
+    const signedOut = await new Browser(app, ADMIN, ISSUER).post('/admin/sign-out', {});
+
+    expect(signedOut.statusCode).toBe(303);
+    expect(signedOut.headers.location).toBe('/admin/signed-out');
   });
 
   it('refuses a POST with a missing or foreign Origin, including the issuer', async () => {

@@ -10,13 +10,13 @@ import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { StructuralIndexer } from './indexer/structural.ts';
 import { logger } from './logger.ts';
-import { State } from './repository.ts';
+import { type IndexState, State } from './repository.ts';
 
 const log = logger.child({ module: 'ocfl' });
 
 const { defaultLicense, defaultMetadataLicense } = config;
 
-const stateCache: { [key: string]: { [key: string]: (typeof State)[keyof typeof State] | undefined } } = {};
+const stateCache: { [key: string]: { [key: string]: IndexState | undefined } } = {};
 let INDEXER: { [key: string]: Indexer };
 let repository: ReturnType<typeof ocfl.storage>;
 let backend: StorageBackend;
@@ -96,14 +96,14 @@ function wrap(ocflObject: OcflObject): CrateObject {
   };
 }
 
-function _setState(crateId: string, types: string | string[], state?: (typeof State)[keyof typeof State]) {
+function _setState(crateId: string, types: string | string[], state?: IndexState) {
   stateCache[crateId] = stateCache[crateId] || {};
   for (const type of ([] as string[]).concat(types)) {
     stateCache[crateId][type] = state;
   }
 }
 
-function setState(crateId: string | undefined, types: string | string[], state?: (typeof State)[keyof typeof State]) {
+function setState(crateId: string | undefined, types: string | string[], state?: IndexState) {
   if (crateId) {
     _setState(crateId, types, state);
   } else {
@@ -130,11 +130,10 @@ export async function getState(crateId: string, type?: string) {
   return type ? { [type]: stateCache[crateId]?.[type] } : (stateCache[crateId] ?? {});
 }
 
-async function indexObject(ocflObject: OcflObject, types: string[], force?: boolean) {
-  if (!ocflObject) {
-    return;
-  }
+async function indexObject(crateId: string, types: string[], force?: boolean) {
   try {
+    const ocflObject = repository.object(crateId);
+    await ocflObject.load();
     log.debug({ crateId: ocflObject.id }, 'Found OCFL object');
     const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
     const rawCrate = JSON.parse(jsonContent);
@@ -157,24 +156,33 @@ async function indexObject(ocflObject: OcflObject, types: string[], force?: bool
       }
     }
   } catch (error) {
-    log.error({ err: error, crateId: ocflObject.id }, 'Error reading object');
+    setState(crateId, types);
+    log.error({ err: error, crateId }, 'Error reading object');
   }
 }
 
-export async function createIndex(crateId?: string | RegExp, type?: string | string[], force?: boolean) {
+async function idsMatching(pattern?: RegExp) {
+  const ids: string[] = [];
+  for await (const ocflObject of repository) {
+    await ocflObject.load();
+    if (!pattern || ocflObject.id.match(pattern)) {
+      ids.push(ocflObject.id);
+    }
+  }
+  return ids;
+}
+
+/** Indexes `crateIds`, the crates matching it, or every crate, marking them all queued before indexing any */
+export async function createIndex(crateIds?: string | string[] | RegExp, type?: string | string[], force?: boolean) {
   log.debug('Indexing started');
   const types = type ? ([] as string[]).concat(type) : Object.keys(INDEXER);
-  if (typeof crateId === 'string') {
-    await indexObject(repository.object(crateId), types, force);
-  } else {
-    for await (const ocflObject of repository) {
-      await ocflObject.load();
-      if (crateId && !ocflObject.id.match(crateId)) {
-        continue;
-      }
-      setState(ocflObject.id, types, State.QUEUED);
-      await indexObject(ocflObject, types, force);
-    }
+  // Given ids are queued before the first await, so callers see them in progress at once
+  const ids = typeof crateIds === 'string' || Array.isArray(crateIds) ? [crateIds].flat() : await idsMatching(crateIds);
+  for (const id of ids) {
+    setState(id, types, State.QUEUED);
+  }
+  for (const id of ids) {
+    await indexObject(id, types, force);
   }
   log.debug('Indexing finished');
 }

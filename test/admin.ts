@@ -22,19 +22,24 @@ const oidcEnv = (upstreamIssuer: string) => ({
 /** The OCFL repository at `OCFL_ROOT` */
 export const ocflRepository = (deps: Record<string, unknown>) => initRepository('ocfl', deps);
 
-/** A repository with one crate, `PEOPLE`, whose search index is in `state`, recording what it is asked to do */
-export const repositoryIn = (state: string) => {
+/** A repository of `crates`, each with its index state, recording what it is asked to do */
+export const repositoryOf = (crates: { id: string; name?: string; state: Record<string, string> }[]) => {
   const fake = {
     storage: () => ({ content: {} }),
     async *objects() {
-      yield { id: PEOPLE, name: 'People', path: '', state: { structural: 'indexed', search: state } };
+      for (const { id, name = id, state } of crates) {
+        yield { id, name, path: '', state };
+      }
     },
-    getState: async () => ({ structural: 'indexed', search: state }),
+    getState: async (crateId: string) => crates.find(({ id }) => id === crateId)?.state ?? {},
     createIndex: vi.fn(async () => {}),
     deleteIndex: vi.fn(async () => {}),
   };
   return fake as unknown as Repository & Pick<typeof fake, 'createIndex' | 'deleteIndex'>;
 };
+
+/** A repository with one crate, `PEOPLE`, whose search index is in `state` */
+export const repositoryIn = (state: string) => repositoryOf([{ id: PEOPLE, name: 'People', state: { structural: 'indexed', search: state } }]);
 
 /** Runs a fake upstream provider for a file's tests, then closes it and every app started with `start` */
 export const adminTestbed = () => {

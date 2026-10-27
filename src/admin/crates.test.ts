@@ -134,6 +134,7 @@ describe('the crate tree', () => {
     const script = await browser.get('/admin/admin.js');
     expect(script.statusCode).toBe(200);
     expect(script.headers['content-type']).toMatch(/javascript/);
+    expect(script.body).toContain('sessionStorage');
   });
 });
 

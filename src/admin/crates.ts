@@ -9,12 +9,22 @@ const INDEXES = { structural: 'Structural', search: 'Search' } as const;
 /** How often the page reloads while an index is changing */
 const REFRESH_SECONDS = 5;
 
-/** The nearest crate whose id is a path prefix of `id`, as indexing a crate also indexes the crates under it */
-const parentOf = (id: string, crates: Map<string, Crate>) => {
+/** The ids of the crates `id` is under, nearest first, as indexing a crate also indexes the crates under it */
+function* ancestorIds(id: string) {
   let path = id.replace(/\/+$/, '');
   for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/')) {
     path = path.slice(0, slash);
-    const parent = crates.get(path) ?? crates.get(`${path}/`);
+    yield path;
+    yield `${path}/`;
+  }
+}
+
+/** Whether `id` is `crateId` or a crate under it */
+export const isWithin = (id: string, crateId: string) => id === crateId || ancestorIds(id).some((ancestor) => ancestor === crateId);
+
+const parentOf = (id: string, crates: Map<string, Crate>) => {
+  for (const ancestor of ancestorIds(id)) {
+    const parent = crates.get(ancestor);
     if (parent) {
       return parent;
     }
@@ -50,7 +60,8 @@ const actionForm = (action: 'index' | 'delete', label: string, crateId?: string,
 
 const crateActions = (crate: Crate) => {
   const indexed = hasState(crate.state, State.INDEXED);
-  return html`<span class="crate-actions">${actionForm('index', indexed ? 'Reindex' : 'Index', crate.id, { force: indexed })} ${actionForm('delete', 'Delete', crate.id, { confirm: `Delete the indexes of ${crate.label}?` })}</span>`;
+  const confirm = `Delete the indexes of ${crate.label}${crate.children.length > 0 ? ' and the crates under it' : ''}?`;
+  return html`<span class="crate-actions">${actionForm('index', indexed ? 'Reindex' : 'Index', crate.id, { force: indexed })} ${actionForm('delete', 'Delete', crate.id, { confirm })}</span>`;
 };
 
 const renderCrates = (crates: Crate[]): Html => html`<ul>
@@ -70,7 +81,7 @@ export const cratesPage = (objects: RepositoryObject[]) => {
   const body =
     objects.length === 0
       ? html`<p>The repository has no crates.</p>`
-      : html`<p class="mb-4 flex gap-2">${actionForm('index', 'Index all')} ${actionForm('delete', 'Delete all', undefined, { confirm: 'Delete every index?' })}</p>
+      : html`<p class="mb-4 flex gap-2">${actionForm('index', 'Index all')} ${actionForm('index', 'Reindex all', undefined, { force: true })} ${actionForm('delete', 'Delete all', undefined, { confirm: 'Delete every index?' })}</p>
     <p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
     <div id="crates">${renderCrates(buildTree(objects))}</div>`;
   return { head: changing ? html`<meta http-equiv="refresh" content="${REFRESH_SECONDS}">` : undefined, body };

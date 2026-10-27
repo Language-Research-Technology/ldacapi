@@ -25,6 +25,13 @@ export type UpstreamChecks = { state: string; codeVerifier: string; nonce: strin
 // Configuration only allows an http issuer outside production
 const insecure = (issuer: string) => (new URL(issuer).protocol === 'http:' ? [allowInsecureRequests] : []);
 
+const allowInsecure = (configuration: Configuration) => {
+  for (const apply of insecure(configuration.serverMetadata().issuer)) {
+    apply(configuration);
+  }
+  return configuration;
+};
+
 // Prefers Basic, which OIDC makes the default when the provider lists no methods
 const clientAuth = ({ token_endpoint_auth_methods_supported: supported }: ServerMetadata, clientSecret: string) => {
   if (!supported || supported.includes('client_secret_basic')) {
@@ -39,14 +46,10 @@ const clientAuth = ({ token_endpoint_auth_methods_supported: supported }: Server
 const discovered = ({ issuer, clientId, clientSecret }: Discovered) => {
   let found: Promise<Configuration> | undefined;
   return () => {
-    const execute = insecure(issuer);
-    found ??= discovery(new URL(issuer), clientId, undefined, undefined, { execute })
-      .then((metadata) => {
-        const configured = new Configuration(metadata.serverMetadata(), clientId, undefined, clientAuth(metadata.serverMetadata(), clientSecret));
-        for (const apply of execute) {
-          apply(configured);
-        }
-        return configured;
+    found ??= discovery(new URL(issuer), clientId, undefined, undefined, { execute: insecure(issuer) })
+      .then((discoveredConfiguration) => {
+        const metadata = discoveredConfiguration.serverMetadata();
+        return allowInsecure(new Configuration(metadata, clientId, undefined, clientAuth(metadata, clientSecret)));
       })
       .catch((error: unknown) => {
         found = undefined;
@@ -56,18 +59,15 @@ const discovered = ({ issuer, clientId, clientSecret }: Discovered) => {
   };
 };
 
-const configured = (configuration: Configuration) => {
-  for (const apply of insecure(configuration.serverMetadata().issuer)) {
-    apply(configuration);
-  }
-  const ready = Promise.resolve(configuration);
+const given = (configuration: Configuration) => {
+  const ready = Promise.resolve(allowInsecure(configuration));
   return () => ready;
 };
 
 /** Signs users in at a provider with the authorisation code flow and PKCE */
 export const createUpstream = (options: UpstreamOptions) => {
   const { redirectUri, scope } = options;
-  const configuration = 'configuration' in options ? configured(options.configuration) : discovered(options);
+  const configuration = 'configuration' in options ? given(options.configuration) : discovered(options);
 
   return {
     /** Fetches the upstream discovery document, which sign-ins then reuse; a failure is retried at the next sign-in */
