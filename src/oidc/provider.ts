@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest, onRequestHookHandler } from 'fastify';
 import Provider, { type ClientMetadata, type Configuration, errors, type InteractionResults, type KoaContextWithOIDC } from 'oidc-provider';
+import { adminClient } from '../admin/client.ts';
 import type { AuthConfig, OidcClient } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import { deleteExpired, PrismaAdapter } from './adapter.ts';
@@ -65,10 +66,11 @@ const loadExistingGrant = (audience: string) => async (ctx: KoaContextWithOIDC) 
 
 const toClientMetadata = (client: OidcClient): ClientMetadata => (client.client_secret ? client : { ...client, token_endpoint_auth_method: 'none' });
 
-const createProvider = ({ issuer, audience, clients, signingKeys, cookieKeys }: AuthConfig) => {
+const createProvider = (auth: AuthConfig) => {
+  const { issuer, audience, clients, signingKeys, cookieKeys } = auth;
   const provider = new Provider(issuer, {
     adapter: PrismaAdapter,
-    clients: clients.map(toClientMetadata),
+    clients: [...clients.map(toClientMetadata), adminClient(auth)],
     clientDefaults: { grant_types: ['authorization_code', 'refresh_token'] },
     jwks: { keys: signingKeys },
     cookies: { keys: cookieKeys },

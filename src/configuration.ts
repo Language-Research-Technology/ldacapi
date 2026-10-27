@@ -118,6 +118,15 @@ export function loadConfig(processEnv: Env) {
       OIDC_UPSTREAM_CLIENT_SECRET: z.string().optional(),
       OIDC_SIGNING_KEYS: signingKeys.optional(),
       OIDC_COOKIE_KEYS: cookieKeys.optional(),
+      ADMIN_USERS: z
+        .string()
+        .default('')
+        .transform((value) =>
+          value
+            .split(',')
+            .map((sub) => sub.trim())
+            .filter(Boolean),
+        ),
     })
     .transform((env, ctx) => {
       const {
@@ -182,6 +191,7 @@ export function loadConfig(processEnv: Env) {
     },
     enrollmentUrl: env.ENROLLMENT_URL,
     auth: env.auth,
+    adminUsers: env.ADMIN_USERS,
     indexType,
     search: { entityIndex: env.ENTITY_INDEX },
   };

@@ -7,6 +7,8 @@ export class Browser {
   private readonly cookies = new Map<string, string>();
   private readonly app: TestApp;
   private readonly origin: string;
+  /** Where the last `follow` ended */
+  url = '';
 
   constructor(app: TestApp, origin: string) {
     this.app = app;
@@ -20,12 +22,13 @@ export class Browser {
     return response;
   }
 
-  async post(url: string, form: Record<string, string>) {
+  /** Posts `form` with the `Origin` a browser sends, unless `headers` say otherwise */
+  async post(url: string, form: Record<string, string>, headers: Record<string, string> = { origin: this.origin }) {
     const { pathname, search, host } = new URL(url, this.origin);
     const response = await this.app.inject({
       method: 'POST',
       url: `${pathname}${search}`,
-      headers: { host, cookie: this.cookieHeader(), 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { host, cookie: this.cookieHeader(), 'content-type': 'application/x-www-form-urlencoded', ...headers },
       payload: new URLSearchParams(form).toString(),
     });
     this.store(response);
@@ -34,17 +37,27 @@ export class Browser {
 
   /** Follows redirects within the app, returning the first response that leaves it */
   async follow(url: string) {
+    this.url = url;
     let response = await this.get(url);
     let location = response.headers.location as string | undefined;
     while (response.statusCode >= 300 && response.statusCode < 400 && location && new URL(location, this.origin).origin === this.origin) {
+      this.url = location;
       response = await this.get(location);
       location = response.headers.location as string | undefined;
     }
     return response;
   }
 
+  cookie(name: string) {
+    return this.cookies.get(name);
+  }
+
+  setCookie(name: string, value: string) {
+    this.cookies.set(name, value);
+  }
+
   private cookieHeader() {
-    return [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ');
+    return [...this.cookies].map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('; ');
   }
 
   private store(response: LightMyRequestResponse) {

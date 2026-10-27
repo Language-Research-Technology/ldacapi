@@ -18,6 +18,8 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
   document per entity, into arocapi's OpenSearch search backend
   (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
 - **Admin API**: list, rebuild and delete indexes (`src/routes/admin.ts`).
+- **Admin pages**: server-rendered pages at `/admin/` for admins, who sign in
+  through our own OIDC provider (`src/admin/`).
 - **Access control**: licences are checked against REMS, with sign-in through
   an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
 - **File downloads**: short-lived signed URLs that stream files out of OCFL
@@ -119,6 +121,7 @@ set.
 | `OIDC_ISSUER`                                              | `http://localhost:8080`                               |
 | `OIDC_CLIENTS`                                             | `[]`                                                  |
 | `OIDC_SIGNING_KEYS`, `OIDC_COOKIE_KEYS`                    | generated at each start outside production            |
+| `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
 With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL`, `TOKEN_ADMIN`
 and `OCFL_ROOT` have no defaults and must be set.
@@ -174,6 +177,23 @@ tries again at the next sign-in.
 Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 `api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
 `client_id` in `OIDC_CLIENTS`.
+
+### Admin pages
+
+The admin pages are at `<OIDC_ISSUER>/admin/`. They are on only when sign-in
+is; otherwise startup logs a warning and `/admin/` is not found. Visiting them
+signs you in through our own OIDC provider, as Oni does, so you need no other
+password or key.
+
+`ADMIN_USERS` is a comma-separated list of the `sub`s of admins. Anyone else who
+signs in gets a page saying they aren't an admin, showing the `sub` to add.
+Every request checks the list, so removing someone takes effect as soon as the
+API restarts. An admin session lasts 8 hours, and signing out of the admin
+pages also ends the session at our provider.
+
+The admin pages are a client of our provider that needs no entry in
+`OIDC_CLIENTS`; their client secret and session keys are derived from
+`OIDC_COOKIE_KEYS`, so they rotate with it.
 
 ## Database
 

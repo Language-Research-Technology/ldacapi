@@ -6,6 +6,7 @@ import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
 import Fastify, { type FastifyPluginAsync } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import pkg from '../package.json' with { type: 'json' };
+import { adminPages } from './admin/plugin.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { logger } from './logger.ts';
@@ -68,6 +69,9 @@ export function buildApp({ repository, search }: AppDeps) {
   );
   if (config.auth) {
     fastify.register(oidcProvider, { auth: config.auth });
+    fastify.register(adminPages, { prefix: '/admin', auth: config.auth, adminUsers: config.adminUsers });
+  } else {
+    fastify.log.warn('The admin pages are off because sign-in is off; set OIDC_UPSTREAM_ISSUER to turn them on');
   }
 
   return fastify;
