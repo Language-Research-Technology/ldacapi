@@ -39,31 +39,33 @@ export function buildApp({ repository, search }: AppDeps) {
   fastify.setErrorHandler(errorHandler);
   fastify.setNotFoundHandler(notFoundHandler);
   fastify.register(fastifySensible);
-  fastify.register(cors, {
-    methods: ['HEAD', 'GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  });
-  fastify.register(arocapi, {
-    prisma,
-    search,
-    access,
-    isAuthenticated,
-    entityVisibilityFilter: AllVisibleEntityFilter,
-    searchVisibilityFilter: AllVisibleSearchFilter,
-    entityTransformers: [
-      (entity) => ({
-        ...entity,
-        accessControl: 'Public',
-        counts: {
-          collections: 0,
-          objects: 0,
-          files: 0,
-        },
-      }),
-    ],
-    storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
-    prefix,
-  });
-  fastify.register(ldacapi, { prefix, repository });
+  fastify.register(
+    async (api) => {
+      api.register(cors, { origin: '*', methods: ['GET', 'HEAD', 'POST'], maxAge: 2 * 60 * 60 });
+      api.register(arocapi, {
+        prisma,
+        search,
+        access,
+        isAuthenticated,
+        entityVisibilityFilter: AllVisibleEntityFilter,
+        searchVisibilityFilter: AllVisibleSearchFilter,
+        entityTransformers: [
+          (entity) => ({
+            ...entity,
+            accessControl: 'Public',
+            counts: {
+              collections: 0,
+              objects: 0,
+              files: 0,
+            },
+          }),
+        ],
+        storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
+      });
+      api.register(ldacapi, { repository });
+    },
+    { prefix },
+  );
   if (config.auth) {
     fastify.register(oidcProvider, { auth: config.auth });
   }
