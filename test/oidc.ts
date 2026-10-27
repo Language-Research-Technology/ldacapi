@@ -20,6 +20,18 @@ export class Browser {
     return response;
   }
 
+  async post(url: string, form: Record<string, string>) {
+    const { pathname, search, host } = new URL(url, this.origin);
+    const response = await this.app.inject({
+      method: 'POST',
+      url: `${pathname}${search}`,
+      headers: { host, cookie: this.cookieHeader(), 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams(form).toString(),
+    });
+    this.store(response);
+    return response;
+  }
+
   /** Follows redirects within the app, returning the first response that leaves it */
   async follow(url: string) {
     let response = await this.get(url);

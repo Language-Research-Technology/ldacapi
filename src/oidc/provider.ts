@@ -12,6 +12,7 @@ const routes = {
   authorization: '/oauth/authorize',
   token: '/oauth/token',
   jwks: '/oauth/jwks',
+  end_session: '/oauth/session/end',
   revocation: '/oauth/token/revocation',
 } satisfies Configuration['routes'];
 
@@ -21,6 +22,24 @@ const SCOPES = 'openid profile email';
 const SIGN_IN_EXPIRED = 'Sign-in has expired or was started elsewhere';
 
 const interactionPath = (uid: string) => `/oauth/interaction/${uid}`;
+
+// Signs out without a click only when the request names, by ID token, the user signed in; anyone else gets a button
+const logoutSource = async (ctx: KoaContextWithOIDC, form: string) => {
+  const hinted = ctx.oidc.entities.IdTokenHint?.payload.sub;
+  const confirmed = hinted !== undefined && hinted === ctx.oidc.session?.accountId;
+  ctx.set('Content-Security-Policy', "frame-ancestors 'none'");
+  ctx.set('X-Frame-Options', 'DENY');
+  ctx.body = `<!DOCTYPE html>
+<html>
+<head><title>Sign out</title></head>
+<body>
+  ${form}
+  <input type="hidden" form="op.logoutForm" name="logout" value="yes"/>
+  <button type="submit" form="op.logoutForm">Sign out</button>
+  ${confirmed ? "<script>document.getElementById('op.logoutForm').submit()</script>" : ''}
+</body>
+</html>`;
+};
 
 // Clients come only from our configuration, so they get every scope they ask for that we support, without a consent screen
 const loadExistingGrant = (audience: string) => async (ctx: KoaContextWithOIDC) => {
@@ -79,8 +98,7 @@ const createProvider = ({ issuer, audience, clients, signingKeys, cookieKeys }: 
       // ID tokens carry the claims, and access tokens are for the API, not userinfo
       userinfo: { enabled: false },
       revocation: { enabled: true },
-      // Oni signs out locally; no client sends users to end_session
-      rpInitiatedLogout: { enabled: false },
+      rpInitiatedLogout: { logoutSource },
       resourceIndicators: {
         enabled: true,
         // Clients such as Oni send no `resource`, and should still get tokens for the API

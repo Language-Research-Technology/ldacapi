@@ -25,6 +25,7 @@ const oidcClient = z.strictObject({
   client_id: z.string().min(1),
   client_secret: z.string().min(1).optional(),
   redirect_uris: z.array(z.url()).min(1),
+  post_logout_redirect_uris: z.array(z.url()).optional(),
 });
 
 export type OidcClient = z.infer<typeof oidcClient>;
