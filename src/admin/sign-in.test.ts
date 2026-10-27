@@ -158,4 +158,14 @@ describe('signing in to the admin pages', () => {
     expect(csp).toContain("style-src 'self'");
     expect(csp).toContain("frame-ancestors 'none'");
   });
+
+  it('serves the stylesheet to anyone, and links it from every page', async () => {
+    const stylesheet = await new Browser(app, ISSUER).get('/admin/admin.css');
+    expect(stylesheet.statusCode).toBe(200);
+    expect(stylesheet.headers['content-type']).toMatch(/^text\/css/);
+
+    const link = '<link rel="stylesheet" href="/admin/admin.css">';
+    expect((await signIn(new Browser(app, ISSUER), '/admin/', ALICE)).body).toContain(link);
+    expect((await signIn(new Browser(app, ISSUER), '/admin/', MALLORY)).body).toContain(link);
+  });
 });

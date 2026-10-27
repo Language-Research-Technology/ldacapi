@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import formBody from '@fastify/formbody';
 import secureSession, { type Session, type SessionData } from '@fastify/secure-session';
+import fastifyStatic from '@fastify/static';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { decodeJwt } from 'jose';
 import type { AuthConfig } from '../configuration.ts';
@@ -49,6 +51,7 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
   const keys = (purpose: string) => auth.cookieKeys.map((key) => derivedKey(key, purpose));
 
   fastify.register(formBody);
+  fastify.register(fastifyStatic, { root: fileURLToPath(new URL('public', import.meta.url)), decorateReply: false, index: false });
   fastify.register(secureSession, [
     {
       sessionName: 'session',
@@ -100,9 +103,11 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
         return reply.redirect(url.toString(), 303);
       }
       if (!admins.has(session.sub)) {
-        const body = html`<p>You are signed in, but you are not an admin.</p>
-    <p>To be given access, ask an operator to add this <code>sub</code> to <code>ADMIN_USERS</code>:</p>
-    <p><code>${session.sub}</code></p>`;
+        const body = html`<div class="max-w-2xl space-y-4 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
+      <p class="font-medium text-red-700">You are signed in, but you are not an admin.</p>
+      <p>To be given access, ask an operator to add this <code class="font-mono text-sm">sub</code> to <code class="font-mono text-sm">ADMIN_USERS</code>:</p>
+      <p><code class="block select-all rounded bg-zinc-100 px-3 py-2 font-mono text-sm break-all">${session.sub}</code></p>
+    </div>`;
         return send(reply, layout({ title: 'Not an admin', user: displayName(session.idToken), body }), 403);
       }
     });

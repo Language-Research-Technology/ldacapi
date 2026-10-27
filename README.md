@@ -50,7 +50,8 @@ No configuration is needed for development. To override a default, copy
 
 | Script               | Does                                                                             |
 | -------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`           | Run the API, restarting on changes                                               |
+| `pnpm dev`           | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
+| `pnpm build`         | Build the admin pages' stylesheet (run before deploying)                         |
 | `pnpm test`          | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`          | Biome, Knip and TypeScript                                                       |
 | `pnpm bootstrap`     | `db:deploy`, `seed` and `index` in one go                                        |
@@ -194,6 +195,12 @@ pages also ends the session at our provider.
 The admin pages are a client of our provider that needs no entry in
 `OIDC_CLIENTS`; their client secret and session keys are derived from
 `OIDC_COOKIE_KEYS`, so they rotate with it.
+
+The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
+`@tailwindcss/cli` from `src/admin/admin.css`, which scans the admin module's
+templates, into `src/admin/public/admin.css`. That file is not checked in: a
+deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
+edit the templates.
 
 ## Database
 
