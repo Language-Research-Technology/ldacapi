@@ -203,6 +203,17 @@ describe('index and delete actions', () => {
     });
   });
 
+  it('reads a crate’s state as it was, not as indexing later changes it', async () => {
+    const indexing = repository.createIndex([BUNDLED]);
+    const state = await repository.getState(BUNDLED);
+    const read = { ...state };
+
+    await indexing;
+
+    expect(read).toEqual({ structural: 'queued', search: 'queued' });
+    expect(state).toEqual(read);
+  });
+
   it('shows the message once, so reloading doesn’t repeat the action', async () => {
     const browser = await signIn(app);
     await act(browser, 'index', { crateId: BUNDLED });

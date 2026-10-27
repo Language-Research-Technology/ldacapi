@@ -127,7 +127,8 @@ export async function getState(crateId: string, type?: string) {
       }
     }
   }
-  return type ? { [type]: stateCache[crateId]?.[type] } : (stateCache[crateId] ?? {});
+  // A copy, as indexing goes on changing the cache after this returns
+  return type ? { [type]: stateCache[crateId]?.[type] } : { ...stateCache[crateId] };
 }
 
 async function indexObject(crateId: string, types: string[], force?: boolean) {
