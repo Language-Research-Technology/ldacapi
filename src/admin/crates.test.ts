@@ -3,17 +3,11 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buildTestApp, type TestApp } from '../../test/app.ts';
-import { startFakeUpstream, type UpstreamUser } from '../../test/fake-upstream.ts';
-import { Browser } from '../../test/oidc.ts';
+import { ALICE, adminTestbed, ocflRepository, PEOPLE, repositoryIn } from '../../test/admin.ts';
+import type { TestApp, TestRepository } from '../../test/app.ts';
 import type { Repository } from '../repository.ts';
 
-const ISSUER = 'http://localhost:8080';
-const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
-const ALICE: UpstreamUser = { sub: 'alice@upstream', name: 'Alice' };
-
 const BUNDLED = 'arcp://name,bundled';
-const PEOPLE = 'arcp://name,people';
 const EXTRA = 'arcp://name,people/extra';
 const MORE = 'arcp://name,people/extra/more';
 const EXTRA_NAME = '<script>alert(1)</script> Extra people';
@@ -64,33 +58,15 @@ const crate = (id: string, name: string) => ({
   ],
 });
 
+const testbed = adminTestbed();
 let storage: string;
-let upstream: Awaited<ReturnType<typeof startFakeUpstream>>;
-const running: Awaited<ReturnType<typeof buildTestApp>>[] = [];
 
-const start = async (repository: Repository | 'ocfl') => {
-  const started = await buildTestApp(
-    {
-      OCFL_ROOT: join(storage, 'ocfl'),
-      OIDC_ISSUER: ISSUER,
-      OIDC_CLIENTS: JSON.stringify([{ client_id: 'oni', redirect_uris: ['http://localhost:5173/callback'] }]),
-      OIDC_UPSTREAM_ISSUER: upstream.issuer,
-      OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
-      OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
-      ADMIN_USERS: ALICE.sub,
-    },
-    { repository },
-  );
-  running.push(started);
-  return started;
-};
+const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: join(storage, 'ocfl'), ADMIN_USERS: ALICE.sub }, { repository });
 
 const signIn = async (app: TestApp) => {
-  const browser = new Browser(app, ISSUER);
-  const toUpstream = await browser.follow('/admin/');
-  const page = await browser.follow(upstream.signIn(toUpstream.headers.location as string, ALICE));
-  expect(page.statusCode).toBe(200);
-  return { browser, page };
+  const signedIn = await testbed.signInAsAdmin(app, ALICE);
+  expect(signedIn.page.statusCode).toBe(200);
+  return signedIn;
 };
 
 beforeAll(async () => {
@@ -108,15 +84,9 @@ beforeAll(async () => {
     await writeFile(join(source, directory, 'ro-crate-metadata.json'), JSON.stringify(crate(id, name)));
   }
   execFileSync('node', ['scripts/seed.ts', source], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
-  upstream = await startFakeUpstream(UPSTREAM_CLIENT);
 });
 
 afterAll(async () => {
-  for (const { app, prisma } of running) {
-    await app.close();
-    await prisma.$disconnect();
-  }
-  await upstream.close();
   await rm(storage, { recursive: true, force: true });
 });
 
@@ -125,7 +95,7 @@ describe('the crate tree', () => {
   let repository: Repository;
 
   beforeAll(async () => {
-    ({ app, repository } = await start('ocfl'));
+    ({ app, repository } = await start(ocflRepository));
     await repository.deleteIndex();
   });
 
@@ -168,15 +138,6 @@ describe('the crate tree', () => {
 });
 
 describe('refreshing while indexes change', () => {
-  /** A repository whose one crate is in `state` for the search index */
-  const repositoryIn = (state: string) =>
-    ({
-      storage: () => ({ content: {} }),
-      async *objects() {
-        yield { id: PEOPLE, name: 'People', path: '', state: { structural: 'indexed', search: state } };
-      },
-    }) as unknown as Repository;
-
   it.each(['queued', 'indexing', 'deleting'])('refreshes the page while an index is %s', async (state) => {
     const { app } = await start(repositoryIn(state));
 

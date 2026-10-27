@@ -1,14 +1,21 @@
 import { hkdfSync } from 'node:crypto';
 import type { AuthConfig } from '../configuration.ts';
 
+/** Where the admin pages are mounted */
+export const ADMIN_PATH = '/admin';
+
 export const derivedKey = (cookieKey: string, purpose: string) => Buffer.from(hkdfSync('sha256', cookieKey, '', `ldacapi ${purpose}`, 32));
+
+export const adminRedirectUri = (issuer: string) => `${issuer}${ADMIN_PATH}/callback`;
+
+export const adminPostLogoutRedirectUri = (issuer: string) => `${issuer}${ADMIN_PATH}/`;
 
 /** The admin pages' own client of our provider, which needs no configuration */
 export const adminClient = ({ issuer, cookieKeys }: AuthConfig) => ({
   client_id: 'ldacapi-admin',
   client_secret: derivedKey(cookieKeys[0] ?? '', 'admin client secret').toString('base64url'),
-  redirect_uris: [`${issuer}/admin/callback`],
-  post_logout_redirect_uris: [`${issuer}/admin/`],
+  redirect_uris: [adminRedirectUri(issuer)],
+  post_logout_redirect_uris: [adminPostLogoutRedirectUri(issuer)],
   grant_types: ['authorization_code'],
   scope: 'openid profile',
 });

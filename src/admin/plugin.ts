@@ -3,12 +3,11 @@ import formBody from '@fastify/formbody';
 import secureSession, { type Session, type SessionData } from '@fastify/secure-session';
 import fastifyStatic from '@fastify/static';
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
-import { decodeJwt } from 'jose';
 import type { AuthConfig } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import type { Repository } from '../repository.ts';
 import { deleteIndexes, type Flash, indexCrates } from './actions.ts';
-import { derivedKey } from './client.ts';
+import { ADMIN_PATH, derivedKey } from './client.ts';
 import { cratesPage } from './crates.ts';
 import { type Html, html } from './html.ts';
 import { layout } from './layout.ts';
@@ -16,7 +15,7 @@ import { createSignIn, type SignInTransaction } from './sign-in.ts';
 
 const log = logger.child({ module: 'admin' });
 
-type AdminSession = { sub: string; signedInAt: number; idToken: string };
+type AdminSession = { sub: string; name: string; signedInAt: number; idToken: string };
 
 declare module '@fastify/secure-session' {
   interface SessionData {
@@ -39,11 +38,6 @@ const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 's
 
 const send = (reply: FastifyReply, page: Html, status = 200) => reply.code(status).type('text/html; charset=utf-8').send(page.toString());
 
-const displayName = (idToken: string) => {
-  const { name, sub } = decodeJwt(idToken);
-  return typeof name === 'string' && name ? name : sub;
-};
-
 type AdminOptions = { auth: AuthConfig; adminUsers: string[]; repository: Repository };
 
 /** The admin pages, for users whose `sub` is in `adminUsers` */
@@ -51,21 +45,15 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
   const issuer = new URL(auth.issuer);
   const signIn = createSignIn(fastify, auth);
   const admins = new Set(adminUsers);
-  const cookie = { path: '/admin', httpOnly: true, secure: issuer.protocol === 'https:', sameSite: 'lax' } as const;
-  const keys = (purpose: string) => auth.cookieKeys.map((key) => derivedKey(key, purpose));
-
-  fastify.register(formBody);
-  fastify.register(fastifyStatic, { root: fileURLToPath(new URL('public', import.meta.url)), decorateReply: false, index: false });
-  fastify.register(secureSession, [
-    {
-      sessionName: 'session',
-      cookieName: 'admin_session',
-      key: keys('admin session'),
-      expiry: SESSION_SECONDS,
-      cookie: { ...cookie, maxAge: SESSION_SECONDS },
-    },
-    { sessionName: 'signIn', cookieName: 'admin_sign_in', key: keys('admin sign-in'), expiry: SIGN_IN_SECONDS, cookie: { ...cookie, maxAge: SIGN_IN_SECONDS } },
-  ]);
+  const cookie = { path: ADMIN_PATH, httpOnly: true, secure: issuer.protocol === 'https:', sameSite: 'lax' } as const;
+  const session = (sessionName: string, cookieName: string, purpose: string, seconds: number) => ({
+    sessionName,
+    cookieName,
+    key: auth.cookieKeys.map((key) => derivedKey(key, purpose)),
+    expiry: seconds,
+    cookie: { ...cookie, maxAge: seconds },
+  });
+  const home = `${ADMIN_PATH}/`;
 
   fastify.addHook('onRequest', async (request, reply) => {
     reply.header('content-security-policy', CSP).header('x-frame-options', 'DENY');
@@ -74,65 +62,77 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
     }
   });
 
-  fastify.get<{ Querystring: Record<string, string> }>('/callback', async (request, reply) => {
-    const transaction = request.signIn.get('transaction');
-    request.signIn.delete();
-    if (!transaction || request.query.state !== transaction.state) {
-      return reply.badRequest('Sign-in has expired or was started elsewhere');
-    }
-    let signedIn: Awaited<ReturnType<typeof signIn.finish>>;
-    try {
-      signedIn = await signIn.finish(request.query, transaction);
-    } catch (err) {
-      log.warn({ err }, 'Sign-in to the admin pages failed');
-      return reply.badRequest('Sign-in failed');
-    }
-    request.session.set('admin', { ...signedIn, signedInAt: Date.now() });
-    return reply.redirect(transaction.returnTo, 303);
-  });
+  fastify.register(fastifyStatic, { root: fileURLToPath(new URL('public', import.meta.url)), decorateReply: false, index: false });
 
-  fastify.post('/sign-out', async (request, reply) => {
-    const session = request.session.get('admin');
-    request.session.delete();
-    return reply.redirect(session ? signIn.signOutUrl(session.idToken).toString() : '/admin/', 303);
-  });
+  fastify.register(async (sessions) => {
+    sessions.register(formBody);
+    sessions.register(secureSession, [
+      session('session', 'admin_session', 'admin session', SESSION_SECONDS),
+      session('signIn', 'admin_sign_in', 'admin sign-in', SIGN_IN_SECONDS),
+    ]);
 
-  // Every page below needs a current session belonging to an admin
-  fastify.register(async (pages) => {
-    pages.addHook('onRequest', async (request, reply) => {
-      const session = request.session.get('admin');
-      if (!session || Date.now() - session.signedInAt >= SESSION_SECONDS * 1000) {
-        const { url, transaction } = await signIn.start(request.url);
-        request.signIn.set('transaction', transaction);
-        return reply.redirect(url.toString(), 303);
+    sessions.get<{ Querystring: Record<string, string> }>('/callback', async (request, reply) => {
+      const transaction = request.signIn.get('transaction');
+      request.signIn.delete();
+      if (!transaction || request.query.state !== transaction.state) {
+        return reply.badRequest('Sign-in has expired or was started elsewhere');
       }
-      if (!admins.has(session.sub)) {
-        const body = html`<div class="max-w-2xl space-y-4 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
+      let signedIn: Awaited<ReturnType<typeof signIn.finish>>;
+      try {
+        signedIn = await signIn.finish(request.query, transaction);
+      } catch (err) {
+        log.warn({ err }, 'Sign-in to the admin pages failed');
+        return reply.badRequest('Sign-in failed');
+      }
+      const { sub, name = sub, idToken } = signedIn;
+      request.session.set('admin', { sub, name, idToken, signedInAt: Date.now() });
+      return reply.redirect(transaction.returnTo, 303);
+    });
+
+    sessions.post('/sign-out', async (request, reply) => {
+      const admin = request.session.get('admin');
+      request.session.delete();
+      return reply.redirect(admin ? signIn.signOutUrl(admin.idToken).toString() : home, 303);
+    });
+
+    // Every page below needs a current session belonging to an admin
+    sessions.register(async (pages) => {
+      pages.addHook('onRequest', async (request, reply) => {
+        const admin = request.session.get('admin');
+        if (!admin || Date.now() - admin.signedInAt >= SESSION_SECONDS * 1000) {
+          const { url, transaction } = await signIn.start(request.url);
+          request.signIn.set('transaction', transaction);
+          return reply.redirect(url.toString(), 303);
+        }
+        if (!admins.has(admin.sub)) {
+          const body = html`<div class="max-w-2xl space-y-4 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
       <p class="font-medium text-red-700">You are signed in, but you are not an admin.</p>
       <p>To be given access, ask an operator to add this <code class="font-mono text-sm">sub</code> to <code class="font-mono text-sm">ADMIN_USERS</code>:</p>
-      <p><code class="block select-all rounded bg-zinc-100 px-3 py-2 font-mono text-sm break-all">${session.sub}</code></p>
+      <p><code class="block select-all rounded bg-zinc-100 px-3 py-2 font-mono text-sm break-all">${admin.sub}</code></p>
     </div>`;
-        return send(reply, layout({ title: 'Not an admin', user: displayName(session.idToken), body }), 403);
-      }
-    });
+          return send(reply, layout({ title: 'Not an admin', user: admin.name, body }), 403);
+        }
+      });
 
-    pages.get('/', async (request, reply) => {
-      const user = displayName(request.session.get('admin')?.idToken ?? '');
-      const flash = request.session.get('flash');
-      request.session.set('flash', undefined);
-      const objects = await Array.fromAsync(repository.objects());
-      return send(reply, layout({ title: 'Crates', user, flash, ...cratesPage(objects) }));
-    });
+      pages.get('/', async (request, reply) => {
+        const flash = request.session.get('flash');
+        if (flash) {
+          request.session.set('flash', undefined);
+        }
+        const objects = await Array.fromAsync(repository.objects());
+        return send(reply, layout({ title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(objects) }));
+      });
 
-    pages.post<{ Body: { crateId?: string; force?: string } }>('/index', async (request, reply) => {
-      const { crateId, force } = request.body ?? {};
-      request.session.set('flash', await indexCrates(repository, request.log, crateId || undefined, Boolean(force)));
-      return reply.redirect('/admin/', 303);
-    });
+      pages.post<{ Body: { crateId?: string; force?: string } }>('/index', async (request, reply) => {
+        const { crateId, force } = request.body ?? {};
+        request.session.set('flash', await indexCrates(repository, request.log, crateId || undefined, Boolean(force)));
+        return reply.redirect(home, 303);
+      });
 
-    pages.post<{ Body: { crateId?: string } }>('/delete', async (request, reply) => {
-      request.session.set('flash', deleteIndexes(repository, request.log, request.body?.crateId || undefined));
-      return reply.redirect('/admin/', 303);
+      pages.post<{ Body: { crateId?: string } }>('/delete', async (request, reply) => {
+        request.session.set('flash', deleteIndexes(repository, request.log, request.body?.crateId || undefined));
+        return reply.redirect(home, 303);
+      });
     });
   });
 };

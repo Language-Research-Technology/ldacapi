@@ -4,44 +4,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTestApp, type TestApp } from '../../test/app.ts';
-import { startFakeUpstream, type UpstreamUser } from '../../test/fake-upstream.ts';
-import { Browser } from '../../test/oidc.ts';
+import { ALICE, adminTestbed, ocflRepository, PEOPLE, repositoryIn } from '../../test/admin.ts';
+import type { buildTestApp, TestApp, TestRepository } from '../../test/app.ts';
+import type { Browser } from '../../test/oidc.ts';
 import type { Repository } from '../repository.ts';
 
-const ISSUER = 'http://localhost:8080';
-const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
-const ALICE: UpstreamUser = { sub: 'alice@upstream', name: 'Alice' };
-
 const BUNDLED = 'arcp://name,bundled';
-const PEOPLE = 'arcp://name,people';
 
+const testbed = adminTestbed();
 let storage: string;
-let upstream: Awaited<ReturnType<typeof startFakeUpstream>>;
 let opensearch: Client;
-const running: Awaited<ReturnType<typeof buildTestApp>>[] = [];
 
-const start = async (repository: Repository | 'ocfl') => {
-  const started = await buildTestApp(
-    {
-      OCFL_ROOT: join(storage, 'ocfl'),
-      OIDC_ISSUER: ISSUER,
-      OIDC_CLIENTS: JSON.stringify([{ client_id: 'oni', redirect_uris: ['http://localhost:5173/callback'] }]),
-      OIDC_UPSTREAM_ISSUER: upstream.issuer,
-      OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
-      OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
-      ADMIN_USERS: ALICE.sub,
-    },
-    { repository },
-  );
-  running.push(started);
-  return started;
-};
+const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: join(storage, 'ocfl'), ADMIN_USERS: ALICE.sub }, { repository });
 
 const signIn = async (app: TestApp) => {
-  const browser = new Browser(app, ISSUER);
-  const toUpstream = await browser.follow('/admin/');
-  expect((await browser.follow(upstream.signIn(toUpstream.headers.location as string, ALICE))).statusCode).toBe(200);
+  const { browser, page } = await testbed.signInAsAdmin(app, ALICE);
+  expect(page.statusCode).toBe(200);
   return browser;
 };
 
@@ -63,16 +41,10 @@ const flash = (body: string) =>
 beforeAll(async () => {
   storage = await mkdtemp(join(tmpdir(), 'ldacapi-actions-'));
   execFileSync('node', ['scripts/seed.ts'], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
-  upstream = await startFakeUpstream(UPSTREAM_CLIENT);
 });
 
 afterAll(async () => {
-  for (const { app, prisma } of running) {
-    await app.close();
-    await prisma.$disconnect();
-  }
   await opensearch?.close();
-  await upstream.close();
   await rm(storage, { recursive: true, force: true });
 });
 
@@ -102,7 +74,7 @@ describe('index and delete actions', () => {
 
   beforeAll(async () => {
     let config: Awaited<ReturnType<typeof buildTestApp>>['config'];
-    ({ app, repository, prisma, config } = await start('ocfl'));
+    ({ app, repository, prisma, config } = await start(ocflRepository));
     entityIndex = config.search.entityIndex;
     opensearch = new Client({ node: config.opensearchUrl });
   });
@@ -213,23 +185,12 @@ describe('index and delete actions', () => {
 });
 
 describe('protecting the actions', () => {
-  /** A repository with one crate whose search index is in `state`, recording what it is asked to do */
-  const repositoryIn = (state: string) => ({
-    storage: () => ({ content: {} }),
-    async *objects() {
-      yield { id: PEOPLE, name: 'People', path: '', state: { structural: 'indexed', search: state } };
-    },
-    getState: async () => ({ structural: 'indexed', search: state }),
-    createIndex: vi.fn(async () => {}),
-    deleteIndex: vi.fn(async () => {}),
-  });
-
   it.each([
     ['one crate', { crateId: PEOPLE, force: 'true' }, `Reindexing ${PEOPLE}`],
     ['every crate', {}, 'Indexing every crate'],
   ])('refuses to index %s while deleting is in progress', async (_, form, asked) => {
     const repository = repositoryIn('deleting');
-    const { app } = await start(repository as unknown as Repository);
+    const { app } = await start(repository);
     const browser = await signIn(app);
 
     const page = await act(browser, 'index', form);
@@ -243,7 +204,7 @@ describe('protecting the actions', () => {
     ['from another origin', { origin: 'https://evil.example.org' }],
   ])('refuses a POST %s and changes nothing', async (_, headers) => {
     const repository = repositoryIn('indexed');
-    const { app } = await start(repository as unknown as Repository);
+    const { app } = await start(repository);
     const browser = await signIn(app);
 
     for (const action of ['index', 'delete']) {

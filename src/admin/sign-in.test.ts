@@ -1,44 +1,28 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buildTestApp, type TestApp } from '../../test/app.ts';
-import { startFakeUpstream, type UpstreamUser } from '../../test/fake-upstream.ts';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ALICE as ADMIN, adminTestbed, ISSUER } from '../../test/admin.ts';
+import type { TestApp } from '../../test/app.ts';
+import type { UpstreamUser } from '../../test/fake-upstream.ts';
 import { authorizationRequest, Browser } from '../../test/oidc.ts';
 
-const ISSUER = 'http://localhost:8080';
-const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
-const ALICE: UpstreamUser = { sub: 'alice@upstream', name: 'Alice <Admin>' };
+const ALICE: UpstreamUser = { ...ADMIN, name: 'Alice <Admin>' };
 const MALLORY: UpstreamUser = { sub: 'mallory@upstream', name: 'Mallory' };
 
-let upstream: Awaited<ReturnType<typeof startFakeUpstream>>;
+const testbed = adminTestbed();
 let app: TestApp;
-let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
 
 /** Follows `url` to the upstream provider, signs `user` in there, and follows the way back */
 const signIn = async (browser: Browser, url: string, user: UpstreamUser) => {
   const toUpstream = await browser.follow(url);
-  expect(new URL(toUpstream.headers.location as string).origin).toBe(upstream.issuer);
-  return browser.follow(upstream.signIn(toUpstream.headers.location as string, user));
+  expect(new URL(toUpstream.headers.location as string).origin).toBe(testbed.upstream.issuer);
+  return browser.follow(testbed.upstream.signIn(toUpstream.headers.location as string, user));
 };
 
 beforeAll(async () => {
-  upstream = await startFakeUpstream(UPSTREAM_CLIENT);
-  ({ app, prisma } = await buildTestApp({
-    OIDC_ISSUER: ISSUER,
-    OIDC_CLIENTS: JSON.stringify([{ client_id: 'oni', redirect_uris: ['http://localhost:5173/callback'] }]),
-    OIDC_UPSTREAM_ISSUER: upstream.issuer,
-    OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
-    OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
-    ADMIN_USERS: ` other@upstream , ${ALICE.sub} `,
-  }));
+  ({ app } = await testbed.start({ ADMIN_USERS: ` other@upstream , ${ALICE.sub} ` }));
 });
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-afterAll(async () => {
-  await app.close();
-  await prisma.$disconnect();
-  await upstream.close();
 });
 
 describe('signing in to the admin pages', () => {
@@ -106,7 +90,7 @@ describe('signing in to the admin pages', () => {
   it('refuses a callback whose state does not match the sign-in', async () => {
     const browser = new Browser(app, ISSUER);
     const toUpstream = await browser.follow('/admin/');
-    let toAdmin = new URL(upstream.signIn(toUpstream.headers.location as string, ALICE));
+    let toAdmin = new URL(testbed.upstream.signIn(toUpstream.headers.location as string, ALICE));
     while (toAdmin.pathname !== '/admin/callback') {
       toAdmin = new URL((await browser.get(toAdmin.toString())).headers.location as string, ISSUER);
     }
@@ -137,7 +121,7 @@ describe('signing in to the admin pages', () => {
     const backToAdmin = await browser.post('/oauth/session/end/confirm', { xsrf, logout: 'yes' });
     expect(backToAdmin.headers.location).toBe(`${ISSUER}/admin/`);
     const again = await browser.follow('/admin/');
-    expect(new URL(again.headers.location as string).origin).toBe(upstream.issuer);
+    expect(new URL(again.headers.location as string).origin).toBe(testbed.upstream.issuer);
   });
 
   it('refuses a POST with a missing or foreign Origin', async () => {

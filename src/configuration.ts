@@ -53,10 +53,14 @@ const privateRsaJwk = z.looseObject({ kty: z.literal('RSA'), kid: z.string().min
 
 const signingKeys = json.pipe(z.object({ keys: z.array(privateRsaJwk).min(1, 'Needs at least one key') }));
 
-const cookieKeys = z
-  .string()
-  .transform((value) => value.split(',').map((key) => key.trim()))
-  .pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')));
+const commaList = z.string().transform((value) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
+
+const cookieKeys = commaList.pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')).min(1, 'Needs at least one key'));
 
 const REQUIRED_WITH_UPSTREAM = 'Required when OIDC_UPSTREAM_ISSUER is set';
 
@@ -117,15 +121,7 @@ export function loadConfig(processEnv: Env) {
       OIDC_UPSTREAM_CLIENT_SECRET: z.string().optional(),
       OIDC_SIGNING_KEYS: signingKeys.optional(),
       OIDC_COOKIE_KEYS: cookieKeys.optional(),
-      ADMIN_USERS: z
-        .string()
-        .default('')
-        .transform((value) =>
-          value
-            .split(',')
-            .map((sub) => sub.trim())
-            .filter(Boolean),
-        ),
+      ADMIN_USERS: commaList.default([]),
     })
     .transform((env, ctx) => {
       const {

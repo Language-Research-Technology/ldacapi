@@ -1,6 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest, onRequestHookHandler } from 'fastify';
 import Provider, { type ClientMetadata, type Configuration, errors, type InteractionResults, type KoaContextWithOIDC } from 'oidc-provider';
-import { adminClient } from '../admin/client.ts';
 import type { AuthConfig, OidcClient } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import { deleteExpired, PrismaAdapter } from './adapter.ts';
@@ -9,7 +8,7 @@ import { findAccount, saveUser } from './users.ts';
 
 const log = logger.child({ module: 'oidc' });
 
-const routes = {
+export const routes = {
   authorization: '/oauth/authorize',
   token: '/oauth/token',
   jwks: '/oauth/jwks',
@@ -66,11 +65,10 @@ const loadExistingGrant = (audience: string) => async (ctx: KoaContextWithOIDC) 
 
 const toClientMetadata = (client: OidcClient): ClientMetadata => (client.client_secret ? client : { ...client, token_endpoint_auth_method: 'none' });
 
-const createProvider = (auth: AuthConfig) => {
-  const { issuer, audience, clients, signingKeys, cookieKeys } = auth;
+const createProvider = ({ issuer, audience, clients, signingKeys, cookieKeys }: AuthConfig) => {
   const provider = new Provider(issuer, {
     adapter: PrismaAdapter,
-    clients: [...clients.map(toClientMetadata), adminClient(auth)],
+    clients: clients.map(toClientMetadata),
     clientDefaults: { grant_types: ['authorization_code', 'refresh_token'] },
     jwks: { keys: signingKeys },
     cookies: { keys: cookieKeys },
@@ -208,7 +206,7 @@ export const oidcProvider: FastifyPluginAsync<{ auth: AuthConfig }> = async (fas
 
     let result: InteractionResults;
     try {
-      const user = await saveUser(await upstream.claims(request.query, checks));
+      const user = await saveUser((await upstream.tokens(request.query, checks)).claims);
       result = { login: { accountId: user.sub } };
     } catch (err) {
       log.warn({ err }, 'Sign-in at the upstream provider failed');

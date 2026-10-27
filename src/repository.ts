@@ -9,6 +9,10 @@ export const State = {
 
 type IndexState = (typeof State)[keyof typeof State];
 
+/** Whether any index is in one of `values` */
+export const hasState = (state: Partial<Record<string, IndexState>>, ...values: IndexState[]) =>
+  Object.values(state).some((value) => value !== undefined && values.includes(value));
+
 /** A crate in the repository, with the state of each index that isn't idle */
 export type RepositoryObject = { id: string; path: string; name?: string | undefined; state: Partial<Record<string, IndexState>> };
 

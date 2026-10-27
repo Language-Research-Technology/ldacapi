@@ -23,7 +23,7 @@ describe('authenticating at the upstream token endpoint', () => {
     const checks = client.newChecks('state');
     const callback = new URL(upstream?.signIn((await client.authorizationUrl(checks)).toString(), ALICE) ?? '');
 
-    const claims = await client.claims(Object.fromEntries(callback.searchParams), checks);
+    const { claims } = await client.tokens(Object.fromEntries(callback.searchParams), checks);
 
     expect(claims).toMatchObject(ALICE);
   });

@@ -5,6 +5,7 @@ import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, 
 import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
 import Fastify, { type FastifyPluginAsync } from 'fastify';
 import pkg from '../package.json' with { type: 'json' };
+import { ADMIN_PATH, adminClient } from './admin/client.ts';
 import { adminPages } from './admin/plugin.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
@@ -62,9 +63,10 @@ export function buildApp({ repository, search }: AppDeps) {
     },
     { prefix },
   );
-  if (config.auth) {
-    fastify.register(oidcProvider, { auth: config.auth });
-    fastify.register(adminPages, { prefix: '/admin', auth: config.auth, adminUsers: config.adminUsers, repository });
+  const { auth } = config;
+  if (auth) {
+    fastify.register(oidcProvider, { auth: { ...auth, clients: [...auth.clients, adminClient(auth)] } });
+    fastify.register(adminPages, { prefix: ADMIN_PATH, auth, adminUsers: config.adminUsers, repository });
   } else {
     fastify.log.warn('The admin pages are off because sign-in is off; set OIDC_UPSTREAM_ISSUER to turn them on');
   }

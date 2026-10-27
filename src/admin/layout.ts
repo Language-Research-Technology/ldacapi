@@ -1,4 +1,5 @@
 import type { Flash } from './actions.ts';
+import { ADMIN_PATH } from './client.ts';
 import { type Html, html } from './html.ts';
 
 type LayoutOptions = {
@@ -18,8 +19,8 @@ export const layout = ({ title, user, body, flash, head }: LayoutOptions) => htm
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${title} · LDaCA admin</title>
-  <link rel="stylesheet" href="/admin/admin.css">
-  <script src="/admin/admin.js" defer></script>
+  <link rel="stylesheet" href="${ADMIN_PATH}/admin.css">
+  <script src="${ADMIN_PATH}/admin.js" defer></script>
   ${head}
 </head>
 <body class="min-h-screen font-sans">
@@ -33,7 +34,7 @@ export const layout = ({ title, user, body, flash, head }: LayoutOptions) => htm
         user &&
         html`<div class="flex items-center gap-4 text-sm">
         <p class="text-zinc-400">Signed in as <span class="font-medium text-zinc-100">${user}</span></p>
-        <form method="post" action="/admin/sign-out"><button type="submit" class="cursor-pointer rounded border border-zinc-600 px-3 py-1 hover:border-amber-400 hover:text-amber-400">Sign out</button></form>
+        <form method="post" action="${ADMIN_PATH}/sign-out"><button type="submit" class="cursor-pointer rounded border border-zinc-600 px-3 py-1 hover:border-amber-400 hover:text-amber-400">Sign out</button></form>
       </div>`
       }
     </div>
