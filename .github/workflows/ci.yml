@@ -80,3 +80,80 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  image:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: ldacapi
+          POSTGRES_USER: ldacapi
+          POSTGRES_PASSWORD: ldacapi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ldacapi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      opensearch:
+        image: opensearchproject/opensearch:3.9.0
+        env:
+          discovery.type: single-node
+          plugins.security.disabled: "true"
+          DISABLE_INSTALL_DEMO_CONFIG: "true"
+          OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -sf localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+        run: |
+          storage=$(mktemp -d)
+          chmod 777 "$storage"
+          env_file=$(mktemp)
+          cat > "$env_file" <<'ENV'
+          DATABASE_URL=postgresql://ldacapi:ldacapi@localhost:5432/ldacapi
+          OPENSEARCH_URL=http://localhost:9200
+          OCFL_ROOT=/storage/ocfl
+          ENV
+          one_off() {
+            docker run --rm --network host --env-file "$env_file" -v "$storage:/storage" "$@"
+          }
+          one_off "$IMAGE" pnpm db:deploy
+          one_off -v "$PWD/test-data:/test-data:ro" "$IMAGE" pnpm seed /test-data
+          docker run -d --name api --network host --env-file "$env_file" -v "$storage:/storage" "$IMAGE"
+          for _ in $(seq 60); do
+            case "$(docker inspect -f '{{.State.Health.Status}}' api)" in
+              healthy) exit 0 ;;
+              unhealthy) break ;;
+            esac
+            [ "$(docker inspect -f '{{.State.Running}}' api)" = true ] || break
+            sleep 2
+          done
+          docker logs api
+          exit 1

@@ -1,0 +1,8 @@
+.git
+node_modules
+storage
+test-data
+.env*
+!.env.example
+src/generated
+src/admin/public/admin.css

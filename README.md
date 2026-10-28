@@ -199,9 +199,55 @@ The admin pages are a client of our provider that needs no entry in
 
 The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
 `@tailwindcss/cli` from `src/admin/admin.css`, which scans the Eta templates in
-`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: a
-deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
+`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: the
+Docker image builds it, and any other deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
 edit the templates.
+
+## Docker image
+
+The `Dockerfile` builds the API's image: production dependencies only, the
+generated Prisma client and the admin pages' stylesheet. It sets
+`NODE_ENV=production` and `LDACAPI_HOST=0.0.0.0`, so the API listens on all
+interfaces on port 8080, and its healthcheck requests `/api/capabilities` on
+`LDACAPI_PORT`. That check touches neither Postgres nor OpenSearch, so it
+reports whether the API is serving, not whether they are up.
+
+Put the API's configuration in an environment file, such as `ldacapi.env`, and
+start it:
+
+```sh
+docker build -t ldacapi .
+docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage ldacapi
+```
+
+`docker run --env-file` takes each value literally, quotes included, so drop
+the quotes from the lines `pnpm generate-keys` prints.
+
+### One-off commands
+
+The container never migrates the database when it starts. Before a rollout,
+apply the migrations once from the new image, so several replicas never race
+to migrate:
+
+```sh
+docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:deploy
+```
+
+`pnpm seed [dir]` (mount `dir` into the container), `pnpm index` and
+`pnpm generate-keys` run the same way, and download nothing. Run them with the
+same environment file as the API: Prisma and the scripts load the whole
+configuration, so in production they need `DATABASE_URL`, `OPENSEARCH_URL`,
+`OCFL_ROOT` and, when sign-in is on, its settings too, not just
+`DATABASE_URL`.
+
+### Storage
+
+The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`,
+and `OCFL_SCRATCH` if it isn't `scratch` beside `OCFL_ROOT`, to the paths
+inside the container (above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
+image's `node` user, uid 1000, so the OCFL repository must be readable by uid
+1000 and the scratch directory writable by it. `pnpm seed` writes to the
+repository, so give it write access too when you run it.
 
 ## Database
 
