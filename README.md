@@ -212,13 +212,22 @@ interfaces on port 8080, and its healthcheck requests `/api/capabilities` on
 `LDACAPI_PORT`. That check touches neither Postgres nor OpenSearch, so it
 reports whether the API is serving, not whether they are up.
 
+CI publishes the image to `ghcr.io/language-research-technology/ldacapi` on
+every push to `main`, once lint, test and the image's smoke test pass. Each
+image is tagged `sha-<short>` with its commit, so you can pin or roll back a
+deployment, and `main` moves to the latest. Pull requests build and smoke-test
+the image without publishing it.
+
 Put the API's configuration in an environment file, such as `ldacapi.env`, and
 start it:
 
 ```sh
-docker build -t ldacapi .
+docker pull ghcr.io/language-research-technology/ldacapi:main
+docker tag ghcr.io/language-research-technology/ldacapi:main ldacapi
 docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage ldacapi
 ```
+
+or build it yourself with `docker build -t ldacapi .`.
 
 `docker run --env-file` takes each value literally, quotes included, so drop
 the quotes from the lines `pnpm generate-keys` prints.
