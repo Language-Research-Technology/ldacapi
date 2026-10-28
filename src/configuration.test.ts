@@ -18,7 +18,6 @@ const PRODUCTION = {
   NODE_ENV: 'production',
   DATABASE_URL: 'postgresql://prod/ldacapi',
   OPENSEARCH_URL: 'http://search:9200',
-  TOKEN_ADMIN: 'secret',
   OCFL_ROOT: '/data/ocfl',
 };
 
@@ -42,10 +41,9 @@ describe('loadConfig', () => {
   });
 
   it('reads values from the environment', () => {
-    const config = loadConfig({ LDACAPI_PORT: '9000', TOKEN_ADMIN: 'secret', ENTITY_INDEX: 'other' });
+    const config = loadConfig({ LDACAPI_PORT: '9000', ENTITY_INDEX: 'other' });
 
     expect(config.port).toBe(9000);
-    expect(config.tokenAdmin).toBe('secret');
     expect(config.search.entityIndex).toBe('other');
   });
 
@@ -55,11 +53,12 @@ describe('loadConfig', () => {
   });
 
   it('treats empty values as unset', () => {
-    expect(loadConfig({ TOKEN_ADMIN: '' }).tokenAdmin).toBe('1234-1234-1234-1234');
+    expect(loadConfig({ OPENSEARCH_URL: '' }).opensearchUrl).toBe('http://localhost:9200');
   });
 
-  it('requires connection details, the admin token and OCFL root in production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*TOKEN_ADMIN[\s\S]*OCFL_ROOT/);
+  it('requires connection details and OCFL root in production', () => {
+    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*OCFL_ROOT/);
+    expect(() => loadConfig({ NODE_ENV: 'production' })).not.toThrow(/TOKEN_ADMIN/);
   });
 
   it('starts in production once the required values are set', () => {
@@ -207,6 +206,34 @@ describe('loadConfig', () => {
         expect(auth?.signingKeys).toEqual([expect.objectContaining({ kty: 'RSA', alg: 'RS256', use: 'sig', kid: expect.any(String), d: expect.any(String) })]);
         expect(auth?.cookieKeys).toEqual([expect.stringMatching(/^[\w-]{43}$/)]);
       }
+    });
+  });
+
+  it('reads admins from ADMIN_USERS as a comma-separated list, nobody when unset', () => {
+    expect(loadConfig({ ADMIN_USERS: ' alice@upstream , ,bob@upstream ' }).adminUsers).toEqual(['alice@upstream', 'bob@upstream']);
+    expect(loadConfig({}).adminUsers).toEqual([]);
+  });
+
+  describe('ADMIN_ORIGIN', () => {
+    const signIn = { ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' };
+
+    it('defaults to admin.localhost outside production', () => {
+      expect(loadConfig({}).adminOrigin).toBe('http://admin.localhost:8080');
+      expect(loadConfig({ NODE_ENV: 'test' }).adminOrigin).toBe('http://admin.localhost:8080');
+    });
+
+    it('is unset by default in production, and read as an origin', () => {
+      expect(loadConfig({ ...PRODUCTION, ...signIn }).adminOrigin).toBeUndefined();
+      expect(loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'https://admin.example.org/' }).adminOrigin).toBe('https://admin.example.org');
+    });
+
+    it('rejects an ADMIN_ORIGIN that is not an origin, or not https in production', () => {
+      expect(() => loadConfig({ ADMIN_ORIGIN: 'https://admin.example.org/admin' })).toThrow(/origin[\s\S]*ADMIN_ORIGIN/);
+      expect(() => loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'http://admin.example.org' })).toThrow(/https[\s\S]*ADMIN_ORIGIN/);
+    });
+
+    it('rejects an ADMIN_ORIGIN that is the issuer’s origin', () => {
+      expect(() => loadConfig({ ...signIn, ADMIN_ORIGIN: 'https://api.example.org' })).toThrow(/OIDC_ISSUER[\s\S]*ADMIN_ORIGIN/);
     });
   });
 

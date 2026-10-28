@@ -8,7 +8,7 @@ import { findAccount, saveUser } from './users.ts';
 
 const log = logger.child({ module: 'oidc' });
 
-const routes = {
+export const routes = {
   authorization: '/oauth/authorize',
   token: '/oauth/token',
   jwks: '/oauth/jwks',
@@ -206,7 +206,7 @@ export const oidcProvider: FastifyPluginAsync<{ auth: AuthConfig }> = async (fas
 
     let result: InteractionResults;
     try {
-      const user = await saveUser(await upstream.claims(request.query, checks));
+      const user = await saveUser((await upstream.tokens(request.query, checks)).claims);
       result = { login: { accountId: user.sub } };
     } catch (err) {
       log.warn({ err }, 'Sign-in at the upstream provider failed');

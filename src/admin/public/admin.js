@@ -1,0 +1,36 @@
+// Narrows the crate tree to crates whose name matches the filter, keeping their ancestors
+const filter = document.getElementById('crate-filter');
+const tree = document.getElementById('crates');
+// Kept across the page's own refreshes
+const FILTER_KEY = 'admin-crate-filter';
+
+const narrow = (item, words) => {
+  const children = item.querySelector(':scope > ul');
+  const childMatches = children ? [...children.children].map((child) => narrow(child, words)).includes(true) : false;
+  const name = item.dataset.name.toLowerCase();
+  const matches = childMatches || words.every((word) => name.includes(word));
+  item.hidden = !matches;
+  return matches;
+};
+
+const apply = () => {
+  sessionStorage.setItem(FILTER_KEY, filter.value);
+  const words = filter.value.toLowerCase().split(/\s+/).filter(Boolean);
+  for (const item of tree.querySelectorAll(':scope > ul > li')) {
+    narrow(item, words);
+  }
+};
+
+if (filter && tree) {
+  filter.value = sessionStorage.getItem(FILTER_KEY) ?? '';
+  apply();
+  filter.addEventListener('input', apply);
+}
+
+for (const form of document.querySelectorAll('form[data-confirm]')) {
+  form.addEventListener('submit', (event) => {
+    if (!confirm(form.dataset.confirm)) {
+      event.preventDefault();
+    }
+  });
+}

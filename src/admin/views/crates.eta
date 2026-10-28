@@ -1,0 +1,11 @@
+<% if (it.crates.length === 0) { %>
+<p>The repository has no crates.</p>
+<% } else { %>
+<p class="mb-4 flex gap-2">
+<% for (const form of it.actions) { %>
+  <%~ include('./action-form', { form }) %>
+<% } %>
+</p>
+<p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
+<div id="crates"><%~ include('./crate-list', { crates: it.crates }) %></div>
+<% } %>

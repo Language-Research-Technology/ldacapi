@@ -17,7 +17,9 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
   index, used by arocapi's entity and file routes) and, as one search
   document per entity, into arocapi's OpenSearch search backend
   (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
-- **Admin API**: list, rebuild and delete indexes (`src/routes/admin.ts`).
+- **Admin pages**: server-rendered pages at `/admin/` on their own origin,
+  where admins, who sign in through our own OIDC provider, see and rebuild or
+  delete indexes (`src/admin/`).
 - **Access control**: licences are checked against REMS, with sign-in through
   an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
 - **File downloads**: short-lived signed URLs that stream files out of OCFL
@@ -48,7 +50,8 @@ No configuration is needed for development. To override a default, copy
 
 | Script               | Does                                                                             |
 | -------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`           | Run the API, restarting on changes                                               |
+| `pnpm dev`           | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
+| `pnpm build`         | Build the admin pages' stylesheet (run before deploying)                         |
 | `pnpm test`          | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`          | Biome, Knip and TypeScript                                                       |
 | `pnpm bootstrap`     | `db:deploy`, `seed` and `index` in one go                                        |
@@ -70,28 +73,6 @@ The indexer skips a crate that has no metadata licence (the `license` of
 `ro-crate-metadata.json`) or no content licence (the `license` of the root
 dataset) unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set.
 
-## Admin API
-
-The admin routes need the admin token (`TOKEN_ADMIN`, `1234-1234-1234-1234` in
-development) as a bearer token.
-
-```sh
-TOKEN=1234-1234-1234-1234
-
-# Index state of every crate, or of one crate
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/<crateId>
-
-# Re-index everything, or one crate (optionally one index: structural or search)
-curl -X POST -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/admin/index/?force'
-curl -X POST -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/admin/index/<crateId>/<index>?force'
-
-# Delete the indexes of one crate
-curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/admin/index/<crateId>
-```
-
-URL-encode crate ids, which are usually URIs.
-
 ## Configuration
 
 Configuration comes only from environment variables, validated at startup
@@ -104,7 +85,6 @@ set.
 | `NODE_ENV`                                                 | `development`                                         |
 | `DATABASE_URL`                                             | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 | `OPENSEARCH_URL`                                           | `http://localhost:9200`                               |
-| `TOKEN_ADMIN`                                              | `1234-1234-1234-1234`                                 |
 | `OCFL_ROOT`                                                | `storage/ocfl`                                        |
 | `OCFL_SCRATCH`                                             | `scratch` beside `OCFL_ROOT`                          |
 | `LDACAPI_PORT`                                             | `8080`                                                |
@@ -119,9 +99,11 @@ set.
 | `OIDC_ISSUER`                                              | `http://localhost:8080`                               |
 | `OIDC_CLIENTS`                                             | `[]`                                                  |
 | `OIDC_SIGNING_KEYS`, `OIDC_COOKIE_KEYS`                    | generated at each start outside production            |
+| `ADMIN_ORIGIN`                                             | `http://admin.localhost:8080` outside production      |
+| `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
-With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL`, `TOKEN_ADMIN`
-and `OCFL_ROOT` have no defaults and must be set.
+With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
+have no defaults and must be set.
 
 ### Sign-in
 
@@ -174,6 +156,52 @@ tries again at the next sign-in.
 Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 `api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
 `client_id` in `OIDC_CLIENTS`.
+
+### Admin pages
+
+The admin pages are at `<ADMIN_ORIGIN>/admin/`. `ADMIN_ORIGIN` is an origin,
+with no path, such as `https://admin.example.org`, and must differ from
+`OIDC_ISSUER`: crate files are served on the API's origin with their own
+content type, so HTML or SVG in a crate could run script there, and a separate
+origin keeps that away from admin. It defaults to `http://admin.localhost:8080`
+outside production, which browsers resolve to this machine; in production it
+must be https. The admin pages are on only when sign-in is and `ADMIN_ORIGIN`
+is set; otherwise startup logs a warning and `/admin/` is not found. On the
+admin origin only `/admin/` is served, and on any other host `/admin/` is not
+found. Visiting them signs you in through our own OIDC provider, as Oni does,
+so you need no other password or key.
+
+The admin pages run in the API's process, so the reverse proxy must route the
+admin hostname to the API too, and pass the browser's `Host` header through
+unchanged: the API tells the two origins apart by `Host`, not by
+`X-Forwarded-Host`.
+
+`ADMIN_USERS` is a comma-separated list of the `sub`s of admins. Anyone else who
+signs in gets a page saying they aren't an admin, showing the `sub` to add.
+Every request checks the list, so removing someone takes effect as soon as the
+API restarts. An admin session lasts 8 hours, and signing out of the admin
+pages also ends the session at our provider, ending on a signed-out page with a
+link to sign in again.
+
+The crates page shows every crate's state in each index. It can index,
+reindex or delete one crate's indexes, or index, reindex or delete all of them.
+An action on a crate covers the crate and the crates under it: those whose id
+is the crate's id followed by `/`. A crate that is already indexed needs
+reindexing. Indexing is refused while any crate it covers is being deleted,
+queued or indexing, deleting is refused while any crate it covers is queued or
+indexing, and an action on a crate that isn't in the repository is refused. The page reloads
+itself until the work finishes. Each action, accepted or refused, is logged at
+`info` with the admin's `sub`.
+
+The admin pages are a client of our provider that needs no entry in
+`OIDC_CLIENTS`; their client secret and session keys are derived from
+`OIDC_COOKIE_KEYS`, so they rotate with it.
+
+The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
+`@tailwindcss/cli` from `src/admin/admin.css`, which scans the Eta templates in
+`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: a
+deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
+edit the templates.
 
 ## Database
 

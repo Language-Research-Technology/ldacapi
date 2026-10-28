@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { Client } from '@opensearch-project/opensearch';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { loadConfig } from '../src/configuration.ts';
@@ -7,6 +8,11 @@ import { PrismaClient } from '../src/generated/prisma/client.ts';
 
 // Each run gets its own database and index so runs never share or destroy each other's data
 export default async function setup() {
+  // The admin pages link the stylesheet; tests only need it to exist
+  if (!existsSync('src/admin/public/admin.css')) {
+    execFileSync('pnpm', ['build'], { stdio: 'ignore' });
+  }
+
   const config = loadConfig({ ...process.env, NODE_ENV: 'test' });
   const suffix = `${process.pid}_${randomBytes(3).toString('hex')}`;
 

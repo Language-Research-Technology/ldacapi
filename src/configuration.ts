@@ -53,10 +53,14 @@ const privateRsaJwk = z.looseObject({ kty: z.literal('RSA'), kid: z.string().min
 
 const signingKeys = json.pipe(z.object({ keys: z.array(privateRsaJwk).min(1, 'Needs at least one key') }));
 
-const cookieKeys = z
-  .string()
-  .transform((value) => value.split(',').map((key) => key.trim()))
-  .pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')));
+const commaList = z.string().transform((value) =>
+  value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
+);
+
+const cookieKeys = commaList.pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')).min(1, 'Needs at least one key'));
 
 const REQUIRED_WITH_UPSTREAM = 'Required when OIDC_UPSTREAM_ISSUER is set';
 
@@ -97,7 +101,6 @@ export function loadConfig(processEnv: Env) {
     .object({
       DATABASE_URL: devDefault(`postgresql://ldacapi:ldacapi@localhost:5432/ldacapi${nodeEnv === 'test' ? '_test' : ''}`),
       OPENSEARCH_URL: devDefault('http://localhost:9200'),
-      TOKEN_ADMIN: devDefault('1234-1234-1234-1234'),
       OCFL_ROOT: devDefault('storage/ocfl'),
       OCFL_SCRATCH: z.string().optional(),
       LDACAPI_PORT: z.coerce.number().int().default(8080),
@@ -118,6 +121,8 @@ export function loadConfig(processEnv: Env) {
       OIDC_UPSTREAM_CLIENT_SECRET: z.string().optional(),
       OIDC_SIGNING_KEYS: signingKeys.optional(),
       OIDC_COOKIE_KEYS: cookieKeys.optional(),
+      ADMIN_ORIGIN: nodeEnv === 'production' ? origin.optional() : origin.default('http://admin.localhost:8080'),
+      ADMIN_USERS: commaList.default([]),
     })
     .transform((env, ctx) => {
       const {
@@ -141,6 +146,10 @@ export function loadConfig(processEnv: Env) {
         return z.NEVER;
       }
       const { data } = required;
+      if (rest.ADMIN_ORIGIN === data.OIDC_ISSUER) {
+        ctx.addIssue({ code: 'custom', path: ['ADMIN_ORIGIN'], message: 'Must differ from OIDC_ISSUER, so the admin pages are on their own origin' });
+        return z.NEVER;
+      }
       const auth = {
         issuer: data.OIDC_ISSUER,
         audience: `${data.OIDC_ISSUER}${prefix}`,
@@ -166,7 +175,6 @@ export function loadConfig(processEnv: Env) {
     host: env.LDACAPI_HOST,
     logLevel: env.LOG_LEVEL,
     maxParamLength: env.LDACAPI_MAX_PARAM_LENGTH,
-    tokenAdmin: env.TOKEN_ADMIN,
     ocfl: {
       root: resolve(env.OCFL_ROOT),
       scratch: resolve(env.OCFL_SCRATCH ?? join(dirname(env.OCFL_ROOT), 'scratch')),
@@ -182,6 +190,8 @@ export function loadConfig(processEnv: Env) {
     },
     enrollmentUrl: env.ENROLLMENT_URL,
     auth: env.auth,
+    adminOrigin: env.ADMIN_ORIGIN,
+    adminUsers: env.ADMIN_USERS,
     indexType,
     search: { entityIndex: env.ENTITY_INDEX },
   };

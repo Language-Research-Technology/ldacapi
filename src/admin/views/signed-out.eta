@@ -1,0 +1,1 @@
+<p>You have signed out. <a href="<%= it.adminPath %>/" class="font-medium text-amber-700 underline hover:text-amber-900">Sign in</a></p>
