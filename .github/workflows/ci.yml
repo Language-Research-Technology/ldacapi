@@ -18,13 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
           cache: pnpm
@@ -37,7 +37,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    services:
+    services: &services
       db:
         image: postgres:18-alpine
         env:
@@ -67,13 +67,13 @@ jobs:
           --health-retries 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
           cache: pnpm
@@ -85,50 +85,40 @@ jobs:
         run: pnpm test
 
   image:
+    needs: [lint, test]
     runs-on: ubuntu-latest
-    services:
-      db:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_DB: ldacapi
-          POSTGRES_USER: ldacapi
-          POSTGRES_PASSWORD: ldacapi
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ldacapi"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      opensearch:
-        image: opensearchproject/opensearch:3.9.0
-        env:
-          discovery.type: single-node
-          plugins.security.disabled: "true"
-          DISABLE_INSTALL_DEMO_CONFIG: "true"
-          OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
-        ports:
-          - 9200:9200
-        options: >-
-          --health-cmd "curl -sf localhost:9200/_cluster/health"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 20
+    concurrency:
+      group: image-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      packages: write
+    services: *services
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/language-research-technology/ldacapi
+          tags: |
+            type=ref,event=branch
+            type=sha
 
       - name: Build image
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64
           load: true
-          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -144,15 +134,16 @@ jobs:
           OPENSEARCH_URL=http://localhost:9200
           OCFL_ROOT=/storage/ocfl
           ENV
-          one_off() {
-            docker run --rm --network host --env-file "$env_file" -v "$storage:/storage" "$@"
-          }
-          one_off "$IMAGE" pnpm db:deploy
-          one_off -v "$PWD/test-data:/test-data:ro" "$IMAGE" pnpm seed /test-data
-          docker run -d --name api --network host --env-file "$env_file" -v "$storage:/storage" "$IMAGE"
+          run=(--network host --env-file "$env_file" -v "$storage:/storage")
+          docker run --rm "${run[@]}" -v "$PWD/test-data:/app/test-data:ro" "$IMAGE" pnpm bootstrap
+          docker run --rm "$IMAGE" test -f src/admin/public/admin.css
+          docker run -d --name api "${run[@]}" "$IMAGE"
           for _ in $(seq 60); do
             case "$(docker inspect -f '{{.State.Health.Status}}' api)" in
-              healthy) exit 0 ;;
+              healthy)
+                curl -fsS localhost:8080/api/entities | grep -q '"total":[1-9]' && exit 0
+                break
+                ;;
               unhealthy) break ;;
             esac
             [ "$(docker inspect -f '{{.State.Running}}' api)" = true ] || break
@@ -161,42 +152,14 @@ jobs:
           docker logs api
           exit 1
 
-  publish:
-    if: github.event_name == 'push'
-    needs: [lint, test, image]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Image metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/language-research-technology/ldacapi
-          tags: |
-            type=ref,event=branch
-            type=sha
-
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        if: github.event_name == 'push'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+      - name: Push image
+        if: github.event_name == 'push'
+        run: docker push --all-tags ghcr.io/language-research-technology/ldacapi

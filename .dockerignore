@@ -6,3 +6,4 @@ test-data
 !.env.example
 src/generated
 src/admin/public/admin.css
+**/*.test.ts

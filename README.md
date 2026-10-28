@@ -125,8 +125,8 @@ anonymous.
   `client_secret`. Clients without a secret are public and must use PKCE. For
   the Oni in Docker Compose:
 
-  ```sh
-  OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]'
+  ```dotenv
+  OIDC_CLIENTS=[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]
   ```
 
 - `OIDC_SIGNING_KEYS` is a JWKS, `{"keys":[…]}`, of private RSA keys that sign
@@ -200,8 +200,8 @@ The admin pages are a client of our provider that needs no entry in
 The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
 `@tailwindcss/cli` from `src/admin/admin.css`, which scans the Eta templates in
 `src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: the
-Docker image builds it, and any other deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
-edit the templates.
+Docker image builds it, other deploys must run `pnpm build`, and `pnpm dev`
+rebuilds it as you edit the templates.
 
 ## Docker image
 
@@ -219,18 +219,17 @@ deployment, and `main` moves to the latest. Pull requests build and smoke-test
 the image without publishing it.
 
 Put the API's configuration in an environment file, such as `ldacapi.env`, and
-start it:
+start it. Docker keeps quotes in an environment file's values, so don't quote
+them. Don't set `LDACAPI_HOST` there: the healthcheck requests `127.0.0.1`, so
+the API must keep listening on `0.0.0.0`.
 
 ```sh
-docker pull ghcr.io/language-research-technology/ldacapi:main
-docker tag ghcr.io/language-research-technology/ldacapi:main ldacapi
-docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage ldacapi
+docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage \
+  ghcr.io/language-research-technology/ldacapi:main
 ```
 
-or build it yourself with `docker build -t ldacapi .`.
-
-`docker run --env-file` takes each value literally, quotes included, so drop
-the quotes from the lines `pnpm generate-keys` prints.
+Below, `ldacapi` stands for the image, which you can also build yourself with
+`docker build -t ldacapi .`.
 
 ### One-off commands
 
@@ -242,18 +241,20 @@ to migrate:
 docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:deploy
 ```
 
-`pnpm seed [dir]` (mount `dir` into the container), `pnpm index` and
-`pnpm generate-keys` run the same way, and download nothing. Run them with the
-same environment file as the API: Prisma and the scripts load the whole
-configuration, so in production they need `DATABASE_URL`, `OPENSEARCH_URL`,
-`OCFL_ROOT` and, when sign-in is on, its settings too, not just
-`DATABASE_URL`.
+`pnpm seed [dir]` (mount `dir` into the container) and `pnpm index` run the
+same way, offline. Give them and `pnpm db:deploy` the API's environment file:
+Prisma and the scripts load the whole [configuration](#configuration).
+`pnpm generate-keys` reads no configuration, so it needs no environment file:
+
+```sh
+docker run --rm ldacapi pnpm generate-keys >> ldacapi.env
+```
 
 ### Storage
 
-The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`,
-and `OCFL_SCRATCH` if it isn't `scratch` beside `OCFL_ROOT`, to the paths
-inside the container (above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
+The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
+(and `OCFL_SCRATCH`, if you need it elsewhere) to paths inside the container
+(above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
 image's `node` user, uid 1000, so the OCFL repository must be readable by uid
 1000 and the scratch directory writable by it. `pnpm seed` writes to the
 repository, so give it write access too when you run it.
