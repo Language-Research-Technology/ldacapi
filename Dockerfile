@@ -7,21 +7,26 @@ ENV COREPACK_HOME=/usr/local/share/corepack \
   CHECKPOINT_DISABLE=1
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN corepack enable && corepack install && chmod -R a+rX "$COREPACK_HOME"
+RUN corepack enable && corepack install && pnpm --version && chmod -R a+rX "$COREPACK_HOME"
+
+FROM base AS prod-deps
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
+  pnpm install --frozen-lockfile --prod --ignore-scripts && pnpm rebuild
 
 FROM base AS build
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store pnpm install --frozen-lockfile --ignore-scripts
-COPY src/admin src/admin
-RUN pnpm build
+COPY prisma.config.ts ./
+COPY prisma prisma
+COPY src src
+RUN pnpm build && pnpm exec prisma generate
 
 FROM base AS runtime
-RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store pnpm install --frozen-lockfile --prod --ignore-scripts \
-  && pnpm rebuild
+COPY --from=prod-deps /app/node_modules node_modules
 COPY prisma.config.ts ./
 COPY prisma prisma
 COPY scripts scripts
 COPY src src
-RUN pnpm exec prisma generate
+COPY --from=build /app/src/generated src/generated
 COPY --from=build /app/src/admin/public/admin.css src/admin/public/
 # node_modules is fixed at build time; pnpm's pre-run install check would need the network
 ENV NODE_ENV=production \
