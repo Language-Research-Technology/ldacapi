@@ -198,8 +198,8 @@ The admin pages are a client of our provider that needs no entry in
 `OIDC_COOKIE_KEYS`, so they rotate with it.
 
 The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
-`@tailwindcss/cli` from `src/admin/admin.css`, which scans the admin module's
-templates, into `src/admin/public/admin.css`. That file is not checked in: a
+`@tailwindcss/cli` from `src/admin/admin.css`, which scans the Eta templates in
+`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: a
 deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
 edit the templates.
 

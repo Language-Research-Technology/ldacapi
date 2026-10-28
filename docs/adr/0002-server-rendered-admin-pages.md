@@ -15,7 +15,7 @@ The API serves its own admin pages at `/admin/`, rendered on the server, in the 
 - Signing out clears the session and ends the session at our provider, via its end-session endpoint with the ID token as `id_token_hint`, which returns to a signed-out page that needs no session. Returning to an admin page instead would sign the admin straight back in while their upstream session lasts.
 - Every action is a POST form that redirects back to the page with a one-time flash message, so reloading doesn't repeat it. An action on a crate covers it and the crates under it, and each action, accepted or refused, is logged with the admin's `sub`. A POST without a session signs in and returns to the home page, as only a GET can be repeated.
 - Every POST must carry an `Origin` matching the admin origin. Responses carry a Content-Security-Policy allowing only same-origin scripts and styles, and no framing.
-- Pages are built with an `html` tagged template that escapes every interpolated value.
+- Pages are rendered with `@fastify/view` and Eta templates in `src/admin/views/`, which escape every value by default; unescaped output is only for a layout's body or an included template.
 
 ## Consequences
 
@@ -25,3 +25,4 @@ The API serves its own admin pages at `/admin/`, rendered on the server, in the 
 - Admin needs sign-in configured, and so a working upstream provider, even locally.
 - Admin needs a second hostname, which the reverse proxy routes to the API with its `Host` header unchanged. Locally it is `admin.localhost`, which browsers resolve to the machine.
 - A non-human caller has no way into admin.
+- Templates aren't type-checked or linted. Each page's data is typed where the TypeScript passes it to its template, and what the templates compute is kept to looping and printing.

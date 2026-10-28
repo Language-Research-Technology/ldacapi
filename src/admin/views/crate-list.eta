@@ -1,0 +1,18 @@
+<ul>
+<% for (const crate of it.crates) { %>
+<li data-id="<%= crate.id %>" data-name="<%= crate.label %>">
+  <span class="crate-name"><%= crate.label %></span> <code><%= crate.id %></code>
+<% for (const state of crate.states) { %>
+  <span class="index-state"><%= state.label %>: <%= state.value %></span>
+<% } %>
+  <span class="crate-actions">
+<% for (const form of crate.actions) { %>
+    <%~ include('./action-form', { form }) %>
+<% } %>
+  </span>
+<% if (crate.children.length > 0) { %>
+  <%~ include('./crate-list', { crates: crate.children }) %>
+<% } %>
+</li>
+<% } %>
+</ul>

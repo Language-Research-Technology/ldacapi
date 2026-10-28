@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url';
 import formBody from '@fastify/formbody';
 import secureSession, { type Session, type SessionData } from '@fastify/secure-session';
 import fastifyStatic from '@fastify/static';
+import fastifyView from '@fastify/view';
+import { Eta } from 'eta';
 import type { FastifyBaseLogger, FastifyPluginAsync, FastifyReply } from 'fastify';
 import type { AuthConfig } from '../configuration.ts';
 import { logger } from '../logger.ts';
@@ -9,8 +11,6 @@ import type { Repository } from '../repository.ts';
 import { deleteIndexes, type Flash, indexCrates } from './actions.ts';
 import { ADMIN_HOME, ADMIN_PATH, ADMIN_SIGNED_OUT, derivedKey } from './client.ts';
 import { cratesPage } from './crates.ts';
-import { type Html, html } from './html.ts';
-import { layout } from './layout.ts';
 import { createSignIn, type SignInTransaction } from './sign-in.ts';
 
 const log = logger.child({ module: 'admin' });
@@ -36,7 +36,17 @@ const SIGN_IN_SECONDS = 10 * 60;
 
 const CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 
-const send = (reply: FastifyReply, page: Html, status = 200) => reply.code(status).type('text/html; charset=utf-8').send(page.toString());
+/** What the layout shows around every page */
+type Frame = { title: string; user?: string | undefined; flash?: Flash | undefined; refresh?: number | undefined };
+
+/** Each page's template and the data it needs */
+type Pages = {
+  crates: Frame & ReturnType<typeof cratesPage>;
+  'not-an-admin': Frame & { sub: string };
+  'signed-out': Frame;
+};
+
+const render = <Page extends keyof Pages>(reply: FastifyReply, page: Page, data: Pages[Page], status = 200) => reply.code(status).view(page, data);
 
 type AdminOptions = { auth: AuthConfig; origin: string; adminUsers: string[]; repository: Repository };
 
@@ -67,6 +77,13 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
     if (request.method === 'POST' && request.headers.origin !== origin) {
       return reply.forbidden('Cross-origin request refused');
     }
+  });
+
+  fastify.register(fastifyView, {
+    engine: { eta: new Eta() },
+    root: fileURLToPath(new URL('views', import.meta.url)),
+    layout: 'layout',
+    defaultContext: { adminPath: ADMIN_PATH },
   });
 
   fastify.register(fastifyStatic, { root: fileURLToPath(new URL('public', import.meta.url)), decorateReply: false, index: false });
@@ -103,8 +120,7 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
     });
 
     sessions.get('/signed-out', async (_request, reply) => {
-      const body = html`<p>You have signed out. <a href="${ADMIN_HOME}" class="font-medium text-amber-700 underline hover:text-amber-900">Sign in</a></p>`;
-      return send(reply, layout({ title: 'Signed out', body }));
+      return render(reply, 'signed-out', { title: 'Signed out' });
     });
 
     // Every page below needs a current session belonging to an admin
@@ -118,12 +134,7 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
           return reply.redirect(url.toString(), 303);
         }
         if (!admins.has(admin.sub)) {
-          const body = html`<div class="max-w-2xl space-y-4 rounded-lg border border-red-200 bg-white p-6 shadow-sm">
-      <p class="font-medium text-red-700">You are signed in, but you are not an admin.</p>
-      <p>To be given access, ask an operator to add this <code class="font-mono text-sm">sub</code> to <code class="font-mono text-sm">ADMIN_USERS</code>:</p>
-      <p><code class="block select-all rounded bg-zinc-100 px-3 py-2 font-mono text-sm break-all">${admin.sub}</code></p>
-    </div>`;
-          return send(reply, layout({ title: 'Not an admin', user: admin.name, body }), 403);
+          return render(reply, 'not-an-admin', { title: 'Not an admin', user: admin.name, sub: admin.sub }, 403);
         }
       });
 
@@ -133,7 +144,7 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
           request.session.set('flash', undefined);
         }
         const objects = await Array.fromAsync(repository.objects());
-        return send(reply, layout({ title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(objects) }));
+        return render(reply, 'crates', { title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(objects) });
       });
 
       for (const [action, run] of Object.entries(actions)) {

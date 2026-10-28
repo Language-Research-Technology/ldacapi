@@ -1,6 +1,4 @@
 import { hasState, type RepositoryObject, State } from '../repository.ts';
-import { ADMIN_PATH } from './client.ts';
-import { type Html, html } from './html.ts';
 
 type Crate = RepositoryObject & { label: string; children: Crate[] };
 
@@ -50,39 +48,34 @@ const buildTree = (objects: RepositoryObject[]) => {
   return sortTree(roots);
 };
 
-const BUTTON = 'cursor-pointer rounded border px-2 py-0.5 text-sm';
-const INDEX_BUTTON = `${BUTTON} border-zinc-300 bg-white hover:border-amber-500 hover:bg-amber-50`;
-const DELETE_BUTTON = `${BUTTON} border-red-300 bg-white text-red-700 hover:bg-red-50`;
-
 /** A form posting `crateId` (none for every crate) to an action */
-const actionForm = (action: 'index' | 'delete', label: string, crateId?: string, { force = false, confirm }: { force?: boolean; confirm?: string } = {}) =>
-  html`<form method="post" action="${ADMIN_PATH}/${action}" class="inline"${confirm && html` data-confirm="${confirm}"`}>${crateId && html`<input type="hidden" name="crateId" value="${crateId}">`}${force && html`<input type="hidden" name="force" value="true">`}<button type="submit" class="${action === 'delete' ? DELETE_BUTTON : INDEX_BUTTON}">${label}</button></form>`;
+type ActionForm = { action: 'index' | 'delete'; label: string; crateId?: string | undefined; force?: boolean; confirm?: string };
 
-const crateActions = (crate: Crate) => {
+type CrateRow = { id: string; label: string; states: { label: string; value: string }[]; actions: ActionForm[]; children: CrateRow[] };
+
+const crateRow = (crate: Crate): CrateRow => {
   const indexed = hasState(crate.state, State.INDEXED);
   const confirm = `Delete the indexes of ${crate.label}${crate.children.length > 0 ? ' and the crates under it' : ''}?`;
-  return html`<span class="crate-actions">${actionForm('index', indexed ? 'Reindex' : 'Index', crate.id, { force: indexed })} ${actionForm('delete', 'Delete', crate.id, { confirm })}</span>`;
+  return {
+    id: crate.id,
+    label: crate.label,
+    states: Object.entries(INDEXES).map(([index, label]) => ({ label, value: crate.state[index] ?? 'not indexed' })),
+    actions: [
+      { action: 'index', label: indexed ? 'Reindex' : 'Index', crateId: crate.id, force: indexed },
+      { action: 'delete', label: 'Delete', crateId: crate.id, confirm },
+    ],
+    children: crate.children.map(crateRow),
+  };
 };
 
-const renderCrates = (crates: Crate[]): Html => html`<ul>
-${crates.map(
-  (crate) => html`<li data-id="${crate.id}" data-name="${crate.label}">
-  <span class="crate-name">${crate.label}</span> <code>${crate.id}</code>
-  ${Object.entries(INDEXES).map(([index, label]) => html`<span class="index-state">${label}: ${crate.state[index] ?? 'not indexed'}</span> `)}
-  ${crateActions(crate)}
-  ${crate.children.length > 0 && renderCrates(crate.children)}
-</li>
-`,
-)}</ul>`;
+const ALL_ACTIONS: ActionForm[] = [
+  { action: 'index', label: 'Index all' },
+  { action: 'index', label: 'Reindex all', force: true },
+  { action: 'delete', label: 'Delete all', confirm: 'Delete every index?' },
+];
 
 /** The crates as a tree, and a refresh while any index is changing */
 export const cratesPage = (objects: RepositoryObject[]) => {
   const changing = objects.some(({ state }) => hasState(state, State.QUEUED, State.INDEXING, State.DELETING));
-  const body =
-    objects.length === 0
-      ? html`<p>The repository has no crates.</p>`
-      : html`<p class="mb-4 flex gap-2">${actionForm('index', 'Index all')} ${actionForm('index', 'Reindex all', undefined, { force: true })} ${actionForm('delete', 'Delete all', undefined, { confirm: 'Delete every index?' })}</p>
-    <p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
-    <div id="crates">${renderCrates(buildTree(objects))}</div>`;
-  return { head: changing ? html`<meta http-equiv="refresh" content="${REFRESH_SECONDS}">` : undefined, body };
+  return { refresh: changing ? REFRESH_SECONDS : undefined, actions: ALL_ACTIONS, crates: buildTree(objects).map(crateRow) };
 };

@@ -1,3 +1,2 @@
 @import "tailwindcss" source(none);
-@source "./**/*.ts";
-@source not "./**/*.test.ts";
+@source "./views/**/*.eta";
