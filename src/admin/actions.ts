@@ -26,6 +26,9 @@ export const indexCrates = async (repository: Repository, log: FastifyBaseLogger
   if (crates.some(({ state }) => hasState(state, State.DELETING))) {
     return refused(asked, 'deleting is in progress');
   }
+  if (crates.some(({ state }) => hasState(state, State.QUEUED, State.INDEXING))) {
+    return refused(asked, 'indexing is already in progress');
+  }
   if (!force && crates.some(({ id, state }) => id === crateId && hasState(state, State.INDEXED))) {
     return refused(asked, 'it is already indexed, so reindex it instead');
   }

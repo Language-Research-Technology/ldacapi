@@ -154,6 +154,16 @@ describe('index and delete actions', () => {
     expect(await entityCount(PEOPLE)).toBe(entities);
   });
 
+  it('refuses to index every crate again while indexing is in progress, and still indexes every crate', async () => {
+    const browser = await signIn(app);
+    await act(browser, 'index');
+
+    const page = await act(browser, 'index');
+
+    expect(flash(page.body)).toBe('Indexing every crate was refused: indexing is already in progress.');
+    await waitUntilIndexed(BUNDLED, PEOPLE);
+  });
+
   it('offers to reindex every crate beside indexing every crate', async () => {
     const page = await (await signIn(app)).get('/admin/');
 
@@ -318,6 +328,24 @@ describe('protecting the actions', () => {
     const page = await act(browser, 'index', form);
 
     expect(flash(page.body)).toBe(`${asked} was refused: deleting is in progress.`);
+    expect(repository.createIndex).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['one crate', 'queued', { crateId: PEOPLE }, `Indexing ${PEOPLE}`],
+    ['one crate', 'indexing', { crateId: PEOPLE, force: 'true' }, `Reindexing ${PEOPLE}`],
+    ['every crate', 'indexing', {}, 'Indexing every crate'],
+    ['every crate', 'queued', { force: 'true' }, 'Reindexing every crate'],
+  ])('refuses to index %s while a crate it covers is %s', async (_, state, form, asked) => {
+    const repository = repositoryOf([
+      { id: PEOPLE, state: {} },
+      { id: EXTRA, state: { search: state } },
+    ]);
+    const browser = await signIn((await start(repository)).app);
+
+    const page = await act(browser, 'index', form);
+
+    expect(flash(page.body)).toBe(`${asked} was refused: indexing is already in progress.`);
     expect(repository.createIndex).not.toHaveBeenCalled();
   });
 

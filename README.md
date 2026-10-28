@@ -188,8 +188,8 @@ reindex or delete one crate's indexes, or index, reindex or delete all of them.
 An action on a crate covers the crate and the crates under it: those whose id
 is the crate's id followed by `/`. A crate that is already indexed needs
 reindexing. Indexing is refused while any crate it covers is being deleted,
-deleting is refused while any crate it covers is queued or indexing, and an
-action on a crate that isn't in the repository is refused. The page reloads
+queued or indexing, deleting is refused while any crate it covers is queued or
+indexing, and an action on a crate that isn't in the repository is refused. The page reloads
 itself until the work finishes. Each action, accepted or refused, is logged at
 `info` with the admin's `sub`.
 
