@@ -125,8 +125,8 @@ anonymous.
   `client_secret`. Clients without a secret are public and must use PKCE. For
   the Oni in Docker Compose:
 
-  ```sh
-  OIDC_CLIENTS='[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]'
+  ```dotenv
+  OIDC_CLIENTS=[{"client_id":"oni","redirect_uris":["http://localhost:3000/auth/callback"],"post_logout_redirect_uris":["http://localhost:3000/"]}]
   ```
 
 - `OIDC_SIGNING_KEYS` is a JWKS, `{"keys":[…]}`, of private RSA keys that sign
@@ -199,9 +199,65 @@ The admin pages are a client of our provider that needs no entry in
 
 The admin pages are styled with [Tailwind](https://tailwindcss.com/), built by
 `@tailwindcss/cli` from `src/admin/admin.css`, which scans the Eta templates in
-`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: a
-deploy must run `pnpm build` to create it, and `pnpm dev` rebuilds it as you
-edit the templates.
+`src/admin/views/`, into `src/admin/public/admin.css`. That file is not checked in: the
+Docker image builds it, other deploys must run `pnpm build`, and `pnpm dev`
+rebuilds it as you edit the templates.
+
+## Docker image
+
+The `Dockerfile` builds the API's image: production dependencies only, the
+generated Prisma client and the admin pages' stylesheet. It sets
+`NODE_ENV=production` and `LDACAPI_HOST=0.0.0.0`, so the API listens on all
+interfaces on port 8080, and its healthcheck requests `/api/capabilities` on
+`LDACAPI_PORT`. That check touches neither Postgres nor OpenSearch, so it
+reports whether the API is serving, not whether they are up.
+
+CI publishes the image to `ghcr.io/language-research-technology/ldacapi` on
+every push to `main`, once lint, test and the image's smoke test pass. Each
+image is tagged `sha-<short>` with its commit, so you can pin or roll back a
+deployment, and `main` moves to the latest. Pull requests build and smoke-test
+the image without publishing it.
+
+Put the API's configuration in an environment file, such as `ldacapi.env`, and
+start it. Docker keeps quotes in an environment file's values, so don't quote
+them. Don't set `LDACAPI_HOST` there: the healthcheck requests `127.0.0.1`, so
+the API must keep listening on `0.0.0.0`.
+
+```sh
+docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage \
+  ghcr.io/language-research-technology/ldacapi:main
+```
+
+Below, `ldacapi` stands for the image, which you can also build yourself with
+`docker build -t ldacapi .`.
+
+### One-off commands
+
+The container never migrates the database when it starts. Before a rollout,
+apply the migrations once from the new image, so several replicas never race
+to migrate:
+
+```sh
+docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:deploy
+```
+
+`pnpm seed [dir]` (mount `dir` into the container) and `pnpm index` run the
+same way, offline. Give them and `pnpm db:deploy` the API's environment file:
+Prisma and the scripts load the whole [configuration](#configuration).
+`pnpm generate-keys` reads no configuration, so it needs no environment file:
+
+```sh
+docker run --rm ldacapi pnpm generate-keys >> ldacapi.env
+```
+
+### Storage
+
+The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
+(and `OCFL_SCRATCH`, if you need it elsewhere) to paths inside the container
+(above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
+image's `node` user, uid 1000, so the OCFL repository must be readable by uid
+1000 and the scratch directory writable by it. `pnpm seed` writes to the
+repository, so give it write access too when you run it.
 
 ## Database
 

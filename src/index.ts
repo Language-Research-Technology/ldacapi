@@ -15,3 +15,11 @@ try {
   fastify.log.error({ err }, 'Failed to start server');
   process.exit(1);
 }
+
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(signal, async () => {
+    fastify.log.info({ signal }, 'Shutting down');
+    await fastify.close();
+    process.exit(0);
+  });
+}
