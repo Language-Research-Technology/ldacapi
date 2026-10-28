@@ -14,6 +14,16 @@ _Avoid_: IdP, CILogon (one instance of it), login provider
 A person who has signed in at the upstream provider, identified by that provider's subject identifier. REMS knows the same person by the same identifier.
 _Avoid_: Account, member
 
+### Access
+
+**Visibility**:
+Whether an entity exists for a request at all. Every entity is visible to everyone (ADR 0003).
+_Avoid_: Access
+
+**Access**:
+What a request may read of a visible entity, decided by its metadata and content licences.
+_Avoid_: Visibility, permissions
+
 ### Admin
 
 **Admin**:
