@@ -7,7 +7,7 @@ ENV COREPACK_HOME=/usr/local/share/corepack \
   CHECKPOINT_DISABLE=1
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN corepack enable && corepack install && pnpm --version && chmod -R a+rX "$COREPACK_HOME"
+RUN npm install -g corepack && corepack enable && corepack install && pnpm --version && chmod -R a+rX "$COREPACK_HOME"
 
 FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
