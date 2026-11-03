@@ -1,0 +1,57 @@
+{
+	email {$ACME_EMAIL}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}
+
+{$DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	# Oni's configuration, with this site's domain filled in
+	handle /configuration.json {
+		root * /srv/oni
+		templates {
+			mime application/json
+		}
+		header Cache-Control no-cache
+		file_server
+	}
+
+	# Crate files are served inline with their own content type. The sandbox gives
+	# any HTML or SVG among them an opaque origin, so its scripts can't reach Oni's sign-in.
+	handle /api/* {
+		header Content-Security-Policy "sandbox allow-scripts allow-popups allow-downloads"
+		reverse_proxy api:8080
+	}
+
+	@provider path /api /oauth/* /.well-known/openid-configuration
+	handle @provider {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		header X-Frame-Options SAMEORIGIN
+		reverse_proxy oni:80
+	}
+}
+
+# The admin pages must be on their own origin (docs/adr/0002-server-rendered-admin-pages.md)
+{$ADMIN_DOMAIN} {
+	import security_headers
+
+	redir / /admin/
+	handle /admin* {
+		reverse_proxy api:8080
+	}
+	handle {
+		respond 404
+	}
+}

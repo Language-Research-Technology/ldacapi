@@ -1,0 +1,108 @@
+# Production stack: Caddy serves Oni, the API and the admin pages over HTTPS.
+# Only Caddy publishes ports.
+
+name: ldacapi-production
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  caddy:
+    <<: *hardening
+    image: caddy:2
+    environment:
+      DOMAIN: ${DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./oni/configuration.json:/srv/oni/configuration.json:ro
+      - ./data/caddy/data:/data
+      - ./data/caddy/config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      api:
+        condition: service_healthy
+      oni:
+        condition: service_healthy
+
+  oni:
+    <<: *hardening
+    image: ghcr.io/crate-works/oni:2
+    volumes:
+      - ./oni/configuration.json:/configuration.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+
+  api:
+    <<: *hardening
+    image: ghcr.io/language-research-technology/ldacapi:main
+    env_file: ldacapi.env
+    environment:
+      DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
+      OPENSEARCH_URL: http://opensearch:9200
+      OCFL_ROOT: /storage/ocfl
+      OCFL_SCRATCH: /storage/scratch
+      OIDC_ISSUER: https://${DOMAIN:?Set DOMAIN in .env}
+      ADMIN_ORIGIN: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
+      OIDC_CLIENTS: >-
+        [{"client_id":"oni","redirect_uris":["https://${DOMAIN}/auth/callback"],"post_logout_redirect_uris":["https://${DOMAIN}/"]}]
+    volumes:
+      - ${STORAGE_DIR:?Set STORAGE_DIR in .env}:/storage
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      db:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+
+  db:
+    <<: *hardening
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ldacapi
+      POSTGRES_USER: ldacapi
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ldacapi", "-d", "ldacapi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  opensearch:
+    <<: *hardening
+    image: opensearchproject/opensearch:3.9.0
+    environment:
+      discovery.type: single-node
+      # No ports are published, so only the stack's containers can reach it
+      plugins.security.disabled: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_PERFORMANCE_ANALYZER_AGENT_CLI: "true"
+      OPENSEARCH_JAVA_OPTS: -Xms${OPENSEARCH_HEAP:-1g} -Xmx${OPENSEARCH_HEAP:-1g}
+    volumes:
+      - ./data/opensearch:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
