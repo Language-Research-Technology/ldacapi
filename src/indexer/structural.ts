@@ -49,7 +49,7 @@ export class StructuralIndexer extends Indexer {
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
         const ocflPath = paths.get(entityId);
-        let f: CrateFile = { size: -1, crc32: '' };
+        let f: CrateFile | undefined;
         if (ocflPath) {
           try {
             f = await crateObject.file(ocflPath);
@@ -61,8 +61,8 @@ export class StructuralIndexer extends Indexer {
           id: entityId,
           filename: (ocflPath ?? entityId).split('/').pop(),
           mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
-          size: +(entity.contentSize?.[0] ?? f.size),
-          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath, crc32: f.crc32 } satisfies OcflStorageMeta & { crc32: string }) : {},
+          size: f?.size ?? statedSize(entity.contentSize?.[0]),
+          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath, crc32: f?.crc32 ?? '' } satisfies OcflStorageMeta & { crc32: string }) : {},
         };
       }
       try {
@@ -102,6 +102,12 @@ export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
     newCrate.root.license = license;
   }
   return newCrate.toJSON();
+}
+
+/** The leading integer of a schema.org contentSize, which is text such as "14384 bytes", or -1 */
+function statedSize(contentSize: unknown) {
+  const size = Number.parseInt(String(contentSize), 10);
+  return Number.isNaN(size) ? -1 : size;
 }
 
 export function pickSingleMemberOf(entity: Entity) {
