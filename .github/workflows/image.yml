@@ -1,0 +1,107 @@
+name: Build image
+run-name: Build image for ${{ github.ref_name }}
+
+on:
+  workflow_call:
+    inputs:
+      push:
+        description: Publish the image once the smoke test passes
+        type: boolean
+        required: true
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Publish the image once the smoke test passes
+        type: boolean
+        default: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: image-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Refuse main and non-branch refs
+        if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || !startsWith(github.ref, 'refs/heads/'))
+        run: |
+          echo "::error::Manual builds are for branches other than main; main's image comes from CI"
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Start Postgres and OpenSearch
+        run: docker compose up -d db opensearch
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/language-research-technology/ldacapi
+          tags: |
+            type=ref,event=branch
+            type=sha
+
+      - name: Build image
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait for Postgres and OpenSearch
+        run: docker compose up -d --wait db opensearch
+
+      - name: Smoke test
+        env:
+          IMAGE: ${{ steps.build.outputs.imageid }}
+        run: |
+          storage=$(mktemp -d)
+          chmod 777 "$storage"
+          env_file=$(mktemp)
+          cat > "$env_file" <<'ENV'
+          DATABASE_URL=postgresql://ldacapi:ldacapi@localhost:5432/ldacapi
+          OPENSEARCH_URL=http://localhost:9200
+          OCFL_ROOT=/storage/ocfl
+          ENV
+          run=(--network host --env-file "$env_file" -v "$storage:/storage")
+          docker run --rm "${run[@]}" -v "$PWD/test-data:/app/test-data:ro" "$IMAGE" pnpm bootstrap
+          docker run --rm "$IMAGE" test -f src/admin/public/admin.css
+          docker run -d --name api "${run[@]}" "$IMAGE"
+          for _ in $(seq 60); do
+            case "$(docker inspect -f '{{.State.Health.Status}}' api)" in
+              healthy)
+                curl -fsS localhost:8080/api/entities | grep -q '"total":[1-9]' && exit 0
+                break
+                ;;
+              unhealthy) break ;;
+            esac
+            [ "$(docker inspect -f '{{.State.Running}}' api)" = true ] || break
+            sleep 2
+          done
+          docker logs api
+          exit 1
+
+      - name: Log in to GHCR
+        if: inputs.push
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: inputs.push
+        run: docker push --all-tags ghcr.io/language-research-technology/ldacapi

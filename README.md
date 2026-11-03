@@ -219,6 +219,13 @@ image is tagged `sha-<short>` with its commit, so you can pin or roll back a
 deployment, and `main` moves to the latest. Pull requests build and smoke-test
 the image without publishing it.
 
+To try a branch before merging it, open **Actions → Build image → Run
+workflow** and pick the branch. That skips lint and test but still runs the
+smoke test, then publishes the image tagged with the branch name
+(`debug/admin-users` becomes `debug-admin-users`) and `sha-<short>`. It won't
+build `main`. Old branch tags stay until you delete them from the package's
+page on GitHub.
+
 Put the API's configuration in an environment file, such as `ldacapi.env`, and
 start it. Docker keeps quotes in an environment file's values, so don't quote
 them. Don't set `LDACAPI_HOST` there: the healthcheck requests `127.0.0.1`, so
@@ -353,6 +360,12 @@ docker compose stop api
 docker compose run --rm api pnpm db:deploy
 docker compose up -d
 ```
+
+To run a branch's image (see [Docker image](#docker-image)) on a dev
+deployment, change the API's `image` tag in `compose.yaml` from `main` to the
+branch's tag and follow the upgrade steps above. Migrations the branch adds
+stay applied after you switch back to `main`; if the branch changes them before
+merging, restore the database from the backup.
 
 To restore the database from a backup, stop the API and run
 `docker compose exec -T db pg_restore -U ldacapi -d ldacapi --clean < ldacapi-<date>.dump`.
