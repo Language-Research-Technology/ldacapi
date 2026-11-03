@@ -55,6 +55,7 @@ No configuration is needed for development. To override a default, copy
 | `pnpm test`          | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`          | Biome, Knip and TypeScript                                                       |
 | `pnpm bootstrap`     | `db:deploy`, `seed` and `index` in one go                                        |
+| `pnpm ocfl:init`     | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
 | `pnpm seed [dir]`    | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
 | `pnpm index`         | Rebuild both indexes from the OCFL repository                                    |
 | `pnpm generate-keys` | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
@@ -241,8 +242,9 @@ to migrate:
 docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:deploy
 ```
 
-`pnpm seed [dir]` (mount `dir` into the container) and `pnpm index` run the
-same way, offline. Give them and `pnpm db:deploy` the API's environment file:
+`pnpm ocfl:init` (which creates an empty OCFL repository; the API won't start
+without one), `pnpm seed [dir]` (mount `dir` into the container) and
+`pnpm index` run the same way, offline. Give them and `pnpm db:deploy` the API's environment file:
 Prisma and the scripts load the whole [configuration](#configuration).
 `pnpm generate-keys` reads no configuration, so it needs no environment file:
 
@@ -258,6 +260,102 @@ The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
 image's `node` user, uid 1000, so the OCFL repository must be readable by uid
 1000 and the scratch directory writable by it. `pnpm seed` writes to the
 repository, so give it write access too when you run it.
+
+## Production with Docker Compose
+
+`deploy/` runs the whole service on one host: [Caddy](https://caddyserver.com/)
+in front, Oni, the API, Postgres and OpenSearch. Caddy is the only container
+with published ports (80 and 443), and it gets and renews HTTPS certificates
+from Let's Encrypt on its own. It serves two hostnames:
+
+| Hostname       | Path                                                      | Goes to                                                      |
+| -------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
+| `DOMAIN`       | `/api/*`, `/oauth/*`, `/.well-known/openid-configuration` | The API                                                      |
+| `DOMAIN`       | `/configuration.json`                                     | Oni's configuration, served by Caddy with `DOMAIN` filled in |
+| `DOMAIN`       | everything else                                           | Oni                                                          |
+| `ADMIN_DOMAIN` | `/admin/*`                                                | The API's admin pages                                        |
+
+The admin pages need their own hostname, so that script in a crate file can
+never run on their origin (ADR 0002). Caddy also serves everything under
+`/api/` with `Content-Security-Policy: sandbox`, which gives any HTML or SVG in
+a crate file an opaque origin, so its scripts can't reach Oni's sign-in on
+`DOMAIN`.
+
+No other container publishes a port, on the host or on localhost, so Postgres,
+OpenSearch, the API and Oni are reachable only from within the stack.
+OpenSearch's security plugin is off for that reason. Every container runs with
+`no-new-privileges`, and the API, Oni and Caddy run with read-only root
+filesystems.
+
+### Setting it up
+
+You need Docker with Compose, ports 80 and 443 open, and DNS for both hostnames
+pointing at the host. OpenSearch also needs a larger mmap limit on the host:
+
+```sh
+echo vm.max_map_count=262144 | sudo tee /etc/sysctl.d/99-opensearch.conf
+sudo sysctl --system
+```
+
+Storage is a directory on the host, usually an NFS mount, set by `STORAGE_DIR`
+in `.env`. The OCFL repository is its `ocfl` directory, and imports are staged
+in its `scratch` directory. Both must be in the one mount: OCFL commits an
+import by renaming it from scratch into the repository, and a rename can't
+cross mounts. The API runs as uid 1000, so the directory must be writable by
+uid 1000: on NFS, set the owner on the server or map the export to uid 1000, as
+root in the container is squashed. Otherwise `pnpm ocfl:init` fails with
+`EACCES: permission denied, mkdir '/storage/ocfl'`. Serving and indexing only
+read, so a read-only mount works if you import crates elsewhere.
+
+Caddy's certificates, Postgres and OpenSearch keep their data in `data/`
+beside `compose.yaml`. OpenSearch runs as uid 1000 and can't fix its own
+directory's owner, so create it first.
+
+Copy `deploy/` to the host, then, in it:
+
+```sh
+sudo install -d -o 1000 -g 1000 data/opensearch
+cp .env.example .env                  # DOMAIN, ADMIN_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, STORAGE_DIR
+cp ldacapi.env.example ldacapi.env    # sign-in, admins and the API's other settings
+chmod 600 .env ldacapi.env
+docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
+docker compose run --rm api pnpm db:deploy     # create the database's tables
+docker compose run --rm api pnpm ocfl:init     # create the empty OCFL repository
+docker compose up -d
+```
+
+Nothing migrates the database on its own: you run `pnpm db:deploy` when you
+install and when you upgrade, after taking a backup.
+
+Register `https://<DOMAIN>/oauth/callback` as the redirect URI at the upstream
+provider. Compose sets the API's database, OpenSearch, storage, `OIDC_ISSUER`,
+`ADMIN_ORIGIN` and Oni's client in `OIDC_CLIENTS` from `.env`, so leave those
+out of `ldacapi.env`. Edit `oni/configuration.json` to change what Oni shows. Its
+endpoints use `DOMAIN`, so don't change them.
+
+### Running it
+
+Import crates and index them with the API's image, mounting the directory of
+crates read-only:
+
+```sh
+docker compose run --rm -v /path/to/crates:/import:ro api pnpm seed /import
+docker compose run --rm api pnpm index
+```
+
+The stack runs the API's `main` image. To upgrade, back up the database and
+`STORAGE_DIR`, then pull the new images, apply any new migrations and restart:
+
+```sh
+docker compose exec -T db pg_dump -U ldacapi -Fc ldacapi > ldacapi-$(date +%F).dump
+docker compose pull
+docker compose stop api
+docker compose run --rm api pnpm db:deploy
+docker compose up -d
+```
+
+To restore the database from a backup, stop the API and run
+`docker compose exec -T db pg_restore -U ldacapi -d ldacapi --clean < ldacapi-<date>.dump`.
 
 ## Database
 

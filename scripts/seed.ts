@@ -3,16 +3,11 @@ import { join, resolve } from 'node:path';
 import { ROCrate } from 'ro-crate';
 import { config } from '../src/configuration.ts';
 import { logger } from '../src/logger.ts';
-import { createStorage } from '../src/ocfl.ts';
+import { openOrCreateStorage } from '../src/ocfl.ts';
 
 const source = resolve(process.argv[2] ?? 'test-data');
 
-const repository = createStorage();
-if (await repository.exists()) {
-  await repository.load();
-} else {
-  await repository.create();
-}
+const repository = await openOrCreateStorage();
 
 const directories = await readdir(source, { withFileTypes: true });
 for (const directory of directories.filter((entry) => entry.isDirectory())) {
