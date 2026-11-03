@@ -1,0 +1,18 @@
+{
+  "interactiveLogin": true,
+  "tokenCallbacks": [
+    {
+      "issuerId": "default",
+      "requestMappings": [
+        {
+          "requestParam": "subject",
+          "match": "*",
+          "claims": {
+            "name": "${subject}",
+            "email": "${subject}@example.com"
+          }
+        }
+      ]
+    }
+  ]
+}
