@@ -27,7 +27,7 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
 
 ## Getting started
 
-You need Node.js 24 (24.18 or later), [pnpm](https://pnpm.io/) and Docker.
+You need Node.js 26 (26.13 or later), [pnpm](https://pnpm.io/) and Docker.
 
 ```sh
 pnpm install

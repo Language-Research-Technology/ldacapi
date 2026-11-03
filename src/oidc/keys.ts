@@ -1,12 +1,12 @@
-import { createHash, createPublicKey, generateKeyPairSync, type JsonWebKey, randomBytes } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, randomBytes, type webcrypto } from 'node:crypto';
 
 /** The algorithm our tokens are signed with */
 export const SIGNING_ALG = 'RS256';
 
-export type Jwk = JsonWebKey & { kid: string };
+export type Jwk = webcrypto.JsonWebKey & { kid: string };
 
 // RFC 7638: the required members in lexicographic order
-const thumbprint = ({ e, kty, n }: JsonWebKey) => createHash('sha256').update(JSON.stringify({ e, kty, n })).digest('base64url');
+const thumbprint = ({ e, kty, n }: webcrypto.JsonWebKey) => createHash('sha256').update(JSON.stringify({ e, kty, n })).digest('base64url');
 
 /** A private RSA JWK for signing our tokens */
 export const generateSigningKey = (): Jwk => {

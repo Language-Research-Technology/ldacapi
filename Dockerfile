@@ -1,4 +1,4 @@
-FROM node:24-slim AS base
+FROM node:26-slim AS base
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
