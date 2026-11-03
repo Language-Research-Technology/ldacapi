@@ -353,6 +353,12 @@ docker compose up -d
 Nothing migrates the database on its own: you run `pnpm db:deploy` when you
 install and when you upgrade, after taking a backup.
 
+OpenSearch is pinned to an exact version in both `deploy/compose.yaml` and the
+development `docker-compose.yml`, so bump the two together: its data directory
+can be upgraded but not downgraded. If it won't start after an upgrade, stop
+it, recreate `data/opensearch` as above, start it and rebuild the indexes with
+`docker compose run --rm api pnpm index`.
+
 Register `https://<DOMAIN>/oauth/callback` as the redirect URI at the upstream
 provider. Compose sets the API's database, OpenSearch, storage, `OIDC_ISSUER`,
 `ADMIN_ORIGIN` and Oni's client in `OIDC_CLIENTS` from `.env`, so leave those
