@@ -44,3 +44,12 @@ services:
       - ./docker/oni/configuration.json:/configuration.json:ro
     ports:
       - "127.0.0.1:3000:80"
+
+  upstream:
+    image: ghcr.io/navikt/mock-oauth2-server:6
+    environment:
+      - JSON_CONFIG_PATH=/config.json
+    volumes:
+      - ./docker/mock-oauth2-server/config.json:/config.json:ro
+    ports:
+      - "127.0.0.1:8090:8080"

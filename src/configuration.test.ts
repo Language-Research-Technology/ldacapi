@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseEnv } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from './configuration.ts';
 import { generateCookieKey, generateSigningKey, publicJwks } from './oidc/keys.ts';
@@ -83,6 +85,16 @@ describe('loadConfig', () => {
       signingKeys: [SIGNING_KEY],
       cookieKeys: [COOKIE_KEY],
     });
+  });
+
+  it('signs in through the compose fake upstream provider with .env.example', () => {
+    const config = loadConfig(parseEnv(readFileSync(new URL('../.env.example', import.meta.url), 'utf8')));
+
+    expect(config.auth?.upstream.issuer).toBe('http://localhost:8090/default');
+    expect(config.auth?.clients).toEqual([
+      { client_id: 'oni', redirect_uris: ['http://localhost:3000/auth/callback'], post_logout_redirect_uris: ['http://localhost:3000/'] },
+    ]);
+    expect(config.adminUsers).toEqual(['admin']);
   });
 
   it('requires the upstream client ID and secret with an upstream issuer', () => {

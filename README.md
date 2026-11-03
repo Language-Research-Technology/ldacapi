@@ -31,7 +31,7 @@ You need Node.js 26 (26.13 or later), [pnpm](https://pnpm.io/) and Docker.
 
 ```sh
 pnpm install
-docker compose up -d --wait   # Postgres, OpenSearch and Oni
+docker compose up -d --wait   # Postgres, OpenSearch, Oni and a fake upstream provider
 pnpm bootstrap                # migrate the database, seed OCFL from test-data, index
 pnpm dev
 ```
@@ -40,11 +40,14 @@ pnpm dev
 | ---------- | ----------------------------------------------------- |
 | API        | <http://localhost:8080/api>                           |
 | Oni        | <http://localhost:3000>                               |
+| Admin      | <http://admin.localhost:8080/admin/>                  |
 | OpenSearch | <http://localhost:9200>                               |
+| Upstream   | <http://localhost:8090/default>                       |
 | Postgres   | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 
-No configuration is needed for development. To override a default, copy
-`.env.example` to `.env`.
+No configuration is needed for development, but sign-in is off until you
+copy `.env.example` to `.env` (see [Local sign-in](#local-sign-in)). To
+override a default, set it in `.env`.
 
 ## Scripts
 
@@ -157,6 +160,22 @@ tries again at the next sign-in.
 Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 `api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
 `client_id` in `OIDC_CLIENTS`.
+
+### Local sign-in
+
+Docker Compose runs a fake upstream provider,
+[mock-oauth2-server](https://github.com/navikt/mock-oauth2-server), at
+`http://localhost:8090/default`, and `.env.example` is set up to use it:
+
+```sh
+cp .env.example .env
+pnpm dev
+```
+
+Sign in through Oni or the admin pages, and the fake provider asks for a
+username. Type any; it becomes your `sub`, with `name` the same and `email`
+`<username>@example.com`. Sign in as `admin` to use the admin pages, or add your
+username to `ADMIN_USERS` in `.env`. Anyone else sees "Not an admin".
 
 ### Admin pages
 
