@@ -2,12 +2,12 @@ FROM node:26-slim AS base
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
-ENV COREPACK_HOME=/usr/local/share/corepack \
-  pnpm_config_store_dir=/pnpm-store \
+COPY --from=ghcr.io/pnpm/pnpm:12.16.1 /opt/pnpm /opt/pnpm
+RUN for bin in pnpm pn pnpx pnx; do ln -s "/opt/pnpm/$bin" "/usr/local/bin/$bin"; done
+ENV pnpm_config_store_dir=/pnpm-store \
   CHECKPOINT_DISABLE=1
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN corepack enable && corepack install && pnpm --version && chmod -R a+rX "$COREPACK_HOME"
 
 FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm-store \
@@ -31,7 +31,6 @@ COPY --from=build /app/src/admin/public/admin.css src/admin/public/
 # node_modules is fixed at build time; pnpm's pre-run install check would need the network
 ENV NODE_ENV=production \
   LDACAPI_HOST=0.0.0.0 \
-  COREPACK_ENABLE_NETWORK=0 \
   pnpm_config_verify_deps_before_run=false
 EXPOSE 8080
 USER node
