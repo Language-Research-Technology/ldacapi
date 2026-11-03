@@ -43,13 +43,24 @@ export async function init(opts: { opensearchClient: Client; search?: ReturnType
     if (await repository.exists()) {
       throw e;
     }
-    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. In development, run \`pnpm seed\` to create it.`, { cause: e });
+    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. Run \`pnpm ocfl:init\` to create it.`, { cause: e });
   }
 }
 
 /** arocapi's storage backend over the repository */
 export function storage() {
   return backend;
+}
+
+/** The OCFL repository, created empty if it doesn't exist yet */
+export async function openOrCreateStorage() {
+  const storage = createStorage();
+  if (await storage.exists()) {
+    await storage.load();
+  } else {
+    await storage.create();
+  }
+  return storage;
 }
 
 export function createStorage() {
