@@ -106,8 +106,8 @@ export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
 
 /** The leading integer of a schema.org contentSize, which is text such as "14384 bytes", or -1 */
 function statedSize(contentSize: unknown) {
-  const match = String(contentSize ?? '').match(/^\s*(\d+)/);
-  return match ? Number(match[1]) : -1;
+  const size = Number.parseInt(String(contentSize), 10);
+  return Number.isNaN(size) ? -1 : size;
 }
 
 export function pickSingleMemberOf(entity: Entity) {

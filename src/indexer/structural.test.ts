@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { ROCrate } from 'ro-crate';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { prisma } from '../prisma.ts';
 import type { CrateObject } from './indexer.ts';
 import { entityAsCrate, StructuralIndexer } from './structural.ts';
@@ -19,7 +19,13 @@ describe('StructuralIndexer file size', () => {
   const ROOT = 'arcp://name,structural-size-test';
   const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
 
-  const index = async (files: Record<string, unknown>[], inventory: Record<string, number>) => {
+  let indexer: StructuralIndexer;
+
+  beforeAll(async () => {
+    indexer = await StructuralIndexer.create({});
+  });
+
+  const index = async (files: Record<string, unknown>[], inventory: Record<string, number> = {}) => {
     const crate = await ROCrate.create({
       '@context': 'https://w3id.org/ro/crate/1.1/context',
       '@graph': [
@@ -40,13 +46,13 @@ describe('StructuralIndexer file size', () => {
         return { size, crc32: '' };
       },
     };
-    await (await StructuralIndexer.create({})).index({ crateObject, crate });
+    await indexer.index({ crateObject, crate });
   };
 
   const sizeOf = async (path: string) => Number((await prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/${path}` } })).size);
 
   afterEach(async () => {
-    await (await StructuralIndexer.create({})).delete(ROOT);
+    await indexer.delete(ROOT);
   });
 
   it('takes the size from the OCFL inventory when the file is there', async () => {
@@ -56,20 +62,17 @@ describe('StructuralIndexer file size', () => {
   });
 
   it('takes the leading number of contentSize when the file is missing', async () => {
-    await index(
-      [
-        { '@id': 'bytes.txt', contentSize: '14384 bytes' },
-        { '@id': 'number.txt', contentSize: 163840 },
-      ],
-      {},
-    );
+    await index([
+      { '@id': 'bytes.txt', contentSize: '14384 bytes' },
+      { '@id': 'number.txt', contentSize: 163840 },
+    ]);
 
     expect(await sizeOf('bytes.txt')).toBe(14384);
     expect(await sizeOf('number.txt')).toBe(163840);
   });
 
   it('records -1 when the file is missing and contentSize has no number', async () => {
-    await index([{ '@id': 'none.txt' }, { '@id': 'unknown.txt', contentSize: 'unknown' }], {});
+    await index([{ '@id': 'none.txt' }, { '@id': 'unknown.txt', contentSize: 'unknown' }]);
 
     expect(await sizeOf('none.txt')).toBe(-1);
     expect(await sizeOf('unknown.txt')).toBe(-1);
