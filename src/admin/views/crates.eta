@@ -1,11 +1,13 @@
 <% if (it.crates.length === 0) { %>
 <p>The repository has no crates.</p>
 <% } else { %>
-<p class="mb-4 flex gap-2">
+<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name" class="w-full max-w-sm rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none">
+  <div class="flex gap-2">
 <% for (const form of it.actions) { %>
-  <%~ include('./action-form', { form }) %>
+    <%~ include('./action-form', { form }) %>
 <% } %>
-</p>
-<p><input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name"></p>
-<div id="crates"><%~ include('./crate-list', { crates: it.crates }) %></div>
+  </div>
+</div>
+<div id="crates" class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"><%~ include('./crate-list', { crates: it.crates }) %></div>
 <% } %>
