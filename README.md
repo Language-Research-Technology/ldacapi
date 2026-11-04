@@ -8,7 +8,7 @@ RO-Crate API. It serves RO-Crates over the
 ## How it fits together
 
 The core API (entities, files, search, RO-Crate metadata) comes from
-[arocapi](https://github.com/Language-Research-Technology/arocapi), which this
+[arocapi](https://github.com/crate-works/arocapi), which this
 app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
 
 - **OCFL storage**: crates live in an [OCFL](https://ocfl.io/) repository on
@@ -20,10 +20,13 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
 - **Admin pages**: server-rendered pages at `/admin/` on their own origin,
   where admins, who sign in through our own OIDC provider, see and rebuild or
   delete indexes (`src/admin/`).
-- **Access control**: licences are checked against REMS, with sign-in through
-  an OIDC provider (`src/auth.ts`, `src/routes/auth.ts`).
-- **File downloads**: short-lived signed URLs that stream files out of OCFL
-  (`src/routes/file.ts`).
+- **Sign-in**: the API is its own OIDC provider, signing users in at an
+  upstream provider such as CILogon (`src/oidc/`).
+- **Access control**: every entity is visible, and what a request may read is
+  decided by licence, checked against REMS (`src/auth.ts`).
+- **Files and metadata**: arocapi serves crate files from the OCFL repository
+  through its OCFL storage backend, and each entity's RO-Crate metadata from
+  the structural index (`src/app.ts`).
 
 ## Getting started
 
