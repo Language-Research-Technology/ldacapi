@@ -44,11 +44,11 @@ describe('index and delete actions', () => {
   let repository: Repository;
   let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
   let search: Awaited<ReturnType<typeof buildTestApp>>['search'];
-  let crateRows: typeof crateRowIds;
+  let rowIdsOfCrate: typeof crateRowIds;
   let countSearchDocuments: typeof countDocuments;
 
   /** The ids of the entity rows indexed from `crateIds`, sorted */
-  const rowIds = async (...crateIds: string[]) => (await Promise.all(crateIds.map(crateRows))).flat().sort();
+  const rowIds = async (...crateIds: string[]) => (await Promise.all(crateIds.map(rowIdsOfCrate))).flat().sort();
 
   const entityCount = async (crateId: string) => (await rowIds(crateId)).length;
 
@@ -74,7 +74,7 @@ describe('index and delete actions', () => {
   beforeAll(async () => {
     ({ app, repository, prisma, search } = await start(ocflRepository));
     // Imported once the app has read its configuration
-    ({ rowIds: crateRows } = await import('../indexer/database.ts'));
+    ({ rowIds: rowIdsOfCrate } = await import('../indexer/database.ts'));
     ({ countDocuments: countSearchDocuments } = await import('../indexer/search.ts'));
   });
 

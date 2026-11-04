@@ -10,14 +10,14 @@ import { DatabaseIndexer } from './indexer/database.ts';
 import { type CrateObject, type Indexer, parentCollection } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { logger } from './logger.ts';
-import { type IndexState, State } from './repository.ts';
+import { INDEX_TYPES, type IndexState, type IndexStates, type IndexType, State } from './repository.ts';
 
 const log = logger.child({ module: 'ocfl' });
 
 const { defaultLicense, defaultMetadataLicense } = config;
 
-const stateCache: { [key: string]: { [key: string]: IndexState | undefined } } = {};
-let INDEXER: { [key: string]: Indexer };
+const stateCache: Record<string, IndexStates> = {};
+let INDEXER: Record<IndexType, Indexer>;
 let repository: ReturnType<typeof ocfl.storage>;
 let backend: StorageBackend;
 
@@ -107,14 +107,14 @@ function wrap(ocflObject: OcflObject): CrateObject {
   };
 }
 
-function _setState(crateId: string, types: string | string[], state?: IndexState) {
-  stateCache[crateId] = stateCache[crateId] || {};
-  for (const type of ([] as string[]).concat(types)) {
+function _setState(crateId: string, types: IndexType | IndexType[], state?: IndexState) {
+  stateCache[crateId] ??= {};
+  for (const type of [types].flat()) {
     stateCache[crateId][type] = state;
   }
 }
 
-function setState(crateId: string | undefined, types: string | string[], state?: IndexState) {
+function setState(crateId: string | undefined, types: IndexType | IndexType[], state?: IndexState) {
   if (crateId) {
     _setState(crateId, types, state);
   } else {
@@ -124,18 +124,10 @@ function setState(crateId: string | undefined, types: string | string[], state?:
   }
 }
 
-export async function getState(crateId: string, type?: string) {
-  const indexers: [string, Indexer | undefined][] = type ? [[type, INDEXER[type]]] : Object.entries(INDEXER);
-  for (const [name, indexer] of indexers) {
-    if (!indexer) {
-      return;
-    }
-    if (!stateCache[crateId]?.[name]) {
-      const count = await indexer.count(crateId);
-      if (count > 0) {
-        stateCache[crateId] = stateCache[crateId] || {};
-        stateCache[crateId][name] = State.INDEXED;
-      }
+export async function getState(crateId: string, type?: IndexType): Promise<IndexStates> {
+  for (const name of type ? [type] : INDEX_TYPES) {
+    if (!stateCache[crateId]?.[name] && (await INDEXER[name].count(crateId)) > 0) {
+      _setState(crateId, name, State.INDEXED);
     }
   }
   // A copy, as indexing goes on changing the cache after this returns
@@ -146,17 +138,17 @@ export async function getState(crateId: string, type?: string) {
  * The search index finds a crate's documents, and their rootCollection, by its database rows. So the rows are indexed
  * first and deleted last, deleting stops at the first failure, and deleting the rows deletes the documents too.
  */
-const INDEX_ORDER = ['database', 'search'];
-const DELETE_ORDER = ['search', 'database'];
+const INDEX_ORDER: readonly IndexType[] = INDEX_TYPES;
+const DELETE_ORDER: readonly IndexType[] = ['search', 'database'];
 
-const typesOf = (type?: string | string[]) => (type ? [type].flat() : INDEX_ORDER);
+const typesOf = (type?: IndexType | IndexType[]) => (type ? [type].flat() : [...INDEX_ORDER]);
 
-const withDocuments = (types: string[]) => (types.includes('database') && !types.includes('search') ? [...types, 'search'] : types);
+const withDocuments = (types: IndexType[]): IndexType[] => (types.includes('database') && !types.includes('search') ? [...types, 'search'] : types);
 
-async function deleteFrom(types: string[], crateId?: string) {
+async function deleteFrom(types: IndexType[], crateId?: string) {
   for (const t of DELETE_ORDER.filter((t) => types.includes(t))) {
     try {
-      await INDEXER[t]?.delete(crateId);
+      await INDEXER[t].delete(crateId);
     } catch (error) {
       log.error({ err: error, crateId, indexer: t }, 'Error deleting index');
       throw error;
@@ -166,6 +158,9 @@ async function deleteFrom(types: string[], crateId?: string) {
 
 const readCrateJson = async (ocflObject: OcflObject): Promise<{ '@graph': RawEntity[] }> =>
   JSON.parse(await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text());
+
+/** The root entity of a crate's raw JSON-LD, whose id is the OCFL object's */
+const rawRoot = (json: { '@graph': RawEntity[] }, crateId: string) => json['@graph'].find((e) => e['@id'] === crateId);
 
 /** A crate's OCFL object, whose id is the crate's root id */
 async function loadObject(crateId: string) {
@@ -186,7 +181,7 @@ function topCollectionFinder() {
       parent = loadObject(crateId)
         .then(readCrateJson)
         .then((json) => {
-          const root = json['@graph'].find((e) => e['@id'] === crateId);
+          const root = rawRoot(json, crateId);
           return root && parentCollection(root, crateId);
         });
       parents.set(crateId, parent);
@@ -215,7 +210,7 @@ function topCollectionFinder() {
   };
 }
 
-async function indexObject(crateId: string, types: string[], findTopCollection: ReturnType<typeof topCollectionFinder>, force?: boolean) {
+async function indexObject(crateId: string, types: IndexType[], findTopCollection: ReturnType<typeof topCollectionFinder>, force?: boolean) {
   try {
     const ocflObject = await loadObject(crateId);
     const crate = await ROCrate.create(await readCrateJson(ocflObject));
@@ -231,16 +226,13 @@ async function indexObject(crateId: string, types: string[], findTopCollection: 
     }
     const topCollection = await findTopCollection(crate);
     for (const t of INDEX_ORDER.filter((t) => types.includes(t))) {
-      const indexer = INDEXER[t];
-      if (indexer) {
-        setState(ocflObject.id, t, State.INDEXING);
-        try {
-          await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection });
-        } catch (error) {
-          log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
-        } finally {
-          setState(ocflObject.id, t);
-        }
+      setState(ocflObject.id, t, State.INDEXING);
+      try {
+        await INDEXER[t].index({ crateObject: wrap(ocflObject), crate, topCollection });
+      } catch (error) {
+        log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
+      } finally {
+        setState(ocflObject.id, t);
       }
     }
   } catch (error) {
@@ -261,7 +253,7 @@ async function idsMatching(pattern?: RegExp) {
 }
 
 /** Indexes `crateIds`, the crates matching it, or every crate, marking them all queued before indexing any */
-export async function createIndex(crateIds?: string | string[] | RegExp, type?: string | string[], force?: boolean) {
+export async function createIndex(crateIds?: string | string[] | RegExp, type?: IndexType | IndexType[], force?: boolean) {
   log.debug('Indexing started');
   const types = force ? withDocuments(typesOf(type)) : typesOf(type);
   // Given ids are queued before the first await, so callers see them in progress at once
@@ -276,7 +268,7 @@ export async function createIndex(crateIds?: string | string[] | RegExp, type?: 
   log.debug('Indexing finished');
 }
 
-export async function deleteIndex(crateId?: string, type?: string | string[]) {
+export async function deleteIndex(crateId?: string, type?: IndexType | IndexType[]) {
   const types = withDocuments(typesOf(type));
   setState(crateId, types, State.DELETING);
   try {
@@ -296,7 +288,7 @@ export async function* objects(prefix?: string, refresh?: boolean) {
   for await (const ocflObject of repository) {
     try {
       const inv = await ocflObject.getInventory();
-      const name = (await readCrateJson(ocflObject))['@graph'].find((e) => e['@id'] === inv.id)?.name?.toString();
+      const name = rawRoot(await readCrateJson(ocflObject), inv.id)?.name?.toString();
       yield { id: inv.id, name, path: ocflObject.root, state: await getState(inv.id) };
     } catch (error) {
       log.error({ err: error, path: ocflObject.root }, 'Error reading object');

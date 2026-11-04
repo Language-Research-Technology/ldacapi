@@ -1,8 +1,8 @@
-import { hasState, type RepositoryObject, State } from '../repository.ts';
+import { hasState, INDEX_TYPES, type IndexType, type RepositoryObject, State } from '../repository.ts';
 
 type Crate = RepositoryObject & { label: string; children: Crate[] };
 
-const INDEXES = { database: 'Database', search: 'Search' } as const;
+const INDEX_LABELS: Record<IndexType, string> = { database: 'Database', search: 'Search' };
 
 /** How often the page reloads while an index is changing */
 const REFRESH_SECONDS = 5;
@@ -59,7 +59,7 @@ const crateRow = (crate: Crate): CrateRow => {
   return {
     id: crate.id,
     label: crate.label,
-    states: Object.entries(INDEXES).map(([index, label]) => ({ label, value: crate.state[index] ?? 'not indexed' })),
+    states: INDEX_TYPES.map((index) => ({ label: INDEX_LABELS[index], value: crate.state[index] ?? 'not indexed' })),
     actions: [
       { action: 'index', label: indexed ? 'Reindex' : 'Index', crateId: crate.id, force: indexed },
       { action: 'delete', label: 'Delete', crateId: crate.id, confirm },

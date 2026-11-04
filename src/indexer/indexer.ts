@@ -155,10 +155,8 @@ export class Indexer {
 /** An entity's rootCollection: empty on the top-level collection itself */
 export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
 
-const firstId = (value: unknown): string | undefined => ([value ?? []].flat()[0] as { '@id'?: string } | undefined)?.['@id'];
-
 /** The first collection `entity` is a member of, by `pcdm:memberOf` or `memberOf`, in a parsed crate or raw JSON-LD */
-export const memberOf = (entity: Record<string, unknown>) => firstId(entity['pcdm:memberOf']) || firstId(entity.memberOf);
+export const memberOf = (entity: Record<string, unknown>) => firstStringOrId(entity['pcdm:memberOf']) || firstStringOrId(entity.memberOf);
 
 /** The id of the collection a crate's root is a member of, if any */
 export function parentCollection(root: Record<string, unknown>, rootId: string): string | undefined {
