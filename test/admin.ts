@@ -39,7 +39,7 @@ export const repositoryOf = (crates: { id: string; name?: string; state: Record<
 };
 
 /** A repository with one crate, `PEOPLE`, whose search index is in `state` */
-export const repositoryIn = (state: string) => repositoryOf([{ id: PEOPLE, name: 'People', state: { structural: 'indexed', search: state } }]);
+export const repositoryIn = (state: string) => repositoryOf([{ id: PEOPLE, name: 'People', state: { database: 'indexed', search: state } }]);
 
 /** Runs a fake upstream provider for a file's tests, then closes it and every app started with `start` */
 export const adminTestbed = () => {

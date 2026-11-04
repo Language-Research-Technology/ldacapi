@@ -5,9 +5,9 @@ import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import { firstStringOrId } from '../utils.ts';
+import { pickSingleMemberOf } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
 import { Indexer, recordType } from './indexer.ts';
-import { pickSingleMemberOf } from './structural.ts';
 
 const log = logger.child({ module: 'indexer/search' });
 

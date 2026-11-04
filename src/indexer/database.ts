@@ -7,18 +7,18 @@ import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
 import { type BaseOptions, type CrateFile, Indexer, RecordType, recordType } from './indexer.ts';
 
-const log = logger.child({ module: 'indexer/structural' });
+const log = logger.child({ module: 'indexer/database' });
 
 type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
-type StructuralOptions = BaseOptions & {
+type DatabaseOptions = BaseOptions & {
   memberOfField?: string;
 };
 
-export class StructuralIndexer extends Indexer {
+export class DatabaseIndexer extends Indexer {
   memberOfField: string;
 
-  constructor(opt: StructuralOptions) {
+  constructor(opt: DatabaseOptions) {
     super(opt);
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }

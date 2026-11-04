@@ -77,7 +77,7 @@ describe('index and delete actions', () => {
   const waitUntilIndexed = async (...crateIds: string[]) => {
     await waitUntilSettled();
     for (const crateId of crateIds) {
-      expect(await repository.getState(crateId)).toEqual({ structural: 'indexed', search: 'indexed' });
+      expect(await repository.getState(crateId)).toEqual({ database: 'indexed', search: 'indexed' });
     }
   };
 
@@ -178,7 +178,7 @@ describe('index and delete actions', () => {
     const page = await act(browser, 'index');
 
     expect(page.body).toMatch(/<meta http-equiv="refresh"/);
-    expect(page.body).not.toContain('Structural: not indexed');
+    expect(page.body).not.toContain('Database: not indexed');
     await waitUntilIndexed(BUNDLED, PEOPLE);
   });
 
@@ -220,7 +220,7 @@ describe('index and delete actions', () => {
 
     await indexing;
 
-    expect(read).toEqual({ structural: 'queued', search: 'queued' });
+    expect(read).toEqual({ database: 'queued', search: 'queued' });
     expect(state).toEqual(read);
   });
 
@@ -307,7 +307,7 @@ describe('protecting the actions', () => {
   ])('refuses to delete %s while a crate it covers is %s', async (_, state, form, asked) => {
     const repository = repositoryOf([
       { id: PEOPLE, state: {} },
-      { id: EXTRA, state: { structural: state } },
+      { id: EXTRA, state: { database: state } },
     ]);
     const browser = await signIn((await start(repository)).app);
 

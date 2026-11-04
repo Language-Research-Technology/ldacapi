@@ -6,9 +6,9 @@ import type { StorageBackend } from 'arocapi';
 import { OcflStorage } from 'arocapi/storage/ocfl';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
+import { DatabaseIndexer } from './indexer/database.ts';
 import type { CrateObject, Indexer } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
-import { StructuralIndexer } from './indexer/structural.ts';
 import { logger } from './logger.ts';
 import { type IndexState, State } from './repository.ts';
 
@@ -24,7 +24,7 @@ let backend: StorageBackend;
 export async function init(opts: { opensearchClient: Client; search?: ReturnType<typeof createSearchBackend> }) {
   log.info('Initializing OCFL repository and indexers');
   INDEXER = {
-    structural: await StructuralIndexer.create({
+    database: await DatabaseIndexer.create({
       defaultLicense,
       defaultMetadataLicense,
     }),

@@ -112,8 +112,8 @@ describe('the crate tree', () => {
     await vi.waitFor(async () => {
       const page = await browser.get('/admin/');
       const tree = crateTree(page.body);
-      expect(find(tree, BUNDLED)?.row).toMatch(/Structural: indexed .*Search: indexed/);
-      expect(find(tree, PEOPLE)?.row).toMatch(/Structural: not indexed .*Search: not indexed/);
+      expect(find(tree, BUNDLED)?.row).toMatch(/Database: indexed .*Search: indexed/);
+      expect(find(tree, PEOPLE)?.row).toMatch(/Database: not indexed .*Search: not indexed/);
       expect(page.body).not.toContain('http-equiv="refresh"');
     });
   });

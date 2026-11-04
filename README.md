@@ -13,7 +13,7 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
 
 - **OCFL storage**: crates live in an [OCFL](https://ocfl.io/) repository on
   disk (`src/ocfl.ts`).
-- **Indexing**: crates are read from OCFL into the database (the structural
+- **Indexing**: crates are read from OCFL into the database (the database
   index, used by arocapi's entity and file routes) and, as one search
   document per entity, into arocapi's OpenSearch search backend
   (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
@@ -26,7 +26,7 @@ app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
   decided by licence, checked against REMS (`src/auth.ts`).
 - **Files and metadata**: arocapi serves crate files from the OCFL repository
   through its OCFL storage backend, and each entity's RO-Crate metadata from
-  the structural index (`src/app.ts`).
+  the database index (`src/app.ts`).
 
 ## Getting started
 

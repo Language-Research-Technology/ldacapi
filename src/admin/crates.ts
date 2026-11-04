@@ -2,7 +2,7 @@ import { hasState, type RepositoryObject, State } from '../repository.ts';
 
 type Crate = RepositoryObject & { label: string; children: Crate[] };
 
-const INDEXES = { structural: 'Structural', search: 'Search' } as const;
+const INDEXES = { database: 'Database', search: 'Search' } as const;
 
 /** How often the page reloads while an index is changing */
 const REFRESH_SECONDS = 5;
