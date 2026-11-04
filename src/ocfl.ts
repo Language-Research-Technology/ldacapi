@@ -203,8 +203,11 @@ function topCollectionFinder() {
         parent = next;
       } catch (error) {
         log.warn({ err: error, crateId: crate.rootId, parent, topCollection: top }, 'Cannot read parent collection; using the highest found');
-        break;
+        return top;
       }
+    }
+    if (parent) {
+      log.warn({ crateId: crate.rootId, cycle: [...seen, parent], topCollection: top }, 'Collections are members of each other; using the highest found');
     }
     return top;
   };
