@@ -59,7 +59,7 @@ describe('DatabaseIndexer', () => {
         return { size, crc32: '' };
       },
     };
-    await indexer.index({ crateObject, crate });
+    await indexer.index({ crateObject, crate, topCollection: ROOT });
   };
 
   describe('file size', () => {

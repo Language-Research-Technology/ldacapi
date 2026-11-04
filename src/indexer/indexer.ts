@@ -24,8 +24,6 @@ function crateRelativePath(ref: string) {
   }
 }
 
-export type EntityIds = ReadonlySet<string>;
-
 /** Entity id → its path in the crate */
 export type LogicalPaths = Map<string, string>;
 
@@ -99,7 +97,7 @@ export class Indexer {
 
   async init() {}
 
-  async count(_crateId?: string): Promise<number> {
+  async count(_crateId: string): Promise<number> {
     throw new Error('Not Implemented');
   }
 
@@ -112,21 +110,8 @@ export class Indexer {
     throw new Error('Not Implemented');
   }
 
-  /**
-   * `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent.
-   * Returns the ids of the entity rows written, if this indexer writes them.
-   */
-  async index({
-    crateObject,
-    crate,
-    topCollection = crate.rootId,
-    rows,
-  }: {
-    crateObject: CrateObject;
-    crate: ROCrate;
-    topCollection?: string;
-    rows?: EntityIds | undefined;
-  }): Promise<EntityIds | undefined> {
+  /** `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent */
+  async index({ crateObject, crate, topCollection }: { crateObject: CrateObject; crate: ROCrate; topCollection: string }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
@@ -143,11 +128,9 @@ export class Indexer {
       log.info({ crateId }, 'Indexing crate');
       const paths = this.deriveUniqueEntityIds(crate);
       try {
-        return await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection, rows });
+        await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
       } catch (error) {
         log.error({ err: error, crateId, path: crateObject.root }, 'Error indexing crate');
-      } finally {
-        log.info({ crateId }, 'Indexed crate');
       }
     }
   }
@@ -159,9 +142,7 @@ export class Indexer {
     license: string;
     metadataLicense: string;
     topCollection: string;
-    /** The ids of the crate's entity rows, once the database indexer has written them */
-    rows?: EntityIds | undefined;
-  }): Promise<EntityIds | undefined> {
+  }): Promise<void> {
     throw new Error('Not Implemented');
   }
 
@@ -174,11 +155,15 @@ export class Indexer {
 /** An entity's rootCollection: empty on the top-level collection itself */
 export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
 
+const firstId = (value: unknown): string | undefined => ([value ?? []].flat()[0] as { '@id'?: string } | undefined)?.['@id'];
+
+/** The first collection `entity` is a member of, by `pcdm:memberOf` or `memberOf`, in a parsed crate or raw JSON-LD */
+export const memberOf = (entity: Record<string, unknown>) => firstId(entity['pcdm:memberOf']) || firstId(entity.memberOf);
+
 /** The id of the collection a crate's root is a member of, if any */
-export function parentCollection(crate: ROCrate): string | undefined {
-  const root = crate.root;
-  const parent: string | undefined = (root['pcdm:memberOf'] ?? root.memberOf)?.[0]?.['@id'];
-  return parent && parent !== crate.rootId ? parent : undefined;
+export function parentCollection(root: Record<string, unknown>, rootId: string): string | undefined {
+  const parent = memberOf(root);
+  return parent && parent !== rootId ? parent : undefined;
 }
 
 const RecordType: Record<string, string> = config.indexType;

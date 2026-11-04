@@ -6,9 +6,9 @@ import { config } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import { COLLECTION, OBJECT } from '../oni.ts';
 import { firstStringOrId } from '../utils.ts';
-import { countRows, pickSingleMemberOf, rowIds } from './database.ts';
+import { crateRows, pickSingleMemberOf, rowIds } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
-import { entityClass, Indexer, recordType, rootCollection } from './indexer.ts';
+import { entityClass, Indexer, recordType } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/search' });
 
@@ -38,6 +38,31 @@ export const createSearchBackend = (client: Client, options: { refresh?: boolean
   OpenSearchBackend({ client, fields, indexName: config.search.entityIndex, ...options });
 
 type SearchBackend = ReturnType<typeof createSearchBackend>;
+
+/** How many of `ids` have a search document, 0 if there is no index */
+export async function countDocuments(search: SearchBackend, ids: string[]) {
+  if (!ids.length) {
+    return 0;
+  }
+  try {
+    const { total } = await search.search({
+      searchType: 'basic',
+      query: '',
+      filters: { terms: {}, ranges: {} },
+      limit: 1,
+      offset: 0,
+      sort: 'relevance',
+      order: 'asc',
+      visibility: { id: { in: ids } },
+    });
+    return total;
+  } catch (error) {
+    if ((error as { statusCode?: number }).statusCode === 404) {
+      return 0;
+    }
+    throw error;
+  }
+}
 
 type SearchOptions = BaseOptions & {
   client: Client;
@@ -121,7 +146,7 @@ export async function searchDocument(
   crateObject: CrateObject,
   entity: Entity,
   license: string,
-  topCollection: string,
+  rootCollection: string | null,
   path?: string,
 ): Promise<Document> {
   const id: string = entity['@id'];
@@ -130,7 +155,6 @@ export async function searchDocument(
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
   const point = location(entity);
-  const root = rootCollection(topCollection, id);
   const doc: Document = {
     id,
     name: entity.name?.join('; ') || id,
@@ -141,7 +165,7 @@ export async function searchDocument(
     linguisticGenre: labels(entity, 'linguisticGenre'),
     annotationType: labels(entity, 'annotationType'),
     encodingFormat: labels(entity, 'encodingFormat'),
-    ...(root && { rootCollection: root }),
+    ...(rootCollection && { rootCollection }),
     ...(memberOf && { memberOf }),
     license: firstStringOrId(entity.license) || license,
     ...(datePublished && { datePublished }),
@@ -184,7 +208,6 @@ export class SearchIndexer extends Indexer {
     await this.search.createIndex();
   }
 
-  /** A crate's documents are found by its database rows, so delete them before the rows */
   async delete(crateId?: string) {
     if (crateId) {
       await this.search.remove(await rowIds(crateId));
@@ -194,26 +217,27 @@ export class SearchIndexer extends Indexer {
     log.debug({ crateId }, 'Index deleted');
   }
 
-  async count(crateId?: string) {
-    return await countRows(crateId);
+  async count(crateId: string) {
+    return await countDocuments(this.search, await rowIds(crateId));
   }
 
   /** Only entities with a row, as arocapi drops a hit without one but still counts it */
-  async _index({ crateObject, crate, paths, license, topCollection, rows }: Parameters<Indexer['_index']>[0]): Promise<undefined> {
+  async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
     await this.search.createIndex();
     const crateId = crate.rootId;
-    const withRows = rows ?? new Set(await rowIds(crateId));
+    const rows = new Map((await crateRows(crateId)).map(({ id, rootCollection }) => [id, rootCollection]));
     const docs: Document[] = [];
     for (const entity of crate.entities()) {
       if (!recordType(entity)) {
         continue;
       }
       const entityId = entity['@id'];
-      if (!withRows.has(entityId)) {
+      const rootCollection = rows.get(entityId);
+      if (rootCollection === undefined) {
         log.warn({ crateId, entityId }, 'Skipped: no database row');
         continue;
       }
-      const doc = await searchDocument(crate, crateObject, entity, license, topCollection, paths.get(entityId));
+      const doc = await searchDocument(crate, crateObject, entity, license, rootCollection, paths.get(entityId));
       if (doc.text) {
         // Indexed alone to keep each request small
         await this.indexDocuments([doc]);

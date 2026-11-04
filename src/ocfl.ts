@@ -7,7 +7,7 @@ import { OcflStorage } from 'arocapi/storage/ocfl';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import { DatabaseIndexer } from './indexer/database.ts';
-import { type CrateObject, type EntityIds, type Indexer, parentCollection } from './indexer/indexer.ts';
+import { type CrateObject, type Indexer, parentCollection } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { logger } from './logger.ts';
 import { type IndexState, State } from './repository.ts';
@@ -142,12 +142,19 @@ export async function getState(crateId: string, type?: string) {
   return type ? { [type]: stateCache[crateId]?.[type] } : { ...stateCache[crateId] };
 }
 
-/** The search index finds a crate's documents by its database rows, so is deleted from first */
+/**
+ * The search index finds a crate's documents, and their rootCollection, by its database rows. So the rows are indexed
+ * first and deleted last, deleting stops at the first failure, and deleting the rows deletes the documents too.
+ */
+const INDEX_ORDER = ['database', 'search'];
 const DELETE_ORDER = ['search', 'database'];
 
-/** Stops at the first failure, so the rows that find a crate's search documents outlive them */
+const typesOf = (type?: string | string[]) => (type ? [type].flat() : INDEX_ORDER);
+
+const withDocuments = (types: string[]) => (types.includes('database') && !types.includes('search') ? [...types, 'search'] : types);
+
 async function deleteFrom(types: string[], crateId?: string) {
-  for (const t of types.toSorted((a, b) => DELETE_ORDER.indexOf(a) - DELETE_ORDER.indexOf(b))) {
+  for (const t of DELETE_ORDER.filter((t) => types.includes(t))) {
     try {
       await INDEXER[t]?.delete(crateId);
     } catch (error) {
@@ -157,12 +164,14 @@ async function deleteFrom(types: string[], crateId?: string) {
   }
 }
 
-/** A crate's OCFL object, whose id is the crate's root id, and its metadata */
-async function readCrate(crateId: string) {
+const readCrateJson = async (ocflObject: OcflObject): Promise<{ '@graph': RawEntity[] }> =>
+  JSON.parse(await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text());
+
+/** A crate's OCFL object, whose id is the crate's root id */
+async function loadObject(crateId: string) {
   const ocflObject = repository.object(crateId);
   await ocflObject.load();
-  const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
-  return { ocflObject, crate: await ROCrate.create(JSON.parse(jsonContent)) };
+  return ocflObject;
 }
 
 /**
@@ -174,14 +183,22 @@ function topCollectionFinder() {
   const parentOf = (crateId: string) => {
     let parent = parents.get(crateId);
     if (!parent) {
-      parent = readCrate(crateId).then(({ crate }) => parentCollection(crate));
+      parent = loadObject(crateId)
+        .then(readCrateJson)
+        .then((json) => {
+          const root = json['@graph'].find((e) => e['@id'] === crateId);
+          return root && parentCollection(root, crateId);
+        });
       parents.set(crateId, parent);
     }
     return parent;
   };
   return async (crate: ROCrate) => {
     let top = crate.rootId;
-    let parent = parentCollection(crate);
+    let parent = parentCollection(crate.root, crate.rootId);
+    if (!parents.has(top)) {
+      parents.set(top, Promise.resolve(parent));
+    }
     const seen = new Set([top]);
     while (parent && !seen.has(parent)) {
       seen.add(parent);
@@ -200,7 +217,8 @@ function topCollectionFinder() {
 
 async function indexObject(crateId: string, types: string[], findTopCollection: ReturnType<typeof topCollectionFinder>, force?: boolean) {
   try {
-    const { ocflObject, crate } = await readCrate(crateId);
+    const ocflObject = await loadObject(crateId);
+    const crate = await ROCrate.create(await readCrateJson(ocflObject));
     log.debug({ crateId: ocflObject.id }, 'Found OCFL object');
     if (force) {
       setState(ocflObject.id, types, State.INDEXING);
@@ -212,13 +230,12 @@ async function indexObject(crateId: string, types: string[], findTopCollection: 
       }
     }
     const topCollection = await findTopCollection(crate);
-    let rows: EntityIds | undefined;
-    for (const t of types) {
+    for (const t of INDEX_ORDER.filter((t) => types.includes(t))) {
       const indexer = INDEXER[t];
       if (indexer) {
         setState(ocflObject.id, t, State.INDEXING);
         try {
-          rows = (await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection, rows })) ?? rows;
+          await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection });
         } catch (error) {
           log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
         } finally {
@@ -246,7 +263,7 @@ async function idsMatching(pattern?: RegExp) {
 /** Indexes `crateIds`, the crates matching it, or every crate, marking them all queued before indexing any */
 export async function createIndex(crateIds?: string | string[] | RegExp, type?: string | string[], force?: boolean) {
   log.debug('Indexing started');
-  const types = type ? ([] as string[]).concat(type) : Object.keys(INDEXER);
+  const types = force ? withDocuments(typesOf(type)) : typesOf(type);
   // Given ids are queued before the first await, so callers see them in progress at once
   const ids = typeof crateIds === 'string' || Array.isArray(crateIds) ? [crateIds].flat() : await idsMatching(crateIds);
   for (const id of ids) {
@@ -260,7 +277,7 @@ export async function createIndex(crateIds?: string | string[] | RegExp, type?: 
 }
 
 export async function deleteIndex(crateId?: string, type?: string | string[]) {
-  const types = type ? ([] as string[]).concat(type) : Object.keys(INDEXER);
+  const types = withDocuments(typesOf(type));
   setState(crateId, types, State.DELETING);
   try {
     await deleteFrom(types, crateId);
@@ -279,9 +296,7 @@ export async function* objects(prefix?: string, refresh?: boolean) {
   for await (const ocflObject of repository) {
     try {
       const inv = await ocflObject.getInventory();
-      const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
-      const jsonParsed = JSON.parse(jsonContent);
-      const name = jsonParsed['@graph'].find((e: RawEntity) => e['@id'] === inv.id)?.name?.toString();
+      const name = (await readCrateJson(ocflObject))['@graph'].find((e) => e['@id'] === inv.id)?.name?.toString();
       yield { id: inv.id, name, path: ocflObject.root, state: await getState(inv.id) };
     } catch (error) {
       log.error({ err: error, path: ocflObject.root }, 'Error reading object');

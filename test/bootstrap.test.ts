@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/configuration.ts';
-import { createSearchBackend } from '../src/indexer/search.ts';
+import { countDocuments, createSearchBackend } from '../src/indexer/search.ts';
 import { prisma } from '../src/prisma.ts';
 
 const crateIds = [
@@ -45,17 +45,7 @@ describe('import and index', () => {
 
     // Documents are searchable after OpenSearch's next refresh
     await vi.waitFor(async () => {
-      const { total } = await search.search({
-        searchType: 'basic',
-        query: '',
-        filters: { terms: {}, ranges: {} },
-        limit: 1,
-        offset: 0,
-        sort: 'relevance',
-        order: 'asc',
-        visibility: { id: { in: ids } },
-      });
-      expect(total).toBe(ids.length);
+      expect(await countDocuments(search, ids)).toBe(ids.length);
     });
     await opensearch.close();
   });

@@ -5,7 +5,7 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
-import { type BaseOptions, type CrateFile, entityClass, Indexer, recordType, rootCollection } from './indexer.ts';
+import { type BaseOptions, type CrateFile, entityClass, Indexer, memberOf, recordType, rootCollection } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/database' });
 
@@ -25,7 +25,6 @@ export class DatabaseIndexer extends Indexer {
 
   override async _index({ crateObject, crate, paths, license, metadataLicense, topCollection }: Parameters<Indexer['_index']>[0]) {
     const crateId = crate.rootId;
-    const written = new Set<string>();
     let count = 0;
     for (const entity of crate.entities()) {
       const entityType = recordType(entity);
@@ -70,7 +69,6 @@ export class DatabaseIndexer extends Indexer {
       }
       try {
         await prisma.entity.create({ data: param.entity });
-        written.add(entityId);
         if (param.file) {
           await prisma.file.create({ data: param.file });
         }
@@ -80,7 +78,6 @@ export class DatabaseIndexer extends Indexer {
     }
 
     log.info({ crateId, entities: count }, 'Indexed crate');
-    return written;
   }
 
   async delete(crateId?: string) {
@@ -89,18 +86,19 @@ export class DatabaseIndexer extends Indexer {
     log.debug({ crateId }, 'Index deleted');
   }
 
-  async count(crateId?: string) {
-    return await countRows(crateId);
+  async count(crateId: string) {
+    return await prisma.entity.count({ where: rowsOf(crateId) });
   }
 }
 
 /** The entity rows indexed from `crateId`, or every row */
 const rowsOf = (crateId?: string): Prisma.EntityWhereInput => (crateId ? { meta: { path: ['crateId'], equals: crateId } } : {});
 
-export const countRows = (crateId?: string) => prisma.entity.count({ where: rowsOf(crateId) });
+/** The id and rootCollection of each entity row indexed from `crateId` */
+export const crateRows = (crateId: string) => prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true, rootCollection: true } });
 
 /** The ids of the entity rows indexed from `crateId` */
-export const rowIds = async (crateId: string) => (await prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true } })).map(({ id }) => id);
+export const rowIds = async (crateId: string) => (await crateRows(crateId)).map(({ id }) => id);
 
 export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
@@ -125,8 +123,7 @@ function statedSize(contentSize: unknown) {
 
 export function pickSingleMemberOf(entity: Entity) {
   return (
-    entity['pcdm:memberOf']?.[0]['@id'] ||
-    entity.memberOf?.[0]['@id'] ||
+    memberOf(entity) ||
     entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
     entity['@reverse'].hasMember?.[0]?.['@id'] ||
     entity.isPartOf?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
