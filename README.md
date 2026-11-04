@@ -461,9 +461,11 @@ docker compose run --rm api pnpm db:deploy
 docker compose up -d
 ```
 
-If an upgrade changes the search fields, the API and `pnpm index` stop with an
-error naming the changed field. Delete the search index (named by
-`ENTITY_INDEX`, `entities` by default), rebuild both indexes, and start again:
+`pnpm index` deletes both indexes and rebuilds them, so run it when an upgrade
+changes what they hold. If an upgrade changes the search fields, the API and
+`pnpm index` stop with an error naming the changed field, as they check the
+search index's mapping before anything else. Delete the search index (named by
+`ENTITY_INDEX`, `entities` by default) first, then rebuild and start again:
 
 ```sh
 docker compose exec opensearch curl -sX DELETE localhost:9200/entities
