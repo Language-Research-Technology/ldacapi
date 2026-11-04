@@ -25,6 +25,7 @@ export class DatabaseIndexer extends Indexer {
 
   override async _index({ crateObject, crate, paths, license, metadataLicense, topCollection }: Parameters<Indexer['_index']>[0]) {
     const crateId = crate.rootId;
+    const written = new Set<string>();
     let count = 0;
     for (const entity of crate.entities()) {
       const entityType = recordType(entity);
@@ -69,6 +70,7 @@ export class DatabaseIndexer extends Indexer {
       }
       try {
         await prisma.entity.create({ data: param.entity });
+        written.add(entityId);
         if (param.file) {
           await prisma.file.create({ data: param.file });
         }
@@ -78,6 +80,7 @@ export class DatabaseIndexer extends Indexer {
     }
 
     log.info({ crateId, entities: count }, 'Indexed crate');
+    return written;
   }
 
   async delete(crateId?: string) {

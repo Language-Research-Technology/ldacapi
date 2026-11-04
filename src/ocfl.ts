@@ -7,7 +7,7 @@ import { OcflStorage } from 'arocapi/storage/ocfl';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import { DatabaseIndexer } from './indexer/database.ts';
-import { type CrateObject, type Indexer, parentCollection } from './indexer/indexer.ts';
+import { type CrateObject, type EntityIds, type Indexer, parentCollection } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { logger } from './logger.ts';
 import { type IndexState, State } from './repository.ts';
@@ -212,12 +212,13 @@ async function indexObject(crateId: string, types: string[], findTopCollection: 
       }
     }
     const topCollection = await findTopCollection(crate);
+    let rows: EntityIds | undefined;
     for (const t of types) {
       const indexer = INDEXER[t];
       if (indexer) {
         setState(ocflObject.id, t, State.INDEXING);
         try {
-          await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection });
+          rows = (await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection, rows })) ?? rows;
         } catch (error) {
           log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
         } finally {

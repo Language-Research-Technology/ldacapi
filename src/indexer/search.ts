@@ -183,14 +183,22 @@ export class SearchIndexer extends Indexer {
     return await countRows(crateId);
   }
 
-  async _index({ crateObject, crate, paths, license, topCollection }: Parameters<Indexer['_index']>[0]) {
+  /** Only entities with a row, as arocapi drops a hit without one but still counts it */
+  async _index({ crateObject, crate, paths, license, topCollection, rows }: Parameters<Indexer['_index']>[0]): Promise<undefined> {
     await this.search.createIndex();
+    const crateId = crate.rootId;
+    const withRows = rows ?? new Set(await rowIds(crateId));
     const docs: Document[] = [];
     for (const entity of crate.entities()) {
       if (!recordType(entity)) {
         continue;
       }
-      const doc = await searchDocument(crate, crateObject, entity, license, topCollection, paths.get(entity['@id']));
+      const entityId = entity['@id'];
+      if (!withRows.has(entityId)) {
+        log.warn({ crateId, entityId }, 'Skipped: no database row');
+        continue;
+      }
+      const doc = await searchDocument(crate, crateObject, entity, license, topCollection, paths.get(entityId));
       if (doc.text) {
         // Indexed alone to keep each request small
         await this.indexDocuments([doc]);
