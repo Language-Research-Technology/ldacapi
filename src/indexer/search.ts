@@ -4,6 +4,7 @@ import { OpenSearchBackend } from 'arocapi/search/opensearch';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { logger } from '../logger.ts';
+import { COLLECTION, OBJECT } from '../oni.ts';
 import { firstStringOrId } from '../utils.ts';
 import { countRows, pickSingleMemberOf, rowIds } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
@@ -44,8 +45,8 @@ type SearchOptions = BaseOptions & {
 };
 
 const CLASS_LABELS: Record<string, string> = {
-  'http://pcdm.org/models#Collection': 'Collection',
-  'http://pcdm.org/models#Object': 'Object',
+  [COLLECTION]: 'Collection',
+  [OBJECT]: 'Object',
   'http://schema.org/MediaObject': 'File',
   'http://schema.org/Person': 'Person',
   'http://schema.org/Organization': 'Organisation',
