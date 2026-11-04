@@ -23,7 +23,7 @@ const search = async (body: Record<string, unknown>) => {
 beforeAll(async () => {
   storage = await mkdtemp(join(tmpdir(), 'ldacapi-search-'));
   const ocflRoot = join(storage, 'ocfl');
-  execFileSync('node', ['scripts/seed.ts'], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
+  execFileSync('node', ['scripts/crates-import.ts'], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
   started = await buildTestApp({ OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, { repository: ocflRepository });
   await started.repository.deleteIndex();
   await started.repository.createIndex(BUNDLED);

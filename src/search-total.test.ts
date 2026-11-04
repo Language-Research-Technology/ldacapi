@@ -58,7 +58,7 @@ beforeAll(async () => {
   await mkdir(join(source, 'unwritable'), { recursive: true });
   await writeFile(join(source, 'unwritable', 'ro-crate-metadata.json'), JSON.stringify(crate));
   const ocflRoot = join(storage, 'ocfl');
-  execFileSync('node', ['scripts/seed.ts', source], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
+  execFileSync('node', ['scripts/crates-import.ts', source], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
   started = await buildTestApp({ OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, { repository: ocflRepository });
   await started.repository.deleteIndex();
   await started.repository.createIndex(ROOT);

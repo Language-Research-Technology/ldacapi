@@ -16,4 +16,4 @@ for (const directory of directories.filter((entry) => entry.isDirectory())) {
   await repository.object(crate.rootId).import(path);
   logger.info({ crateId: crate.rootId, path }, 'Imported crate');
 }
-logger.info({ root: config.ocfl.root }, 'Seeded the OCFL repository');
+logger.info({ root: config.ocfl.root }, 'Imported crates into the OCFL repository');

@@ -45,7 +45,7 @@ const flash = (body: string) =>
 
 beforeAll(async () => {
   storage = await mkdtemp(join(tmpdir(), 'ldacapi-actions-'));
-  execFileSync('node', ['scripts/seed.ts'], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
+  execFileSync('node', ['scripts/crates-import.ts'], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
 });
 
 afterAll(async () => {

@@ -35,7 +35,7 @@ You need Node.js 26 (26.13 or later), [pnpm](https://pnpm.io/) and Docker.
 ```sh
 pnpm install
 docker compose up -d --wait   # Postgres, OpenSearch, Oni and a fake upstream provider
-pnpm bootstrap                # migrate the database, seed OCFL from test-data, index
+pnpm bootstrap                # migrate the database, import test-data into OCFL, index
 pnpm dev
 ```
 
@@ -54,25 +54,25 @@ override a default, set it in `.env`.
 
 ## Scripts
 
-| Script               | Does                                                                             |
-| -------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`           | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
-| `pnpm build`         | Build the admin pages' stylesheet (run before deploying)                         |
-| `pnpm test`          | Run the tests (needs `docker compose up`)                                        |
-| `pnpm lint`          | Biome, Knip and TypeScript                                                       |
-| `pnpm bootstrap`     | `db:deploy`, `seed` and `index` in one go                                        |
-| `pnpm ocfl:init`     | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
-| `pnpm seed [dir]`    | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
-| `pnpm index`         | Rebuild both indexes from the OCFL repository                                    |
-| `pnpm generate-keys` | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
-| `pnpm db:migrate`    | Create and apply a migration after a schema change                               |
-| `pnpm db:deploy`     | Apply pending migrations                                                         |
-| `pnpm db:reset`      | Drop and recreate the dev database                                               |
-| `pnpm db:console`    | Open `psql` on the dev database                                                  |
+| Script                     | Does                                                                             |
+| -------------------------- | -------------------------------------------------------------------------------- |
+| `pnpm dev`                 | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
+| `pnpm build`               | Build the admin pages' stylesheet (run before deploying)                         |
+| `pnpm test`                | Run the tests (needs `docker compose up`)                                        |
+| `pnpm lint`                | Biome, Knip and TypeScript                                                       |
+| `pnpm bootstrap`           | `db:deploy`, `crates:import` and `index` in one go                               |
+| `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
+| `pnpm crates:import [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
+| `pnpm index`               | Rebuild both indexes from the OCFL repository                                    |
+| `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
+| `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
+| `pnpm db:deploy`           | Apply pending migrations                                                         |
+| `pnpm db:reset`            | Drop and recreate the dev database                                               |
+| `pnpm db:console`          | Open `psql` on the dev database                                                  |
 
 ## Test data
 
-Each folder in `test-data/` is one RO-Crate. `pnpm seed` imports them into the
+Each folder in `test-data/` is one RO-Crate. `pnpm crates:import` imports them into the
 OCFL repository at `storage/ocfl` (gitignored), and re-running it only adds a
 new OCFL version for crates that changed. Run `pnpm index` afterwards.
 
@@ -83,7 +83,7 @@ dataset) unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set.
 ## Configuration
 
 Configuration comes only from environment variables, validated at startup
-(`src/configuration.ts`). `pnpm dev`, `pnpm seed`, `pnpm index` and Prisma
+(`src/configuration.ts`). `pnpm dev`, `pnpm crates:import`, `pnpm index` and Prisma
 also read `.env` if it exists, without overriding variables that are already
 set.
 
@@ -287,7 +287,7 @@ docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:
 ```
 
 `pnpm ocfl:init` (which creates an empty OCFL repository; the API won't start
-without one), `pnpm seed [dir]` (mount `dir` into the container) and
+without one), `pnpm crates:import [dir]` (mount `dir` into the container) and
 `pnpm index` run the same way, offline. Give them and `pnpm db:deploy` the API's environment file:
 Prisma and the scripts load the whole [configuration](#configuration).
 `pnpm generate-keys` reads no configuration, so it needs no environment file:
@@ -302,7 +302,7 @@ The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
 (and `OCFL_SCRATCH`, if you need it elsewhere) to paths inside the container
 (above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
 image's `node` user, uid 1000, so the OCFL repository must be readable by uid
-1000 and the scratch directory writable by it. `pnpm seed` writes to the
+1000 and the scratch directory writable by it. `pnpm crates:import` writes to the
 repository, so give it write access too when you run it.
 
 ## Production with Docker Compose
@@ -389,7 +389,7 @@ Import crates and index them with the API's image, mounting the directory of
 crates read-only:
 
 ```sh
-docker compose run --rm -v /path/to/crates:/import:ro api pnpm seed /import
+docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import /import
 docker compose run --rm api pnpm index
 ```
 

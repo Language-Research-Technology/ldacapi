@@ -83,7 +83,7 @@ beforeAll(async () => {
     await mkdir(join(source, directory));
     await writeFile(join(source, directory, 'ro-crate-metadata.json'), JSON.stringify(crate(id, name)));
   }
-  execFileSync('node', ['scripts/seed.ts', source], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
+  execFileSync('node', ['scripts/crates-import.ts', source], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
 });
 
 afterAll(async () => {

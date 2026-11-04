@@ -15,13 +15,13 @@ const crateIds = [
   'arcp://name,distributed_metadata_restricted',
 ];
 
-describe('seed and index', () => {
+describe('import and index', () => {
   let storage: string;
 
   beforeAll(async () => {
     storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
     const env = { ...process.env, OCFL_ROOT: join(storage, 'ocfl'), LOG_LEVEL: 'silent' };
-    execFileSync('node', ['scripts/seed.ts'], { env, stdio: 'ignore' });
+    execFileSync('node', ['scripts/crates-import.ts'], { env, stdio: 'ignore' });
     execFileSync('node', ['scripts/index.ts'], { env, stdio: 'ignore' });
   });
 

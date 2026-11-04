@@ -29,7 +29,7 @@ const collectionFacet = async () => {
 beforeAll(async () => {
   storage = await mkdtemp(join(tmpdir(), 'ldacapi-root-collection-'));
   const ocflRoot = join(storage, 'ocfl');
-  execFileSync('node', ['scripts/seed.ts'], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
+  execFileSync('node', ['scripts/crates-import.ts'], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
   started = await buildTestApp({ OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, { repository: ocflRepository });
 });
 
