@@ -4,10 +4,11 @@ import { OpenSearchBackend } from 'arocapi/search/opensearch';
 import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { logger } from '../logger.ts';
+import { COLLECTION, OBJECT } from '../oni.ts';
 import { firstStringOrId } from '../utils.ts';
+import { crateRows, pickSingleMemberOf, rowIds } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
-import { Indexer, recordType } from './indexer.ts';
-import { pickSingleMemberOf } from './structural.ts';
+import { entityClass, Indexer, recordType } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/search' });
 
@@ -15,7 +16,8 @@ const fields = {
   name: { type: 'text', label: 'Name', weight: 3, advanced: true, sort: true },
   description: { type: 'text', label: 'Description', advanced: true },
   text: { type: 'text', label: 'Text', advanced: true },
-  type: { type: 'keyword', label: 'Record Type', facet: true },
+  entityType: { type: 'keyword', label: 'Entity Type', filter: true },
+  recordType: { type: 'keyword', label: 'Record Type', facet: true },
   inLanguage: { type: 'keyword', label: 'Language', advanced: true, facet: true },
   communicationMode: { type: 'keyword', label: 'Communication Mode', facet: true },
   linguisticGenre: { type: 'keyword', label: 'Linguistic Genre', facet: true },
@@ -36,10 +38,53 @@ export const createSearchBackend = (client: Client) => OpenSearchBackend({ clien
 
 type SearchBackend = ReturnType<typeof createSearchBackend>;
 
+/** Well under OpenSearch's default `index.max_terms_count` of 65,536 */
+const BATCH_SIZE = 10_000;
+
+const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / BATCH_SIZE) }, (_, i) => items.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE));
+
+/** How many of `ids` have a search document, 0 if there is no index */
+export async function countDocuments(search: SearchBackend, ids: string[]) {
+  try {
+    let count = 0;
+    for (const batch of batches(ids)) {
+      const { total } = await search.search({
+        searchType: 'basic',
+        query: '',
+        filters: { terms: {}, ranges: {} },
+        limit: 1,
+        offset: 0,
+        sort: 'relevance',
+        order: 'asc',
+        visibility: { id: { in: batch } },
+      });
+      count += total;
+    }
+    return count;
+  } catch (error) {
+    if ((error as { statusCode?: number }).statusCode === 404) {
+      return 0;
+    }
+    throw error;
+  }
+}
+
 type SearchOptions = BaseOptions & {
   client: Client;
   search: SearchBackend;
 };
+
+const CLASS_LABELS: Record<string, string> = {
+  [COLLECTION]: 'Collection',
+  [OBJECT]: 'Object',
+  'http://schema.org/MediaObject': 'File',
+  'http://schema.org/Person': 'Person',
+  'http://schema.org/Organization': 'Organisation',
+  'http://schema.org/SoftwareApplication': 'Software Application',
+};
+
+/** A readable label for a class URI, either schema.org scheme alike, falling back to its last segment */
+const classLabel = (uri: string) => CLASS_LABELS[uri.replace(/^https:\/\/schema\.org\//, 'http://schema.org/')] ?? uri.split(/[#/]/).at(-1) ?? uri;
 
 const values = (entity: Entity, name: string): unknown[] => [...(entity[name] ?? []), ...(entity[`ldac:${name}`] ?? [])];
 
@@ -101,8 +146,17 @@ function isText(entity: Entity) {
 }
 
 /** One entity's search document; File entities with text content include it */
-export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string, path?: string): Promise<Document> {
+export async function searchDocument(
+  crate: ROCrate,
+  crateObject: CrateObject,
+  entity: Entity,
+  license: string,
+  rootCollection: string | null,
+  path?: string,
+): Promise<Document> {
   const id: string = entity['@id'];
+  const type = recordType(entity);
+  const entityType = type && entityClass(crate, type);
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
   const point = location(entity);
@@ -110,13 +164,13 @@ export async function searchDocument(crate: ROCrate, crateObject: CrateObject, e
     id,
     name: entity.name?.join('; ') || id,
     description: labels(entity, 'description'),
-    type: entity['@type'],
+    ...(entityType && { entityType, recordType: classLabel(entityType) }),
     inLanguage: labels(entity, 'inLanguage'),
     communicationMode: labels(entity, 'communicationMode'),
     linguisticGenre: labels(entity, 'linguisticGenre'),
     annotationType: labels(entity, 'annotationType'),
     encodingFormat: labels(entity, 'encodingFormat'),
-    rootCollection: crate.rootId,
+    ...(rootCollection && { rootCollection }),
     ...(memberOf && { memberOf }),
     license: firstStringOrId(entity.license) || license,
     ...(datePublished && { datePublished }),
@@ -161,59 +215,84 @@ export class SearchIndexer extends Indexer {
 
   async delete(crateId?: string) {
     if (crateId) {
-      await this.client.deleteByQuery({ index: this.indexName, refresh: true, body: { query: { term: { rootCollection: crateId } } } });
+      for (const batch of batches(await rowIds(crateId))) {
+        await this.search.remove(batch);
+      }
+      await this.refresh();
     } else {
       await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }
     log.debug({ crateId }, 'Index deleted');
   }
 
-  async count(crateId?: string) {
-    try {
-      const res = await this.client.count({
-        index: this.indexName,
-        ...(crateId && { body: { query: { term: { rootCollection: crateId } } } }),
-      });
-      return res.body.count;
-    } catch {
-      return 0;
-    }
+  async count(crateId: string) {
+    return await countDocuments(this.search, await rowIds(crateId));
   }
 
+  /** Makes changes searchable now, rather than at OpenSearch's next periodic refresh */
+  async refresh() {
+    await this.client.indices.refresh({ index: this.indexName, ignore_unavailable: true });
+  }
+
+  /** Only entities with a row, as arocapi drops a hit without one but still counts it */
   async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
     await this.search.createIndex();
+    const crateId = crate.rootId;
+    const rows = new Map((await crateRows(crateId)).map(({ id, rootCollection }) => [id, rootCollection]));
+    const unrowed: string[] = [];
     const docs: Document[] = [];
-    for (const entity of crate.entities()) {
-      if (!recordType(entity)) {
-        continue;
+    let count = 0;
+    try {
+      for (const entity of crate.entities()) {
+        if (!recordType(entity)) {
+          continue;
+        }
+        const entityId = entity['@id'];
+        const rootCollection = rows.get(entityId);
+        if (rootCollection === undefined) {
+          unrowed.push(entityId);
+          continue;
+        }
+        const doc = await searchDocument(crate, crateObject, entity, license, rootCollection, paths.get(entityId));
+        if (doc.text) {
+          // Indexed alone to keep each request small
+          count += await this.indexDocuments([doc]);
+        } else {
+          docs.push(doc);
+        }
       }
-      const doc = await searchDocument(crate, crateObject, entity, license, paths.get(entity['@id']));
-      if (doc.text) {
-        // Indexed alone to keep each request small
-        await this.indexDocuments([doc]);
-      } else {
-        docs.push(doc);
+      count += await this.indexDocuments(docs);
+    } finally {
+      await this.refresh();
+    }
+    if (rows.size === 0 && unrowed.length > 0) {
+      log.warn({ crateId, skipped: unrowed.length }, 'Skipped crate: no database rows');
+    } else {
+      for (const entityId of unrowed) {
+        log.warn({ crateId, entityId }, 'Skipped: no database row');
       }
     }
-    await this.indexDocuments(docs);
-    await this.client.indices.refresh({ index: this.indexName });
+    log.info({ crateId, documents: count }, 'Indexed crate');
   }
 
-  /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest */
-  async indexDocuments(docs: Document[]) {
+  /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest; returns how many were indexed */
+  async indexDocuments(docs: Document[]): Promise<number> {
     if (!docs.length) {
-      return;
+      return 0;
     }
     try {
       await this.search.index(docs);
+      return docs.length;
     } catch (error) {
       if (docs.length === 1) {
         log.error({ err: error, entityId: docs[0]?.id }, 'Error indexing document');
-        return;
+        return 0;
       }
+      let count = 0;
       for (const doc of docs) {
-        await this.indexDocuments([doc]);
+        count += await this.indexDocuments([doc]);
       }
+      return count;
     }
   }
 }

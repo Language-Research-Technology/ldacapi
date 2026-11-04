@@ -1,14 +1,14 @@
 import { ROCrate } from 'ro-crate';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type CrateObject, Indexer } from './indexer.ts';
-import { searchDocument } from './search.ts';
+import { countDocuments, searchDocument } from './search.ts';
 
 const ROOT = 'arcp://name,test';
 const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
 
-const crateWith = async (entity: Record<string, unknown>) => {
+const crateWith = async (entity: Record<string, unknown>, terms: Record<string, string> = {}) => {
   const crate = await ROCrate.create({
-    '@context': ['https://w3id.org/ro/crate/1.1/context', { '@vocab': 'http://schema.org/', ldac: 'https://w3id.org/ldac/terms#' }],
+    '@context': ['https://w3id.org/ro/crate/1.1/context', { '@vocab': 'http://schema.org/', ldac: 'https://w3id.org/ldac/terms#', ...terms }],
     '@graph': [
       { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', about: { '@id': ROOT }, license: { '@id': LICENSE } },
       { '@id': ROOT, '@type': ['Dataset', 'RepositoryCollection'], name: 'Root', hasPart: [{ '@id': 'data.txt' }] },
@@ -34,10 +34,11 @@ describe('searchDocument', () => {
       contentLocation: { '@id': '#place' },
     });
 
-    expect(await searchDocument(crate, crateObject, entity, LICENSE, path)).toMatchObject({
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT, path)).toMatchObject({
       id: `${ROOT}/data.txt`,
       name: 'Data',
-      type: ['File'],
+      entityType: 'http://schema.org/MediaObject',
+      recordType: 'File',
       inLanguage: ['English'],
       communicationMode: ['https://w3id.org/ldac/terms#SpokenLanguage'],
       encodingFormat: ['text/plain'],
@@ -49,12 +50,57 @@ describe('searchDocument', () => {
     });
   });
 
+  it.each([
+    [['Dataset', 'RepositoryCollection'], 'https://w3id.org/ldac/profile#Collection', 'Collection'],
+    [['Dataset', 'RepositoryObject'], 'https://w3id.org/ldac/profile#Object', 'Object'],
+    ['Person', 'https://w3id.org/ldac/profile#Person', 'Person'],
+    ['Organization', 'https://w3id.org/ldac/profile#Organization', 'Organisation'],
+    ['SoftwareApplication', 'https://w3id.org/ldac/profile#SoftwareApplication', 'Software Application'],
+  ])('labels a %s record as %s', async (type, profile, label) => {
+    const { crate, entity } = await crateWith({ '@type': type, conformsTo: { '@id': profile } });
+
+    expect((await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).recordType).toBe(label);
+  });
+
+  it.each(['http://schema.org/MediaObject', 'https://schema.org/MediaObject'])('labels %s as File, whichever the scheme', async (uri) => {
+    const { crate, entity } = await crateWith({}, { File: uri });
+
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).toMatchObject({ entityType: uri, recordType: 'File' });
+  });
+
+  it.each([
+    ['http://schema.org/Thing', 'Thing'],
+    ['https://example.com/terms#Widget', 'Widget'],
+  ])('labels an unknown class %s by its last segment', async (uri, label) => {
+    const { crate, entity } = await crateWith({}, { File: uri });
+
+    const doc = await searchDocument(crate, crateObject, entity, LICENSE, ROOT);
+
+    expect(doc).toMatchObject({ entityType: uri, recordType: label });
+  });
+
+  it('has no type field', async () => {
+    const { crate, entity } = await crateWith({});
+
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).not.toHaveProperty('type');
+  });
+
   it('leaves out dates it cannot store', async () => {
     const { crate, entity } = await crateWith({ datePublished: 'circa 1900', dateCreated: ['1901-02-03', 'unknown'] });
 
-    const doc = await searchDocument(crate, crateObject, entity, LICENSE);
+    const doc = await searchDocument(crate, crateObject, entity, LICENSE, ROOT);
 
     expect(doc).not.toHaveProperty('datePublished');
     expect(doc.dateCreated).toEqual(['1901-02-03']);
+  });
+});
+
+describe('countDocuments', () => {
+  it('counts in batches under OpenSearch’s terms limit, summing them', async () => {
+    const search = vi.fn(async ({ visibility }: { visibility: { id: { in: string[] } } }) => ({ total: visibility.id.in.length, hits: [] }));
+    const ids = Array.from({ length: 25_000 }, (_, i) => `id-${i}`);
+
+    expect(await countDocuments({ search } as unknown as Parameters<typeof countDocuments>[0], ids)).toBe(25_000);
+    expect(search.mock.calls.map(([{ visibility }]) => visibility.id.in.length)).toEqual([10_000, 10_000, 5_000]);
   });
 });

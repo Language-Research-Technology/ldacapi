@@ -39,6 +39,7 @@ export function buildApp({ repository, search }: AppDeps) {
   fastify.register(fastifySensible);
   fastify.register(
     async (api) => {
+      // Here rather than at the root, to keep CORS headers off /oauth and /admin
       api.register(cors, { origin: '*', methods: ['GET', 'HEAD', 'POST'], maxAge: 2 * 60 * 60 });
       api.register(arocapi, {
         prisma,

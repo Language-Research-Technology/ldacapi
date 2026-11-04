@@ -1,23 +1,22 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Client } from '@opensearch-project/opensearch';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ALICE, adminTestbed, ocflRepository, PEOPLE, repositoryIn, repositoryOf } from '../../test/admin.ts';
-import type { buildTestApp, TestApp, TestRepository } from '../../test/app.ts';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ALICE, adminTestbed, PEOPLE, repositoryIn, repositoryOf } from '../../test/admin.ts';
+import { type buildTestApp, ocflRepository, ocflStorage, type TestApp, type TestRepository } from '../../test/app.ts';
 import type { Browser } from '../../test/oidc.ts';
-import { hasState, type Repository, State } from '../repository.ts';
+import type { rowIds as crateRowIds } from '../indexer/database.ts';
+import type { countDocuments } from '../indexer/search.ts';
+import { hasState, type IndexType, type Repository, State } from '../repository.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 const EXTRA = `${PEOPLE}/extra`;
 const PEOPLE_TOO = `${PEOPLE}2`;
+const DISTRIBUTED_ROOT = 'arcp://name,distributed_root';
+const CONTENT_RESTRICTED = 'arcp://name,distributed_content_restricted';
+const METADATA_RESTRICTED = 'arcp://name,distributed_metadata_restricted';
 
 const testbed = adminTestbed();
-let storage: string;
-let opensearch: Client;
+const { ocflRoot } = ocflStorage();
 
-const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: join(storage, 'ocfl'), ADMIN_USERS: ALICE.sub }, { repository });
+const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: ocflRoot(), ADMIN_USERS: ALICE.sub }, { repository });
 
 const signIn = async (app: TestApp) => {
   const { browser, page } = await testbed.signInAsAdmin(app, ALICE);
@@ -40,29 +39,20 @@ const flash = (body: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-beforeAll(async () => {
-  storage = await mkdtemp(join(tmpdir(), 'ldacapi-actions-'));
-  execFileSync('node', ['scripts/seed.ts'], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
-});
-
-afterAll(async () => {
-  await opensearch?.close();
-  await rm(storage, { recursive: true, force: true });
-});
-
 describe('index and delete actions', () => {
   let app: TestApp;
   let repository: Repository;
   let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
-  let entityIndex: string;
+  let search: Awaited<ReturnType<typeof buildTestApp>>['search'];
+  let rowIdsOfCrate: typeof crateRowIds;
+  let countSearchDocuments: typeof countDocuments;
 
-  const entityCount = (crateId: string) => prisma.entity.count({ where: { rootCollection: crateId } });
+  /** The ids of the entity rows indexed from `crateIds`, sorted */
+  const rowIds = async (...crateIds: string[]) => (await Promise.all(crateIds.map(rowIdsOfCrate))).flat().sort();
 
-  const searchCount = async (crateId: string) => {
-    await opensearch.indices.refresh({ index: entityIndex, ignore_unavailable: true });
-    const { body } = await opensearch.count({ index: entityIndex, ignore_unavailable: true, body: { query: { term: { rootCollection: crateId } } } });
-    return body.count;
-  };
+  const entityCount = async (crateId: string) => (await rowIds(crateId)).length;
+
+  const searchCount = (ids: string[]) => countSearchDocuments(search, ids);
 
   /** Waits until no crate is queued, indexing or deleting, so an earlier action can't leak into the next */
   const waitUntilSettled = () =>
@@ -77,15 +67,15 @@ describe('index and delete actions', () => {
   const waitUntilIndexed = async (...crateIds: string[]) => {
     await waitUntilSettled();
     for (const crateId of crateIds) {
-      expect(await repository.getState(crateId)).toEqual({ structural: 'indexed', search: 'indexed' });
+      expect(await repository.getState(crateId)).toEqual({ database: 'indexed', search: 'indexed' });
     }
   };
 
   beforeAll(async () => {
-    let config: Awaited<ReturnType<typeof buildTestApp>>['config'];
-    ({ app, repository, prisma, config } = await start(ocflRepository));
-    entityIndex = config.search.entityIndex;
-    opensearch = new Client({ node: config.opensearchUrl });
+    ({ app, repository, prisma, search } = await start(ocflRepository));
+    // Imported once the app has read its configuration
+    ({ rowIds: rowIdsOfCrate } = await import('../indexer/database.ts'));
+    ({ countDocuments: countSearchDocuments } = await import('../indexer/search.ts'));
   });
 
   beforeEach(async () => {
@@ -101,10 +91,21 @@ describe('index and delete actions', () => {
 
     expect(flash(page.body)).toBe(`Indexing ${BUNDLED} has been queued.`);
     await waitUntilIndexed(BUNDLED);
-    expect(await entityCount(BUNDLED)).toBeGreaterThan(0);
-    expect(await searchCount(BUNDLED)).toBeGreaterThan(0);
+    const ids = await rowIds(BUNDLED);
+    expect(ids).toContain(BUNDLED);
+    expect(await searchCount(ids)).toBe(ids.length);
     expect(await entityCount(PEOPLE)).toBe(0);
-    expect(await searchCount(PEOPLE)).toBe(0);
+  });
+
+  it('records the crate each entity row came from', async () => {
+    const browser = await signIn(app);
+
+    await act(browser, 'index');
+
+    await waitUntilIndexed(BUNDLED, PEOPLE, DISTRIBUTED_ROOT, CONTENT_RESTRICTED, METADATA_RESTRICTED);
+    const counts = await Promise.all([BUNDLED, PEOPLE, DISTRIBUTED_ROOT, CONTENT_RESTRICTED, METADATA_RESTRICTED].map(entityCount));
+    expect(counts.every((count) => count > 0)).toBe(true);
+    expect(counts.reduce((sum, count) => sum + count)).toBe(await prisma.entity.count());
   });
 
   it('refuses to index an indexed crate, asking for a reindex', async () => {
@@ -121,15 +122,33 @@ describe('index and delete actions', () => {
     const browser = await signIn(app);
     await act(browser, 'index', { crateId: BUNDLED });
     await waitUntilIndexed(BUNDLED);
-    const entities = await entityCount(BUNDLED);
-    const documents = await searchCount(BUNDLED);
+    const ids = await rowIds(BUNDLED);
 
     const page = await act(browser, 'index', { crateId: BUNDLED, force: 'true' });
 
     expect(flash(page.body)).toBe(`Reindexing ${BUNDLED} has been queued.`);
     await waitUntilIndexed(BUNDLED);
-    expect(await entityCount(BUNDLED)).toBe(entities);
-    expect(await searchCount(BUNDLED)).toBe(documents);
+    expect(await rowIds(BUNDLED)).toEqual(ids);
+    expect(await searchCount(ids)).toBe(ids.length);
+  });
+
+  it.each([
+    ['reindexes', 'index', { force: 'true' }, true],
+    ['deletes', 'delete', {}, false],
+  ])('%s one crate of a distributed collection, leaving the rest of it alone', async (_, action, form, kept) => {
+    const browser = await signIn(app);
+    await act(browser, 'index');
+    await waitUntilIndexed(DISTRIBUTED_ROOT, CONTENT_RESTRICTED, METADATA_RESTRICTED);
+    const ids = await rowIds(CONTENT_RESTRICTED);
+    const siblings = await rowIds(DISTRIBUTED_ROOT, METADATA_RESTRICTED);
+
+    await act(browser, action, { crateId: CONTENT_RESTRICTED, ...form });
+
+    await waitUntilSettled();
+    expect(await rowIds(CONTENT_RESTRICTED)).toEqual(kept ? ids : []);
+    expect(await searchCount(ids)).toBe(kept ? ids.length : 0);
+    expect(await rowIds(DISTRIBUTED_ROOT, METADATA_RESTRICTED)).toEqual(siblings);
+    expect(await searchCount(siblings)).toBe(siblings.length);
   });
 
   it('indexes every crate', async () => {
@@ -178,38 +197,73 @@ describe('index and delete actions', () => {
     const page = await act(browser, 'index');
 
     expect(page.body).toMatch(/<meta http-equiv="refresh"/);
-    expect(page.body).not.toContain('Structural: not indexed');
+    expect(page.body).not.toContain('Database: not indexed');
     await waitUntilIndexed(BUNDLED, PEOPLE);
   });
 
-  it('deletes one crate’s indexes', async () => {
+  it('deletes one crate’s indexes, including its people and organisations', async () => {
     const browser = await signIn(app);
     await act(browser, 'index');
     await waitUntilIndexed(BUNDLED, PEOPLE);
+    const ids = await rowIds(PEOPLE);
+    expect(ids).toEqual(expect.arrayContaining([`${PEOPLE}/JohnSmith`, 'arcp://name,organisation/ldaca']));
+    const others = await rowIds(BUNDLED);
 
-    const page = await act(browser, 'delete', { crateId: BUNDLED });
+    const page = await act(browser, 'delete', { crateId: PEOPLE });
 
-    expect(flash(page.body)).toBe(`Deleting the indexes of ${BUNDLED} has started.`);
+    expect(flash(page.body)).toBe(`Deleting the indexes of ${PEOPLE} has started.`);
     await vi.waitFor(async () => {
-      expect(await entityCount(BUNDLED)).toBe(0);
-      expect(await searchCount(BUNDLED)).toBe(0);
+      expect(await prisma.entity.count({ where: { id: { in: ids } } })).toBe(0);
+      expect(await searchCount(ids)).toBe(0);
     });
-    expect(await entityCount(PEOPLE)).toBeGreaterThan(0);
-    expect(await searchCount(PEOPLE)).toBeGreaterThan(0);
+    expect(await rowIds(BUNDLED)).toEqual(others);
+    expect(await searchCount(others)).toBe(others.length);
+  });
+
+  it('keeps a crate’s database rows when deleting its search documents fails', async () => {
+    const browser = await signIn(app);
+    await act(browser, 'index');
+    await waitUntilIndexed(BUNDLED, PEOPLE);
+    const ids = await rowIds(PEOPLE);
+    const remove = vi.spyOn(search, 'remove').mockRejectedValue(new Error('Search is down'));
+
+    try {
+      await act(browser, 'delete', { crateId: PEOPLE });
+      await waitUntilSettled();
+      expect(remove).toHaveBeenCalled();
+    } finally {
+      remove.mockRestore();
+    }
+
+    expect(await rowIds(PEOPLE)).toEqual(ids);
+    expect(await searchCount(ids)).toBe(ids.length);
+    expect(await repository.getState(PEOPLE)).toEqual({ database: 'indexed', search: 'indexed' });
+  });
+
+  it.each<[string, IndexType[] | undefined]>([
+    ['search', ['search']],
+    ['database and search', undefined],
+  ])('reads a crate as not indexed as soon as its %s indexes are deleted', async (_, type) => {
+    await repository.createIndex(BUNDLED);
+    expect(await repository.getState(BUNDLED)).toEqual({ database: 'indexed', search: 'indexed' });
+
+    await repository.deleteIndex(BUNDLED, type);
+
+    expect(hasState(await repository.getState(BUNDLED, 'search'), State.INDEXED)).toBe(false);
   });
 
   it('deletes every index', async () => {
     const browser = await signIn(app);
     await act(browser, 'index');
     await waitUntilIndexed(BUNDLED, PEOPLE);
+    const ids = await rowIds(BUNDLED, PEOPLE);
 
     const page = await act(browser, 'delete');
 
     expect(flash(page.body)).toBe('Deleting every index has started.');
     await vi.waitFor(async () => {
       expect(await prisma.entity.count()).toBe(0);
-      expect(await searchCount(BUNDLED)).toBe(0);
-      expect(await searchCount(PEOPLE)).toBe(0);
+      expect(await searchCount(ids)).toBe(0);
     });
   });
 
@@ -220,7 +274,7 @@ describe('index and delete actions', () => {
 
     await indexing;
 
-    expect(read).toEqual({ structural: 'queued', search: 'queued' });
+    expect(read).toEqual({ database: 'queued', search: 'queued' });
     expect(state).toEqual(read);
   });
 
@@ -307,7 +361,7 @@ describe('protecting the actions', () => {
   ])('refuses to delete %s while a crate it covers is %s', async (_, state, form, asked) => {
     const repository = repositoryOf([
       { id: PEOPLE, state: {} },
-      { id: EXTRA, state: { structural: state } },
+      { id: EXTRA, state: { database: state } },
     ]);
     const browser = await signIn((await start(repository)).app);
 

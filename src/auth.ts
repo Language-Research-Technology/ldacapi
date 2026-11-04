@@ -44,19 +44,23 @@ async function fetchUserLicenses(request: FastifyRequest): Promise<string[] | un
   if (!userId || !config.rems.endpoint) {
     return;
   }
-  const res = await fetch(`${config.rems.endpoint}/entitlements?user=${encodeURIComponent(userId)}`, {
-    headers: {
-      'x-rems-api-key': config.rems.key,
-      'x-rems-user-id': config.rems.user,
-      accept: 'application/json',
-    },
-  });
-  if (!res.ok) {
-    request.log.error({ status: res.status, statusText: res.statusText }, 'Failed to fetch user entitlements');
+  try {
+    const res = await fetch(`${config.rems.endpoint}/entitlements?user=${encodeURIComponent(userId)}`, {
+      headers: {
+        'x-rems-api-key': config.rems.key,
+        'x-rems-user-id': config.rems.user,
+        accept: 'application/json',
+      },
+    });
+    if (!res.ok) {
+      throw new Error(`REMS responded ${res.status} ${res.statusText}`);
+    }
+    const data: RemsUserEntitlement[] = await res.json();
+    return data.map((item) => item.resource);
+  } catch (err) {
+    request.log.error({ err }, 'Failed to fetch user entitlements');
     return;
   }
-  const data = await res.json();
-  return data.map((item: RemsUserEntitlement) => item.resource);
 }
 
 const userIdsByRequest = new WeakMap<FastifyRequest, Promise<string | undefined>>();

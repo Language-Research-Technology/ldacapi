@@ -3,8 +3,8 @@ import { ROCrate } from 'ro-crate';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { accessControlOf } from '../entity-meta.ts';
 import { prisma } from '../prisma.ts';
+import { DatabaseIndexer, entityAsCrate } from './database.ts';
 import type { CrateObject } from './indexer.ts';
-import { entityAsCrate, StructuralIndexer } from './structural.ts';
 
 describe('entityAsCrate', () => {
   it('preserves the original RO-Crate context when serializing an entity', async () => {
@@ -16,15 +16,15 @@ describe('entityAsCrate', () => {
   });
 });
 
-describe('StructuralIndexer', () => {
-  const ROOT = 'arcp://name,structural-test';
+describe('DatabaseIndexer', () => {
+  const ROOT = 'arcp://name,database-test';
   const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
   const RESTRICTED = 'https://www.ldaca.edu.au/licenses/restricted/v1/';
 
-  let indexer: StructuralIndexer;
+  let indexer: DatabaseIndexer;
 
   beforeAll(async () => {
-    indexer = await StructuralIndexer.create({});
+    indexer = await DatabaseIndexer.create({});
   });
 
   afterEach(async () => {
@@ -40,7 +40,7 @@ describe('StructuralIndexer', () => {
           '@id': ROOT,
           '@type': ['Dataset', 'RepositoryCollection'],
           conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' },
-          name: 'Structural test',
+          name: 'Database test',
           license: OPEN,
           hasPart: files.map((f) => ({ '@id': f['@id'] })),
         },
@@ -48,7 +48,7 @@ describe('StructuralIndexer', () => {
       ],
     });
     const crateObject: CrateObject = {
-      id: 'structural-test',
+      id: 'database-test',
       root: '/nowhere',
       text: async () => '',
       file: async (path) => {
@@ -59,7 +59,7 @@ describe('StructuralIndexer', () => {
         return { size, crc32: '' };
       },
     };
-    await indexer.index({ crateObject, crate });
+    await indexer.index({ crateObject, crate, topCollection: ROOT });
   };
 
   describe('file size', () => {

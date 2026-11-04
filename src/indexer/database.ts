@@ -5,25 +5,25 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
-import { type BaseOptions, type CrateFile, Indexer, RecordType, recordType } from './indexer.ts';
+import { type BaseOptions, type CrateFile, entityClass, Indexer, memberOf, recordType, rootCollection } from './indexer.ts';
 
-const log = logger.child({ module: 'indexer/structural' });
+const log = logger.child({ module: 'indexer/database' });
 
 type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
-type StructuralOptions = BaseOptions & {
+type DatabaseOptions = BaseOptions & {
   memberOfField?: string;
 };
 
-export class StructuralIndexer extends Indexer {
+export class DatabaseIndexer extends Indexer {
   memberOfField: string;
 
-  constructor(opt: StructuralOptions) {
+  constructor(opt: DatabaseOptions) {
     super(opt);
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 
-  override async _index({ crateObject, crate, paths, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
+  override async _index({ crateObject, crate, paths, license, metadataLicense, topCollection }: Parameters<Indexer['_index']>[0]) {
     const crateId = crate.rootId;
     let count = 0;
     for (const entity of crate.entities()) {
@@ -41,12 +41,12 @@ export class StructuralIndexer extends Indexer {
           id: entityId,
           name: entity.name?.join('; ') || entityId,
           description: entity.description?.join('; ') || '',
-          entityType: crate.getContextDefinition(entityType) || RecordType[entityType],
+          entityType: entityClass(crate, entityType),
           memberOf: pickSingleMemberOf(entity),
-          rootCollection: crate.rootId,
+          rootCollection: rootCollection(topCollection, entityId),
           metadataLicenseId: metadataLicense,
           contentLicenseId,
-          meta: { rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
+          meta: { crateId, rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
         },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
@@ -81,15 +81,24 @@ export class StructuralIndexer extends Indexer {
   }
 
   async delete(crateId?: string) {
-    await prisma.file.deleteMany({ where: crateId ? { entity: { rootCollection: crateId } } : {} });
-    await prisma.entity.deleteMany({ where: crateId ? { rootCollection: crateId } : {} });
+    await prisma.file.deleteMany({ where: { entity: rowsOf(crateId) } });
+    await prisma.entity.deleteMany({ where: rowsOf(crateId) });
     log.debug({ crateId }, 'Index deleted');
   }
 
-  async count(crateId?: string) {
-    return await prisma.entity.count(crateId ? { where: { id: crateId } } : undefined);
+  async count(crateId: string) {
+    return await prisma.entity.count({ where: rowsOf(crateId) });
   }
 }
+
+/** The entity rows indexed from `crateId`, or every row */
+const rowsOf = (crateId?: string): Prisma.EntityWhereInput => (crateId ? { meta: { path: ['crateId'], equals: crateId } } : {});
+
+/** The id and rootCollection of each entity row indexed from `crateId` */
+export const crateRows = (crateId: string) => prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true, rootCollection: true } });
+
+/** The ids of the entity rows indexed from `crateId` */
+export const rowIds = async (crateId: string) => (await crateRows(crateId)).map(({ id }) => id);
 
 export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
@@ -114,8 +123,7 @@ function statedSize(contentSize: unknown) {
 
 export function pickSingleMemberOf(entity: Entity) {
   return (
-    entity['pcdm:memberOf']?.[0]['@id'] ||
-    entity.memberOf?.[0]['@id'] ||
+    memberOf(entity) ||
     entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
     entity['@reverse'].hasMember?.[0]?.['@id'] ||
     entity.isPartOf?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||

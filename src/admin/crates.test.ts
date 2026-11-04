@@ -1,10 +1,8 @@
-import { execFileSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { cp, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ALICE, adminTestbed, ocflRepository, PEOPLE, repositoryIn } from '../../test/admin.ts';
-import type { TestApp, TestRepository } from '../../test/app.ts';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { ALICE, adminTestbed, PEOPLE, repositoryIn } from '../../test/admin.ts';
+import { ocflRepository, ocflStorage, type TestApp, type TestRepository } from '../../test/app.ts';
 import type { Repository } from '../repository.ts';
 
 const BUNDLED = 'arcp://name,bundled';
@@ -59,36 +57,31 @@ const crate = (id: string, name: string) => ({
 });
 
 const testbed = adminTestbed();
-let storage: string;
+const { ocflRoot } = ocflStorage({
+  source: async (scratch) => {
+    const source = join(scratch, 'source');
+    await mkdir(source);
+    for (const name of ['bundled', 'people']) {
+      await cp(resolve('test-data', name), join(source, name), { recursive: true });
+    }
+    for (const [directory, id, name] of [
+      ['extra', EXTRA, EXTRA_NAME],
+      ['more', MORE, 'More people'],
+    ] as const) {
+      await mkdir(join(source, directory));
+      await writeFile(join(source, directory, 'ro-crate-metadata.json'), JSON.stringify(crate(id, name)));
+    }
+    return source;
+  },
+});
 
-const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: join(storage, 'ocfl'), ADMIN_USERS: ALICE.sub }, { repository });
+const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: ocflRoot(), ADMIN_USERS: ALICE.sub }, { repository });
 
 const signIn = async (app: TestApp) => {
   const signedIn = await testbed.signInAsAdmin(app, ALICE);
   expect(signedIn.page.statusCode).toBe(200);
   return signedIn;
 };
-
-beforeAll(async () => {
-  storage = await mkdtemp(join(tmpdir(), 'ldacapi-crates-'));
-  const source = join(storage, 'source');
-  await mkdir(source);
-  for (const name of ['bundled', 'people']) {
-    await cp(resolve('test-data', name), join(source, name), { recursive: true });
-  }
-  for (const [directory, id, name] of [
-    ['extra', EXTRA, EXTRA_NAME],
-    ['more', MORE, 'More people'],
-  ] as const) {
-    await mkdir(join(source, directory));
-    await writeFile(join(source, directory, 'ro-crate-metadata.json'), JSON.stringify(crate(id, name)));
-  }
-  execFileSync('node', ['scripts/seed.ts', source], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
-});
-
-afterAll(async () => {
-  await rm(storage, { recursive: true, force: true });
-});
 
 describe('the crate tree', () => {
   let app: TestApp;
@@ -112,8 +105,8 @@ describe('the crate tree', () => {
     await vi.waitFor(async () => {
       const page = await browser.get('/admin/');
       const tree = crateTree(page.body);
-      expect(find(tree, BUNDLED)?.row).toMatch(/Structural: indexed .*Search: indexed/);
-      expect(find(tree, PEOPLE)?.row).toMatch(/Structural: not indexed .*Search: not indexed/);
+      expect(find(tree, BUNDLED)?.row).toMatch(/Database: indexed .*Search: indexed/);
+      expect(find(tree, PEOPLE)?.row).toMatch(/Database: not indexed .*Search: not indexed/);
       expect(page.body).not.toContain('http-equiv="refresh"');
     });
   });

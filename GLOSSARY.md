@@ -4,6 +4,30 @@ Serves RO-Crates from OCFL storage through the arocapi API, and controls access 
 
 ## Language
 
+arocapi's terms, such as **Record**, **Metadata**, **Content** and **Row**, mean what [arocapi's glossary](https://github.com/crate-works/arocapi/blob/main/GLOSSARY.md) says.
+
+### Crates and indexes
+
+**Crate**:
+One RO-Crate, stored as one OCFL object in the repository. The unit of import, indexing and admin actions.
+_Avoid_: OCFL object (the storage), collection (what a crate may describe)
+
+**Import**:
+Bringing RO-Crates into the OCFL repository: `pnpm crates:import` today, the deposit API in future.
+_Avoid_: Seed
+
+**Index**:
+Building the database index and the search index from the repository, for one crate or all of them. Both can be deleted and rebuilt at any time.
+_Avoid_: Import
+
+**Database index**:
+The Entity and File rows that arocapi reads, written by the indexer (arocapi's Rows).
+_Avoid_: Structural index
+
+**Search index**:
+The search documents in arocapi's search backend, one per entity that has a row.
+_Avoid_: OpenSearch index (one backend's storage)
+
 ### Authentication
 
 **Upstream provider**:

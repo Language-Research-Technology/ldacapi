@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@opensearch-project/opensearch';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/configuration.ts';
+import { countDocuments, createSearchBackend } from '../src/indexer/search.ts';
 import { prisma } from '../src/prisma.ts';
 
 const crateIds = [
@@ -14,13 +15,13 @@ const crateIds = [
   'arcp://name,distributed_metadata_restricted',
 ];
 
-describe('seed and index', () => {
+describe('import and index', () => {
   let storage: string;
 
   beforeAll(async () => {
     storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
     const env = { ...process.env, OCFL_ROOT: join(storage, 'ocfl'), LOG_LEVEL: 'silent' };
-    execFileSync('node', ['scripts/seed.ts'], { env, stdio: 'ignore' });
+    execFileSync('node', ['scripts/crates-import.ts'], { env, stdio: 'ignore' });
     execFileSync('node', ['scripts/index.ts'], { env, stdio: 'ignore' });
   });
 
@@ -37,14 +38,15 @@ describe('seed and index', () => {
 
   it('indexes every crate into OpenSearch', async () => {
     const opensearch = new Client({ node: config.opensearchUrl });
-    const indexed = await Promise.all(
-      crateIds.map(async (id) => {
-        const { body } = await opensearch.count({ index: config.search.entityIndex, body: { query: { term: { rootCollection: id } } } });
-        return body.count > 0;
-      }),
-    );
-    await opensearch.close();
+    const search = createSearchBackend(opensearch);
+    const rows = await prisma.entity.findMany({ select: { id: true } });
+    const ids = rows.map(({ id }) => id);
+    expect(ids).toEqual(expect.arrayContaining(crateIds));
 
-    expect(indexed).toEqual(crateIds.map(() => true));
+    // Documents are searchable after OpenSearch's next refresh
+    await vi.waitFor(async () => {
+      expect(await countDocuments(search, ids)).toBe(ids.length);
+    });
+    await opensearch.close();
   });
 });

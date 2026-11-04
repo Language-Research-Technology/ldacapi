@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { generateKeyPair, importJWK, type JWTPayload, SignJWT } from 'jose';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTestApp, repositoryWithContent, type TestApp } from '../test/app.ts';
 import { generateSigningKey, type Jwk } from './oidc/keys.ts';
 
@@ -12,10 +12,16 @@ const RESTRICTED = 'https://example.org/licenses/restricted';
 const RESTRICTED_METADATA = 'https://example.org/licenses/restricted-metadata';
 const ENTITLED = 'upstream-user-entitled';
 const UNENTITLED = 'upstream-user-unentitled';
+const UNREACHABLE = 'upstream-user-rems-unreachable';
+const GARBLED = 'upstream-user-rems-garbled';
 
 const OPEN_FILE = 'http://test/licence/open.txt';
 const RESTRICTED_FILE = 'http://test/licence/restricted.txt';
 const RESTRICTED_ENTITY = 'http://test/licence/restricted';
+
+const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
+
+vi.mock('./logger.ts', async () => (await import('../test/logs.ts')).capturingLogger(logs, 'error'));
 
 let app: TestApp;
 let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
@@ -59,6 +65,14 @@ beforeAll(async () => {
   server = createServer((request, response) => {
     received.push(request);
     const user = new URL(request.url ?? '', 'http://rems').searchParams.get('user');
+    if (user === UNREACHABLE) {
+      request.socket.destroy();
+      return;
+    }
+    if (user === GARBLED) {
+      response.writeHead(200, { 'content-type': 'application/json' }).end('{"entitlements": [');
+      return;
+    }
     const entitlements = user === ENTITLED ? [{ resource: RESTRICTED }, { resource: RESTRICTED_METADATA }] : [];
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(entitlements));
   });
@@ -74,6 +88,7 @@ beforeAll(async () => {
       OIDC_UPSTREAM_CLIENT_ID: 'ldacapi',
       OIDC_UPSTREAM_CLIENT_SECRET: 'secret',
       REMS_ENDPOINT: fake,
+      ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource={licenseId}',
       OIDC_SIGNING_KEYS: JSON.stringify({ keys: SIGNING_KEYS }),
     },
     { repository: repositoryWithContent },
@@ -89,6 +104,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   received = [];
+  logs.length = 0;
 });
 
 afterAll(async () => {
@@ -125,6 +141,29 @@ describe('licence checks with our access tokens', () => {
 
     expect(response.json().access).toMatchObject({ metadata: true, content: true });
     expect(remsRequests()).toHaveLength(1);
+  });
+
+  describe.each([
+    ['is unreachable', UNREACHABLE],
+    ['answers with a garbled body', GARBLED],
+  ])('when REMS %s', (_, sub) => {
+    it('denies restricted content with its enrolment link, and logs the failure', async () => {
+      const response = await get(`/entity/${encodeURIComponent(RESTRICTED_FILE)}`, await token({ sub }));
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().access).toEqual({
+        metadata: true,
+        content: false,
+        contentAuthorizationUrl: `https://rems.example.org/apply-for?resource=${encodeURIComponent(RESTRICTED)}`,
+      });
+      expect(logs).toContainEqual(expect.objectContaining({ level: 50, msg: 'Failed to fetch user entitlements' }));
+    });
+
+    it('still serves content under an open licence', async () => {
+      const response = await file(OPEN_FILE, await token({ sub }));
+
+      expect(response.statusCode).toBe(200);
+    });
   });
 
   it('does not call the upstream provider', async () => {

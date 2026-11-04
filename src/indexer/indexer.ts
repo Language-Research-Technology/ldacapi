@@ -97,7 +97,7 @@ export class Indexer {
 
   async init() {}
 
-  async count(_crateId?: string): Promise<number> {
+  async count(_crateId: string): Promise<number> {
     throw new Error('Not Implemented');
   }
 
@@ -110,7 +110,8 @@ export class Indexer {
     throw new Error('Not Implemented');
   }
 
-  async index({ crateObject, crate }: { crateObject: CrateObject; crate: ROCrate }) {
+  /** `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent */
+  async index({ crateObject, crate, topCollection }: { crateObject: CrateObject; crate: ROCrate; topCollection: string }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
@@ -127,15 +128,21 @@ export class Indexer {
       log.info({ crateId }, 'Indexing crate');
       const paths = this.deriveUniqueEntityIds(crate);
       try {
-        await this._index({ crateObject, crate, paths, license, metadataLicense });
+        await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
       } catch (error) {
         log.error({ err: error, crateId, path: crateObject.root }, 'Error indexing crate');
       }
-      log.info({ crateId }, 'Indexed crate');
     }
   }
 
-  async _index(_param: { crateObject: CrateObject; crate: ROCrate; paths: LogicalPaths; license: string; metadataLicense: string }) {
+  async _index(_param: {
+    crateObject: CrateObject;
+    crate: ROCrate;
+    paths: LogicalPaths;
+    license: string;
+    metadataLicense: string;
+    topCollection: string;
+  }): Promise<void> {
     throw new Error('Not Implemented');
   }
 
@@ -145,7 +152,19 @@ export class Indexer {
   }
 }
 
-export const RecordType: Record<string, string> = config.indexType;
+/** An entity's rootCollection: empty on the top-level collection itself */
+export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
+
+/** The first collection `entity` is a member of, by `pcdm:memberOf` or `memberOf`, in a parsed crate or raw JSON-LD */
+export const memberOf = (entity: Record<string, unknown>) => firstStringOrId(entity['pcdm:memberOf']) || firstStringOrId(entity.memberOf);
+
+/** The id of the collection a crate's root is a member of, if any */
+export function parentCollection(root: Record<string, unknown>, rootId: string): string | undefined {
+  const parent = memberOf(root);
+  return parent && parent !== rootId ? parent : undefined;
+}
+
+const RecordType: Record<string, string> = config.indexType;
 
 /** The entity's first type that we index, if it conforms to that type's profile */
 export function recordType(entity: Entity): string | undefined {
@@ -156,3 +175,6 @@ export function recordType(entity: Entity): string | undefined {
   }
   return type;
 }
+
+/** The class URI of a record type, as the entity's row holds it */
+export const entityClass = (crate: ROCrate, type: string): string => crate.getContextDefinition(type) || RecordType[type];
