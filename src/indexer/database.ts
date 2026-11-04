@@ -5,7 +5,7 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
-import { type BaseOptions, type CrateFile, entityClass, Indexer, recordType } from './indexer.ts';
+import { type BaseOptions, type CrateFile, entityClass, Indexer, recordType, rootCollection } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/database' });
 
@@ -23,7 +23,7 @@ export class DatabaseIndexer extends Indexer {
     this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
   }
 
-  override async _index({ crateObject, crate, paths, license, metadataLicense }: Parameters<Indexer['_index']>[0]) {
+  override async _index({ crateObject, crate, paths, license, metadataLicense, topCollection }: Parameters<Indexer['_index']>[0]) {
     const crateId = crate.rootId;
     let count = 0;
     for (const entity of crate.entities()) {
@@ -43,7 +43,7 @@ export class DatabaseIndexer extends Indexer {
           description: entity.description?.join('; ') || '',
           entityType: entityClass(crate, entityType),
           memberOf: pickSingleMemberOf(entity),
-          rootCollection: crate.rootId,
+          rootCollection: rootCollection(topCollection, entityId),
           metadataLicenseId: metadataLicense,
           contentLicenseId,
           meta: { crateId, rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,

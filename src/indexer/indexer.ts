@@ -110,7 +110,8 @@ export class Indexer {
     throw new Error('Not Implemented');
   }
 
-  async index({ crateObject, crate }: { crateObject: CrateObject; crate: ROCrate }) {
+  /** `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent */
+  async index({ crateObject, crate, topCollection = crate.rootId }: { crateObject: CrateObject; crate: ROCrate; topCollection?: string }) {
     const rootDataset = crate.root;
     const crateId = crate.rootId;
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
@@ -127,7 +128,7 @@ export class Indexer {
       log.info({ crateId }, 'Indexing crate');
       const paths = this.deriveUniqueEntityIds(crate);
       try {
-        await this._index({ crateObject, crate, paths, license, metadataLicense });
+        await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
       } catch (error) {
         log.error({ err: error, crateId, path: crateObject.root }, 'Error indexing crate');
       }
@@ -135,7 +136,7 @@ export class Indexer {
     }
   }
 
-  async _index(_param: { crateObject: CrateObject; crate: ROCrate; paths: LogicalPaths; license: string; metadataLicense: string }) {
+  async _index(_param: { crateObject: CrateObject; crate: ROCrate; paths: LogicalPaths; license: string; metadataLicense: string; topCollection: string }) {
     throw new Error('Not Implemented');
   }
 
@@ -143,6 +144,16 @@ export class Indexer {
   async _indexEntity(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
     throw new Error('Not Implemented');
   }
+}
+
+/** An entity's rootCollection: empty on the top-level collection itself */
+export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
+
+/** The id of the collection a crate's root is a member of, if any */
+export function parentCollection(crate: ROCrate): string | undefined {
+  const root = crate.root;
+  const parent: string | undefined = (root['pcdm:memberOf'] ?? root.memberOf)?.[0]?.['@id'];
+  return parent && parent !== crate.rootId ? parent : undefined;
 }
 
 const RecordType: Record<string, string> = config.indexType;

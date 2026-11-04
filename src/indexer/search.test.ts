@@ -34,7 +34,7 @@ describe('searchDocument', () => {
       contentLocation: { '@id': '#place' },
     });
 
-    expect(await searchDocument(crate, crateObject, entity, LICENSE, path)).toMatchObject({
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT, path)).toMatchObject({
       id: `${ROOT}/data.txt`,
       name: 'Data',
       entityType: 'http://schema.org/MediaObject',
@@ -52,13 +52,13 @@ describe('searchDocument', () => {
   it('has no type field', async () => {
     const { crate, entity } = await crateWith({});
 
-    expect(await searchDocument(crate, crateObject, entity, LICENSE)).not.toHaveProperty('type');
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).not.toHaveProperty('type');
   });
 
   it('leaves out dates it cannot store', async () => {
     const { crate, entity } = await crateWith({ datePublished: 'circa 1900', dateCreated: ['1901-02-03', 'unknown'] });
 
-    const doc = await searchDocument(crate, crateObject, entity, LICENSE);
+    const doc = await searchDocument(crate, crateObject, entity, LICENSE, ROOT);
 
     expect(doc).not.toHaveProperty('datePublished');
     expect(doc.dateCreated).toEqual(['1901-02-03']);

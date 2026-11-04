@@ -7,7 +7,7 @@ import { logger } from '../logger.ts';
 import { firstStringOrId } from '../utils.ts';
 import { countRows, pickSingleMemberOf, rowIds } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
-import { entityClass, Indexer, recordType } from './indexer.ts';
+import { entityClass, Indexer, recordType, rootCollection } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/search' });
 
@@ -102,12 +102,20 @@ function isText(entity: Entity) {
 }
 
 /** One entity's search document; File entities with text content include it */
-export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string, path?: string): Promise<Document> {
+export async function searchDocument(
+  crate: ROCrate,
+  crateObject: CrateObject,
+  entity: Entity,
+  license: string,
+  topCollection: string,
+  path?: string,
+): Promise<Document> {
   const id: string = entity['@id'];
   const type = recordType(entity);
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
   const point = location(entity);
+  const root = rootCollection(topCollection, id);
   const doc: Document = {
     id,
     name: entity.name?.join('; ') || id,
@@ -118,7 +126,7 @@ export async function searchDocument(crate: ROCrate, crateObject: CrateObject, e
     linguisticGenre: labels(entity, 'linguisticGenre'),
     annotationType: labels(entity, 'annotationType'),
     encodingFormat: labels(entity, 'encodingFormat'),
-    rootCollection: crate.rootId,
+    ...(root && { rootCollection: root }),
     ...(memberOf && { memberOf }),
     license: firstStringOrId(entity.license) || license,
     ...(datePublished && { datePublished }),
@@ -175,14 +183,14 @@ export class SearchIndexer extends Indexer {
     return await countRows(crateId);
   }
 
-  async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
+  async _index({ crateObject, crate, paths, license, topCollection }: Parameters<Indexer['_index']>[0]) {
     await this.search.createIndex();
     const docs: Document[] = [];
     for (const entity of crate.entities()) {
       if (!recordType(entity)) {
         continue;
       }
-      const doc = await searchDocument(crate, crateObject, entity, license, paths.get(entity['@id']));
+      const doc = await searchDocument(crate, crateObject, entity, license, topCollection, paths.get(entity['@id']));
       if (doc.text) {
         // Indexed alone to keep each request small
         await this.indexDocuments([doc]);

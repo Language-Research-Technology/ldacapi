@@ -7,7 +7,7 @@ import { OcflStorage } from 'arocapi/storage/ocfl';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { config } from './configuration.ts';
 import { DatabaseIndexer } from './indexer/database.ts';
-import type { CrateObject, Indexer } from './indexer/indexer.ts';
+import { type CrateObject, type Indexer, parentCollection } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { logger } from './logger.ts';
 import { type IndexState, State } from './repository.ts';
@@ -157,14 +157,51 @@ async function deleteFrom(types: string[], crateId?: string) {
   }
 }
 
-async function indexObject(crateId: string, types: string[], force?: boolean) {
+/** A crate's OCFL object, whose id is the crate's root id, and its metadata */
+async function readCrate(crateId: string) {
+  const ocflObject = repository.object(crateId);
+  await ocflObject.load();
+  const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
+  return { ocflObject, crate: await ROCrate.create(JSON.parse(jsonContent)) };
+}
+
+/**
+ * Finds the top-level collection a crate sits under by following memberOf up through the parent crates in the repository,
+ * so it doesn't depend on which crates are indexed yet. Each crate's parent is cached for the life of the finder.
+ */
+function topCollectionFinder() {
+  const parents = new Map<string, Promise<string | undefined>>();
+  const parentOf = (crateId: string) => {
+    let parent = parents.get(crateId);
+    if (!parent) {
+      parent = readCrate(crateId).then(({ crate }) => parentCollection(crate));
+      parents.set(crateId, parent);
+    }
+    return parent;
+  };
+  return async (crate: ROCrate) => {
+    let top = crate.rootId;
+    let parent = parentCollection(crate);
+    const seen = new Set([top]);
+    while (parent && !seen.has(parent)) {
+      seen.add(parent);
+      try {
+        const next = await parentOf(parent);
+        top = parent;
+        parent = next;
+      } catch (error) {
+        log.warn({ err: error, crateId: crate.rootId, parent, topCollection: top }, 'Cannot read parent collection; using the highest found');
+        break;
+      }
+    }
+    return top;
+  };
+}
+
+async function indexObject(crateId: string, types: string[], findTopCollection: ReturnType<typeof topCollectionFinder>, force?: boolean) {
   try {
-    const ocflObject = repository.object(crateId);
-    await ocflObject.load();
+    const { ocflObject, crate } = await readCrate(crateId);
     log.debug({ crateId: ocflObject.id }, 'Found OCFL object');
-    const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
-    const rawCrate = JSON.parse(jsonContent);
-    const crate = await ROCrate.create(rawCrate);
     if (force) {
       setState(ocflObject.id, types, State.INDEXING);
       try {
@@ -174,12 +211,13 @@ async function indexObject(crateId: string, types: string[], force?: boolean) {
         return;
       }
     }
+    const topCollection = await findTopCollection(crate);
     for (const t of types) {
       const indexer = INDEXER[t];
       if (indexer) {
         setState(ocflObject.id, t, State.INDEXING);
         try {
-          await indexer.index({ crateObject: wrap(ocflObject), crate });
+          await indexer.index({ crateObject: wrap(ocflObject), crate, topCollection });
         } catch (error) {
           log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
         } finally {
@@ -213,8 +251,9 @@ export async function createIndex(crateIds?: string | string[] | RegExp, type?: 
   for (const id of ids) {
     setState(id, types, State.QUEUED);
   }
+  const findTopCollection = topCollectionFinder();
   for (const id of ids) {
-    await indexObject(id, types, force);
+    await indexObject(id, types, findTopCollection, force);
   }
   log.debug('Indexing finished');
 }
