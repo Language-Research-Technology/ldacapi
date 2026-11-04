@@ -66,4 +66,20 @@ describe('an entity whose row fails to be written', () => {
   it('logs the skip with the crate and entity ids', () => {
     expect(logs).toContainEqual(expect.objectContaining({ level: 40, crateId: ROOT, entityId: UNWRITTEN, msg: 'Skipped: no database row' }));
   });
+
+  it('logs the documents it indexed', () => {
+    expect(logs).toContainEqual(expect.objectContaining({ module: 'indexer/search', crateId: ROOT, documents: 2, msg: 'Indexed crate' }));
+  });
+});
+
+describe('a crate with no database rows', () => {
+  it('logs the skip once for the crate', async () => {
+    await testbed.started.repository.deleteIndex(ROOT);
+    logs.length = 0;
+
+    await testbed.started.repository.createIndex(ROOT, 'search');
+
+    const skips = logs.filter(({ msg }) => typeof msg === 'string' && msg.startsWith('Skipped'));
+    expect(skips).toEqual([expect.objectContaining({ level: 40, crateId: ROOT, skipped: 3, msg: 'Skipped crate: no database rows' })]);
+  });
 });

@@ -239,7 +239,9 @@ export class SearchIndexer extends Indexer {
     await this.search.createIndex();
     const crateId = crate.rootId;
     const rows = new Map((await crateRows(crateId)).map(({ id, rootCollection }) => [id, rootCollection]));
+    const unrowed: string[] = [];
     const docs: Document[] = [];
+    let count = 0;
     try {
       for (const entity of crate.entities()) {
         if (!recordType(entity)) {
@@ -248,38 +250,49 @@ export class SearchIndexer extends Indexer {
         const entityId = entity['@id'];
         const rootCollection = rows.get(entityId);
         if (rootCollection === undefined) {
-          log.warn({ crateId, entityId }, 'Skipped: no database row');
+          unrowed.push(entityId);
           continue;
         }
         const doc = await searchDocument(crate, crateObject, entity, license, rootCollection, paths.get(entityId));
         if (doc.text) {
           // Indexed alone to keep each request small
-          await this.indexDocuments([doc]);
+          count += await this.indexDocuments([doc]);
         } else {
           docs.push(doc);
         }
       }
-      await this.indexDocuments(docs);
+      count += await this.indexDocuments(docs);
     } finally {
       await this.refresh();
     }
+    if (rows.size === 0 && unrowed.length > 0) {
+      log.warn({ crateId, skipped: unrowed.length }, 'Skipped crate: no database rows');
+    } else {
+      for (const entityId of unrowed) {
+        log.warn({ crateId, entityId }, 'Skipped: no database row');
+      }
+    }
+    log.info({ crateId, documents: count }, 'Indexed crate');
   }
 
-  /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest */
-  async indexDocuments(docs: Document[]) {
+  /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest; returns how many were indexed */
+  async indexDocuments(docs: Document[]): Promise<number> {
     if (!docs.length) {
-      return;
+      return 0;
     }
     try {
       await this.search.index(docs);
+      return docs.length;
     } catch (error) {
       if (docs.length === 1) {
         log.error({ err: error, entityId: docs[0]?.id }, 'Error indexing document');
-        return;
+        return 0;
       }
+      let count = 0;
       for (const doc of docs) {
-        await this.indexDocuments([doc]);
+        count += await this.indexDocuments([doc]);
       }
+      return count;
     }
   }
 }
