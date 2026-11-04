@@ -25,14 +25,7 @@
 		file_server
 	}
 
-	# Crate files are served inline with their own content type. The sandbox gives
-	# any HTML or SVG among them an opaque origin, so its scripts can't reach Oni's sign-in.
-	handle /api/* {
-		header Content-Security-Policy "sandbox allow-scripts allow-popups allow-downloads"
-		reverse_proxy api:8080
-	}
-
-	@provider path /api /oauth/* /.well-known/openid-configuration
+	@provider path /api /api/* /oauth/* /.well-known/openid-configuration
 	handle @provider {
 		reverse_proxy api:8080
 	}

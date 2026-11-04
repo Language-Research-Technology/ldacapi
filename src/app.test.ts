@@ -1,7 +1,7 @@
 import { Client } from '@opensearch-project/opensearch';
 import { describe, expect, it } from 'vitest';
 import pkg from '../package.json' with { type: 'json' };
-import { repository } from '../test/app.ts';
+import { buildTestApp, repository, repositoryWithContent } from '../test/app.ts';
 import { buildApp } from './app.ts';
 import { config } from './configuration.ts';
 import { createSearchBackend } from './indexer/search.ts';
@@ -79,5 +79,40 @@ describe('buildApp', () => {
       expect((await app.inject({ method, url: `${config.prefix}/admin/index/`, headers })).statusCode, method).toBe(404);
     }
     await app.close();
+  });
+});
+
+describe('crate file delivery', () => {
+  const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
+  const files = { 'http://test/delivery/page.html': 'text/html', 'http://test/delivery/song.mp3': 'audio/mpeg' };
+
+  it('sandboxes crate files but not audio or video, so media plays when opened directly', async () => {
+    const { app, prisma, config } = await buildTestApp({}, { repository: repositoryWithContent });
+    for (const [id, mediaType] of Object.entries(files)) {
+      await prisma.entity.create({
+        data: { id, name: id, description: '', entityType: 'http://schema.org/MediaObject', metadataLicenseId: OPEN, contentLicenseId: OPEN },
+      });
+      await prisma.file.create({ data: { id, filename: id.split('/').at(-1) ?? id, mediaType, size: 7 } });
+    }
+
+    try {
+      const deliver = (id: string) => app.inject({ method: 'GET', url: `${config.prefix}/file/${encodeURIComponent(id)}` });
+
+      const html = await deliver('http://test/delivery/page.html');
+      expect(html.statusCode).toBe(200);
+      expect(html.headers['x-content-type-options']).toBe('nosniff');
+      expect(html.headers['content-security-policy']).toContain('sandbox');
+
+      const audio = await deliver('http://test/delivery/song.mp3');
+      expect(audio.statusCode).toBe(200);
+      expect(audio.headers['x-content-type-options']).toBe('nosniff');
+      expect(audio.headers['content-security-policy']).toBeUndefined();
+    } finally {
+      const ids = Object.keys(files);
+      await prisma.file.deleteMany({ where: { id: { in: ids } } });
+      await prisma.entity.deleteMany({ where: { id: { in: ids } } });
+      await app.close();
+      await prisma.$disconnect();
+    }
   });
 });

@@ -12,10 +12,15 @@ export type TestRepository = Repository | ((deps: RepositoryDeps) => Repository 
 /** A repository with no content */
 export const repository = { storage: () => ({ content: {} }), async *objects() {} } as unknown as Repository;
 
-/** A repository whose every file holds `content` */
+/** A repository whose every file holds `content`, served as the file's media type */
 export const repositoryWithContent = {
   storage: () => ({
-    content: () => ({ type: 'stream', open: () => Readable.from(['content']), contentLength: 7, contentType: 'text/plain' }),
+    content: (file: { mediaType?: string }) => ({
+      type: 'stream',
+      open: () => Readable.from(['content']),
+      contentLength: 7,
+      contentType: file.mediaType ?? 'text/plain',
+    }),
   }),
 } as unknown as Repository;
 

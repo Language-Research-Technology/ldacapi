@@ -320,10 +320,10 @@ from Let's Encrypt on its own. It serves two hostnames:
 | `ADMIN_DOMAIN` | `/admin/*`                                                | The API's admin pages                                        |
 
 The admin pages need their own hostname, so that script in a crate file can
-never run on their origin (ADR 0002). Caddy also serves everything under
-`/api/` with `Content-Security-Policy: sandbox`, which gives any HTML or SVG in
-a crate file an opaque origin, so its scripts can't reach Oni's sign-in on
-`DOMAIN`.
+never run on their origin (ADR 0002). arocapi serves crate files, other than
+audio and video, with a `sandbox` Content-Security-Policy, which gives any HTML
+or SVG in a crate file an opaque origin, so its scripts can't reach Oni's
+sign-in on `DOMAIN`.
 
 No other container publishes a port, on the host or on localhost, so Postgres,
 OpenSearch, the API and Oni are reachable only from within the stack.
