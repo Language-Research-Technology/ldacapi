@@ -1,12 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Client } from '@opensearch-project/opensearch';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ALICE, adminTestbed, ocflRepository, PEOPLE, repositoryIn, repositoryOf } from '../../test/admin.ts';
-import type { buildTestApp, TestApp, TestRepository } from '../../test/app.ts';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ALICE, adminTestbed, PEOPLE, repositoryIn, repositoryOf } from '../../test/admin.ts';
+import { type buildTestApp, ocflRepository, ocflStorage, type TestApp, type TestRepository } from '../../test/app.ts';
 import type { Browser } from '../../test/oidc.ts';
+import type { rowIds as crateRowIds } from '../indexer/database.ts';
+import type { countDocuments } from '../indexer/search.ts';
 import { hasState, type Repository, State } from '../repository.ts';
 
 const BUNDLED = 'arcp://name,bundled';
@@ -17,10 +14,9 @@ const CONTENT_RESTRICTED = 'arcp://name,distributed_content_restricted';
 const METADATA_RESTRICTED = 'arcp://name,distributed_metadata_restricted';
 
 const testbed = adminTestbed();
-let storage: string;
-let opensearch: Client;
+const { ocflRoot } = ocflStorage();
 
-const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: join(storage, 'ocfl'), ADMIN_USERS: ALICE.sub }, { repository });
+const start = (repository: TestRepository) => testbed.start({ OCFL_ROOT: ocflRoot(), ADMIN_USERS: ALICE.sub }, { repository });
 
 const signIn = async (app: TestApp) => {
   const { browser, page } = await testbed.signInAsAdmin(app, ALICE);
@@ -43,46 +39,20 @@ const flash = (body: string) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-beforeAll(async () => {
-  storage = await mkdtemp(join(tmpdir(), 'ldacapi-actions-'));
-  execFileSync('node', ['scripts/crates-import.ts'], { env: { ...process.env, OCFL_ROOT: join(storage, 'ocfl') }, stdio: 'ignore' });
-});
-
-afterAll(async () => {
-  await opensearch?.close();
-  await rm(storage, { recursive: true, force: true });
-});
-
 describe('index and delete actions', () => {
   let app: TestApp;
   let repository: Repository;
   let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
-  let entityIndex: string;
   let search: Awaited<ReturnType<typeof buildTestApp>>['search'];
+  let crateRows: typeof crateRowIds;
+  let countSearchDocuments: typeof countDocuments;
 
-  /** The ids of the entity rows indexed from `crateId` */
-  const rowIds = async (crateId: string) =>
-    (await prisma.entity.findMany({ where: { meta: { path: ['crateId'], equals: crateId } }, select: { id: true } })).map(({ id }) => id).sort();
+  /** The ids of the entity rows indexed from `crateIds`, sorted */
+  const rowIds = async (...crateIds: string[]) => (await Promise.all(crateIds.map(crateRows))).flat().sort();
 
   const entityCount = async (crateId: string) => (await rowIds(crateId)).length;
 
-  /** How many of `ids` have a search document */
-  const searchCount = async (ids: string[]) => {
-    if (!ids.length || !(await opensearch.indices.exists({ index: entityIndex })).body) {
-      return 0;
-    }
-    const { total } = await search.search({
-      searchType: 'basic',
-      query: '',
-      filters: { terms: {}, ranges: {} },
-      limit: 1,
-      offset: 0,
-      sort: 'relevance',
-      order: 'asc',
-      visibility: { id: { in: ids } },
-    });
-    return total;
-  };
+  const searchCount = (ids: string[]) => countSearchDocuments(search, ids);
 
   /** Waits until no crate is queued, indexing or deleting, so an earlier action can't leak into the next */
   const waitUntilSettled = () =>
@@ -102,10 +72,10 @@ describe('index and delete actions', () => {
   };
 
   beforeAll(async () => {
-    let config: Awaited<ReturnType<typeof buildTestApp>>['config'];
-    ({ app, repository, prisma, config, search } = await start(ocflRepository));
-    entityIndex = config.search.entityIndex;
-    opensearch = new Client({ node: config.opensearchUrl });
+    ({ app, repository, prisma, search } = await start(ocflRepository));
+    // Imported once the app has read its configuration
+    ({ rowIds: crateRows } = await import('../indexer/database.ts'));
+    ({ countDocuments: countSearchDocuments } = await import('../indexer/search.ts'));
   });
 
   beforeEach(async () => {
@@ -162,19 +132,22 @@ describe('index and delete actions', () => {
     expect(await searchCount(ids)).toBe(ids.length);
   });
 
-  it('reindexes one crate of a distributed collection, leaving the rest of it alone', async () => {
+  it.each([
+    ['reindexes', 'index', { force: 'true' }, true],
+    ['deletes', 'delete', {}, false],
+  ])('%s one crate of a distributed collection, leaving the rest of it alone', async (_, action, form, kept) => {
     const browser = await signIn(app);
     await act(browser, 'index');
     await waitUntilIndexed(DISTRIBUTED_ROOT, CONTENT_RESTRICTED, METADATA_RESTRICTED);
     const ids = await rowIds(CONTENT_RESTRICTED);
-    const siblings = [...(await rowIds(DISTRIBUTED_ROOT)), ...(await rowIds(METADATA_RESTRICTED))];
+    const siblings = await rowIds(DISTRIBUTED_ROOT, METADATA_RESTRICTED);
 
-    await act(browser, 'index', { crateId: CONTENT_RESTRICTED, force: 'true' });
+    await act(browser, action, { crateId: CONTENT_RESTRICTED, ...form });
 
-    await waitUntilIndexed(CONTENT_RESTRICTED);
-    expect(await rowIds(CONTENT_RESTRICTED)).toEqual(ids);
-    expect(await searchCount(ids)).toBe(ids.length);
-    expect([...(await rowIds(DISTRIBUTED_ROOT)), ...(await rowIds(METADATA_RESTRICTED))]).toEqual(siblings);
+    await waitUntilSettled();
+    expect(await rowIds(CONTENT_RESTRICTED)).toEqual(kept ? ids : []);
+    expect(await searchCount(ids)).toBe(kept ? ids.length : 0);
+    expect(await rowIds(DISTRIBUTED_ROOT, METADATA_RESTRICTED)).toEqual(siblings);
     expect(await searchCount(siblings)).toBe(siblings.length);
   });
 
@@ -247,23 +220,6 @@ describe('index and delete actions', () => {
     expect(await searchCount(others)).toBe(others.length);
   });
 
-  it('deletes one crate of a distributed collection, leaving the rest of it alone', async () => {
-    const browser = await signIn(app);
-    await act(browser, 'index');
-    await waitUntilIndexed(DISTRIBUTED_ROOT, CONTENT_RESTRICTED, METADATA_RESTRICTED);
-    const ids = await rowIds(CONTENT_RESTRICTED);
-    const siblings = [...(await rowIds(DISTRIBUTED_ROOT)), ...(await rowIds(METADATA_RESTRICTED))];
-
-    await act(browser, 'delete', { crateId: CONTENT_RESTRICTED });
-
-    await vi.waitFor(async () => {
-      expect(await prisma.entity.count({ where: { id: { in: ids } } })).toBe(0);
-      expect(await searchCount(ids)).toBe(0);
-    });
-    expect([...(await rowIds(DISTRIBUTED_ROOT)), ...(await rowIds(METADATA_RESTRICTED))]).toEqual(siblings);
-    expect(await searchCount(siblings)).toBe(siblings.length);
-  });
-
   it('keeps a crate’s database rows when deleting its search documents fails', async () => {
     const browser = await signIn(app);
     await act(browser, 'index');
@@ -288,7 +244,7 @@ describe('index and delete actions', () => {
     const browser = await signIn(app);
     await act(browser, 'index');
     await waitUntilIndexed(BUNDLED, PEOPLE);
-    const ids = [...(await rowIds(BUNDLED)), ...(await rowIds(PEOPLE))];
+    const ids = await rowIds(BUNDLED, PEOPLE);
 
     const page = await act(browser, 'delete');
 

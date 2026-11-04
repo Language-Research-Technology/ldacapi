@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, vi } from 'vitest';
-import { initRepository, type Repository } from '../src/repository.ts';
+import type { Repository } from '../src/repository.ts';
 import { buildTestApp, type TestApp } from './app.ts';
 import { startFakeUpstream, type UpstreamUser } from './fake-upstream.ts';
 import { Browser } from './oidc.ts';
@@ -18,9 +18,6 @@ const oidcEnv = (upstreamIssuer: string) => ({
   OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
   OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
 });
-
-/** The OCFL repository at `OCFL_ROOT` */
-export const ocflRepository = (deps: Record<string, unknown>) => initRepository('ocfl', deps);
 
 /** A repository of `crates`, each with its index state, recording what it is asked to do */
 export const repositoryOf = (crates: { id: string; name?: string; state: Record<string, string> }[]) => {

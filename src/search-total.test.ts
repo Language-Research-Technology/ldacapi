@@ -1,24 +1,11 @@
-import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { ocflRepository } from '../test/admin.ts';
-import { buildTestApp } from '../test/app.ts';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { ocflTestbed } from '../test/app.ts';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
-vi.mock('./logger.ts', async () => {
-  const { pino } = await import('pino');
-  const stream = new Writable({
-    write(chunk, _encoding, done) {
-      logs.push(JSON.parse(chunk.toString()));
-      done();
-    },
-  });
-  return { logger: pino({ level: 'info' }, stream) };
-});
+vi.mock('./logger.ts', async () => (await import('../test/logs.ts')).capturingLogger(logs, 'info'));
 
 const ROOT = 'arcp://name,unwritable';
 const WRITTEN = `${ROOT}/written`;
@@ -43,32 +30,19 @@ const crate = {
   ],
 };
 
-let storage: string;
-let started: Awaited<ReturnType<typeof buildTestApp>>;
-
-const search = async (body: Record<string, unknown>) => {
-  const response = await started.app.inject({ method: 'POST', url: `${started.config.prefix}/search`, payload: body });
-  expect(response.statusCode).toBe(200);
-  return response.json();
-};
+const testbed = ocflTestbed({
+  source: async (scratch) => {
+    const source = join(scratch, 'crates');
+    await mkdir(join(source, 'unwritable'), { recursive: true });
+    await writeFile(join(source, 'unwritable', 'ro-crate-metadata.json'), JSON.stringify(crate));
+    return source;
+  },
+});
+const { search } = testbed;
 
 beforeAll(async () => {
-  storage = await mkdtemp(join(tmpdir(), 'ldacapi-search-total-'));
-  const source = join(storage, 'crates');
-  await mkdir(join(source, 'unwritable'), { recursive: true });
-  await writeFile(join(source, 'unwritable', 'ro-crate-metadata.json'), JSON.stringify(crate));
-  const ocflRoot = join(storage, 'ocfl');
-  execFileSync('node', ['scripts/crates-import.ts', source], { env: { ...process.env, OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, stdio: 'ignore' });
-  started = await buildTestApp({ OCFL_ROOT: ocflRoot, LOG_LEVEL: 'silent' }, { repository: ocflRepository });
-  await started.repository.deleteIndex();
-  await started.repository.createIndex(ROOT);
-});
-
-afterAll(async () => {
-  await started?.repository.deleteIndex();
-  await started?.app.close();
-  await started?.prisma.$disconnect();
-  await rm(storage, { recursive: true, force: true });
+  await testbed.started.repository.deleteIndex();
+  await testbed.started.repository.createIndex(ROOT);
 });
 
 describe('an entity whose row fails to be written', () => {
@@ -81,7 +55,7 @@ describe('an entity whose row fails to be written', () => {
   });
 
   it('is not counted when the search index is rebuilt alone', async () => {
-    await started.repository.createIndex(ROOT, 'search', true);
+    await testbed.started.repository.createIndex(ROOT, 'search', true);
 
     const { total, entities } = await search({ query: '', limit: 100 });
 

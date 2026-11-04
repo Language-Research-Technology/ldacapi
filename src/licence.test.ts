@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { Writable } from 'node:stream';
 import { generateKeyPair, importJWK, type JWTPayload, SignJWT } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildTestApp, repositoryWithContent, type TestApp } from '../test/app.ts';
@@ -22,16 +21,7 @@ const RESTRICTED_ENTITY = 'http://test/licence/restricted';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
-vi.mock('./logger.ts', async () => {
-  const { pino } = await import('pino');
-  const stream = new Writable({
-    write(chunk, _encoding, done) {
-      logs.push(JSON.parse(chunk.toString()));
-      done();
-    },
-  });
-  return { logger: pino({ level: 'error' }, stream) };
-});
+vi.mock('./logger.ts', async () => (await import('../test/logs.ts')).capturingLogger(logs, 'error'));
 
 let app: TestApp;
 let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];

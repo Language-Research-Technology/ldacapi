@@ -1,8 +1,12 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { Client } from '@opensearch-project/opensearch';
-import { vi } from 'vitest';
+import { afterAll, beforeAll, expect, vi } from 'vitest';
 import type { createSearchBackend } from '../src/indexer/search.ts';
-import type { Repository } from '../src/repository.ts';
+import { initRepository, type Repository } from '../src/repository.ts';
 
 type RepositoryDeps = { opensearchClient: Client; search: ReturnType<typeof createSearchBackend> };
 
@@ -23,6 +27,9 @@ export const repositoryWithContent = {
     }),
   }),
 } as unknown as Repository;
+
+/** The OCFL repository at `OCFL_ROOT` */
+export const ocflRepository = (deps: Record<string, unknown>) => initRepository('ocfl', deps);
 
 /** Builds the app with `env` set while configuration is read, which happens on first import */
 export const buildTestApp = async (env: Record<string, string>, options: { repository?: TestRepository } = {}) => {
@@ -47,3 +54,53 @@ export const buildTestApp = async (env: Record<string, string>, options: { repos
 };
 
 export type TestApp = Awaited<ReturnType<typeof buildTestApp>>['app'];
+
+/**
+ * A new OCFL repository for a file's tests, imported from the directory `source` returns (test-data by default),
+ * which it may create under the scratch directory it is given
+ */
+export const ocflStorage = ({ source }: { source?: (scratch: string) => Promise<string> } = {}) => {
+  let storage: string;
+  const ocflRoot = () => join(storage, 'ocfl');
+
+  beforeAll(async () => {
+    storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
+    const sources = source ? [await source(storage)] : [];
+    execFileSync('node', ['scripts/crates-import.ts', ...sources], { env: { ...process.env, OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' }, stdio: 'ignore' });
+  });
+
+  afterAll(async () => {
+    await rm(storage, { recursive: true, force: true });
+  });
+
+  return { ocflRoot };
+};
+
+/** The app over a new OCFL repository (see `ocflStorage`), its indexes deleted after the file's tests */
+export const ocflTestbed = (options: Parameters<typeof ocflStorage>[0] = {}) => {
+  const { ocflRoot } = ocflStorage(options);
+  let started: Awaited<ReturnType<typeof buildTestApp>>;
+
+  beforeAll(async () => {
+    started = await buildTestApp({ OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' }, { repository: ocflRepository });
+  });
+
+  afterAll(async () => {
+    await started?.repository.deleteIndex();
+    await started?.app.close();
+    await started?.prisma.$disconnect();
+  });
+
+  return {
+    get started() {
+      return started;
+    },
+
+    /** POSTs `body` to the search endpoint, expecting success */
+    async search(body: Record<string, unknown>) {
+      const response = await started.app.inject({ method: 'POST', url: `${started.config.prefix}/search`, payload: body });
+      expect(response.statusCode).toBe(200);
+      return response.json();
+    },
+  };
+};
