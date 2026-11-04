@@ -39,23 +39,29 @@ export const createSearchBackend = (client: Client, options: { refresh?: boolean
 
 type SearchBackend = ReturnType<typeof createSearchBackend>;
 
+/** Well under OpenSearch's default `index.max_terms_count` of 65,536 */
+const BATCH_SIZE = 10_000;
+
+const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / BATCH_SIZE) }, (_, i) => items.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE));
+
 /** How many of `ids` have a search document, 0 if there is no index */
 export async function countDocuments(search: SearchBackend, ids: string[]) {
-  if (!ids.length) {
-    return 0;
-  }
   try {
-    const { total } = await search.search({
-      searchType: 'basic',
-      query: '',
-      filters: { terms: {}, ranges: {} },
-      limit: 1,
-      offset: 0,
-      sort: 'relevance',
-      order: 'asc',
-      visibility: { id: { in: ids } },
-    });
-    return total;
+    let count = 0;
+    for (const batch of batches(ids)) {
+      const { total } = await search.search({
+        searchType: 'basic',
+        query: '',
+        filters: { terms: {}, ranges: {} },
+        limit: 1,
+        offset: 0,
+        sort: 'relevance',
+        order: 'asc',
+        visibility: { id: { in: batch } },
+      });
+      count += total;
+    }
+    return count;
   } catch (error) {
     if ((error as { statusCode?: number }).statusCode === 404) {
       return 0;
@@ -210,7 +216,9 @@ export class SearchIndexer extends Indexer {
 
   async delete(crateId?: string) {
     if (crateId) {
-      await this.search.remove(await rowIds(crateId));
+      for (const batch of batches(await rowIds(crateId))) {
+        await this.search.remove(batch);
+      }
     } else {
       await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }

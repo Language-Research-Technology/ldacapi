@@ -1,7 +1,7 @@
 import { ROCrate } from 'ro-crate';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { type CrateObject, Indexer } from './indexer.ts';
-import { searchDocument } from './search.ts';
+import { countDocuments, searchDocument } from './search.ts';
 
 const ROOT = 'arcp://name,test';
 const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
@@ -86,5 +86,15 @@ describe('searchDocument', () => {
 
     expect(doc).not.toHaveProperty('datePublished');
     expect(doc.dateCreated).toEqual(['1901-02-03']);
+  });
+});
+
+describe('countDocuments', () => {
+  it('counts in batches under OpenSearch’s terms limit, summing them', async () => {
+    const search = vi.fn(async ({ visibility }: { visibility: { id: { in: string[] } } }) => ({ total: visibility.id.in.length, hits: [] }));
+    const ids = Array.from({ length: 25_000 }, (_, i) => `id-${i}`);
+
+    expect(await countDocuments({ search } as unknown as Parameters<typeof countDocuments>[0], ids)).toBe(25_000);
+    expect(search.mock.calls.map(([{ visibility }]) => visibility.id.in.length)).toEqual([10_000, 10_000, 5_000]);
   });
 });
