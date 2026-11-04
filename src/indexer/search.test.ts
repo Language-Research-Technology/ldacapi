@@ -37,7 +37,7 @@ describe('searchDocument', () => {
     expect(await searchDocument(crate, crateObject, entity, LICENSE, path)).toMatchObject({
       id: `${ROOT}/data.txt`,
       name: 'Data',
-      type: ['File'],
+      entityType: 'http://schema.org/MediaObject',
       inLanguage: ['English'],
       communicationMode: ['https://w3id.org/ldac/terms#SpokenLanguage'],
       encodingFormat: ['text/plain'],
@@ -47,6 +47,12 @@ describe('searchDocument', () => {
       location: { lat: -27.47, lng: 153.02 },
       text: 'hello world',
     });
+  });
+
+  it('has no type field', async () => {
+    const { crate, entity } = await crateWith({});
+
+    expect(await searchDocument(crate, crateObject, entity, LICENSE)).not.toHaveProperty('type');
   });
 
   it('leaves out dates it cannot store', async () => {

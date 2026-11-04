@@ -145,7 +145,7 @@ export class Indexer {
   }
 }
 
-export const RecordType: Record<string, string> = config.indexType;
+const RecordType: Record<string, string> = config.indexType;
 
 /** The entity's first type that we index, if it conforms to that type's profile */
 export function recordType(entity: Entity): string | undefined {
@@ -156,3 +156,6 @@ export function recordType(entity: Entity): string | undefined {
   }
   return type;
 }
+
+/** The class URI of a record type, as the entity's row holds it */
+export const entityClass = (crate: ROCrate, type: string): string => crate.getContextDefinition(type) || RecordType[type];

@@ -7,7 +7,7 @@ import { logger } from '../logger.ts';
 import { firstStringOrId } from '../utils.ts';
 import { pickSingleMemberOf } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
-import { Indexer, recordType } from './indexer.ts';
+import { entityClass, Indexer, recordType } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/search' });
 
@@ -15,7 +15,7 @@ const fields = {
   name: { type: 'text', label: 'Name', weight: 3, advanced: true, sort: true },
   description: { type: 'text', label: 'Description', advanced: true },
   text: { type: 'text', label: 'Text', advanced: true },
-  type: { type: 'keyword', label: 'Record Type', facet: true },
+  entityType: { type: 'keyword', label: 'Record Type', facet: true },
   inLanguage: { type: 'keyword', label: 'Language', advanced: true, facet: true },
   communicationMode: { type: 'keyword', label: 'Communication Mode', facet: true },
   linguisticGenre: { type: 'keyword', label: 'Linguistic Genre', facet: true },
@@ -103,6 +103,7 @@ function isText(entity: Entity) {
 /** One entity's search document; File entities with text content include it */
 export async function searchDocument(crate: ROCrate, crateObject: CrateObject, entity: Entity, license: string, path?: string): Promise<Document> {
   const id: string = entity['@id'];
+  const type = recordType(entity);
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
   const point = location(entity);
@@ -110,7 +111,7 @@ export async function searchDocument(crate: ROCrate, crateObject: CrateObject, e
     id,
     name: entity.name?.join('; ') || id,
     description: labels(entity, 'description'),
-    type: entity['@type'],
+    ...(type && { entityType: entityClass(crate, type) }),
     inLanguage: labels(entity, 'inLanguage'),
     communicationMode: labels(entity, 'communicationMode'),
     linguisticGenre: labels(entity, 'linguisticGenre'),

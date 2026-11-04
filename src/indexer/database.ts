@@ -5,7 +5,7 @@ import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
-import { type BaseOptions, type CrateFile, Indexer, RecordType, recordType } from './indexer.ts';
+import { type BaseOptions, type CrateFile, entityClass, Indexer, recordType } from './indexer.ts';
 
 const log = logger.child({ module: 'indexer/database' });
 
@@ -41,7 +41,7 @@ export class DatabaseIndexer extends Indexer {
           id: entityId,
           name: entity.name?.join('; ') || entityId,
           description: entity.description?.join('; ') || '',
-          entityType: crate.getContextDefinition(entityType) || RecordType[entityType],
+          entityType: entityClass(crate, entityType),
           memberOf: pickSingleMemberOf(entity),
           rootCollection: crate.rootId,
           metadataLicenseId: metadataLicense,
