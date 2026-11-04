@@ -2,9 +2,8 @@ import { type IsAuthenticated, LicenceAccess, type RequestContext } from 'arocap
 import type { FastifyRequest } from 'fastify';
 import { createLocalJWKSet, errors, jwtVerify } from 'jose';
 import { config } from './configuration.ts';
+import { isOpenLicence } from './licences.ts';
 import { publicJwks, SIGNING_ALG } from './oidc/keys.ts';
-
-const openLicenses = new Set(config.openLicenses);
 
 type RemsUserEntitlement = {
   resource: string;
@@ -29,7 +28,7 @@ export const access = LicenceAccess({ hasLicence, authorisationUrl: enrollmentUr
 export const isAuthenticated: IsAuthenticated = async ({ request }) => Boolean(await authenticateUser(request));
 
 async function hasLicence(licenseId: string, { request }: RequestContext): Promise<boolean> {
-  if (openLicenses.has(licenseId)) {
+  if (isOpenLicence(licenseId)) {
     return true;
   }
   return (await userLicenses(request))?.includes(licenseId) ?? false;

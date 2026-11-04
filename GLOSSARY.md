@@ -24,6 +24,10 @@ _Avoid_: Access
 What a request may read of a visible entity, decided by its metadata and content licences.
 _Avoid_: Visibility, permissions
 
+**Access control**:
+How Oni tells users they can get an entity's content: `Public` when its content licence is open, otherwise `AuthorizationByApplication` (apply in REMS). The indexer decides it and stores it with the entity; it describes the licence, not what a particular request may read.
+_Avoid_: Access, access level
+
 ### Admin
 
 **Admin**:
