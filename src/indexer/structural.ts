@@ -1,5 +1,6 @@
 import type { OcflStorageMeta } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
+import { accessControlFor, type EntityMeta } from '../entity-meta.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';
@@ -34,6 +35,7 @@ export class StructuralIndexer extends Indexer {
       count++;
       const entityId = entity['@id'];
       const rocrate = entityAsCrate(crate, entity, license);
+      const contentLicenseId = firstStringOrId(entity.license) || license;
       const param: IndexRecord = {
         entity: {
           id: entityId,
@@ -43,8 +45,8 @@ export class StructuralIndexer extends Indexer {
           memberOf: pickSingleMemberOf(entity),
           rootCollection: crate.rootId,
           metadataLicenseId: metadataLicense,
-          contentLicenseId: firstStringOrId(entity.license) || license,
-          meta: { rocrate },
+          contentLicenseId,
+          meta: { rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
         },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {

@@ -11,6 +11,7 @@ import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
 import { logger } from './logger.ts';
 import { oidcProvider } from './oidc/provider.ts';
+import { oniEntityTransformer } from './oni.ts';
 import { prisma } from './prisma.ts';
 import type { Repository } from './repository.ts';
 
@@ -46,17 +47,7 @@ export function buildApp({ repository, search }: AppDeps) {
         isAuthenticated,
         entityVisibilityFilter: AllVisibleEntityFilter,
         searchVisibilityFilter: AllVisibleSearchFilter,
-        entityTransformers: [
-          (entity) => ({
-            ...entity,
-            accessControl: 'Public',
-            counts: {
-              collections: 0,
-              objects: 0,
-              files: 0,
-            },
-          }),
-        ],
+        entityTransformers: [oniEntityTransformer],
         storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
       });
       api.register(ldacapi);

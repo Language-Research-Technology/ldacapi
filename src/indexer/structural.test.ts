@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { ROCrate } from 'ro-crate';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { accessControlOf } from '../entity-meta.ts';
 import { prisma } from '../prisma.ts';
 import type { CrateObject } from './indexer.ts';
 import { entityAsCrate, StructuralIndexer } from './structural.ts';
@@ -15,9 +16,10 @@ describe('entityAsCrate', () => {
   });
 });
 
-describe('StructuralIndexer file size', () => {
-  const ROOT = 'arcp://name,structural-size-test';
-  const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
+describe('StructuralIndexer', () => {
+  const ROOT = 'arcp://name,structural-test';
+  const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
+  const RESTRICTED = 'https://www.ldaca.edu.au/licenses/restricted/v1/';
 
   let indexer: StructuralIndexer;
 
@@ -25,17 +27,28 @@ describe('StructuralIndexer file size', () => {
     indexer = await StructuralIndexer.create({});
   });
 
+  afterEach(async () => {
+    await indexer.delete(ROOT);
+  });
+
   const index = async (files: Record<string, unknown>[], inventory: Record<string, number> = {}) => {
     const crate = await ROCrate.create({
       '@context': 'https://w3id.org/ro/crate/1.1/context',
       '@graph': [
-        { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', about: { '@id': ROOT }, license: LICENSE },
-        { '@id': ROOT, '@type': 'Dataset', name: 'Size test', license: LICENSE, hasPart: files.map((f) => ({ '@id': f['@id'] })) },
+        { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', about: { '@id': ROOT }, license: OPEN },
+        {
+          '@id': ROOT,
+          '@type': ['Dataset', 'RepositoryCollection'],
+          conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' },
+          name: 'Structural test',
+          license: OPEN,
+          hasPart: files.map((f) => ({ '@id': f['@id'] })),
+        },
         ...files.map((f) => ({ '@type': 'File', ...f })),
       ],
     });
     const crateObject: CrateObject = {
-      id: 'size-test',
+      id: 'structural-test',
       root: '/nowhere',
       text: async () => '',
       file: async (path) => {
@@ -49,32 +62,41 @@ describe('StructuralIndexer file size', () => {
     await indexer.index({ crateObject, crate });
   };
 
-  const sizeOf = async (path: string) => Number((await prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/${path}` } })).size);
+  describe('file size', () => {
+    const sizeOf = async (path: string) => Number((await prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/${path}` } })).size);
 
-  afterEach(async () => {
-    await indexer.delete(ROOT);
+    it('takes the size from the OCFL inventory when the file is there', async () => {
+      await index([{ '@id': 'a.txt', contentSize: '14384 bytes' }], { 'a.txt': 500 });
+
+      expect(await sizeOf('a.txt')).toBe(500);
+    });
+
+    it('takes the leading number of contentSize when the file is missing', async () => {
+      await index([
+        { '@id': 'bytes.txt', contentSize: '14384 bytes' },
+        { '@id': 'number.txt', contentSize: 163840 },
+      ]);
+
+      expect(await sizeOf('bytes.txt')).toBe(14384);
+      expect(await sizeOf('number.txt')).toBe(163840);
+    });
+
+    it('records -1 when the file is missing and contentSize has no number', async () => {
+      await index([{ '@id': 'none.txt' }, { '@id': 'unknown.txt', contentSize: 'unknown' }]);
+
+      expect(await sizeOf('none.txt')).toBe(-1);
+      expect(await sizeOf('unknown.txt')).toBe(-1);
+    });
   });
 
-  it('takes the size from the OCFL inventory when the file is there', async () => {
-    await index([{ '@id': 'a.txt', contentSize: '14384 bytes' }], { 'a.txt': 500 });
+  describe('accessControl', () => {
+    const storedAccessControl = async (id: string) => accessControlOf((await prisma.entity.findUniqueOrThrow({ where: { id } })).meta);
 
-    expect(await sizeOf('a.txt')).toBe(500);
-  });
+    it('is Public for an open content licence and AuthorizationByApplication otherwise', async () => {
+      await index([{ '@id': 'restricted.txt', license: RESTRICTED }]);
 
-  it('takes the leading number of contentSize when the file is missing', async () => {
-    await index([
-      { '@id': 'bytes.txt', contentSize: '14384 bytes' },
-      { '@id': 'number.txt', contentSize: 163840 },
-    ]);
-
-    expect(await sizeOf('bytes.txt')).toBe(14384);
-    expect(await sizeOf('number.txt')).toBe(163840);
-  });
-
-  it('records -1 when the file is missing and contentSize has no number', async () => {
-    await index([{ '@id': 'none.txt' }, { '@id': 'unknown.txt', contentSize: 'unknown' }]);
-
-    expect(await sizeOf('none.txt')).toBe(-1);
-    expect(await sizeOf('unknown.txt')).toBe(-1);
+      expect(await storedAccessControl(ROOT)).toBe('Public');
+      expect(await storedAccessControl(`${ROOT}/restricted.txt`)).toBe('AuthorizationByApplication');
+    });
   });
 });

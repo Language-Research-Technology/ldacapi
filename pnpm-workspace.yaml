@@ -11,4 +11,4 @@ allowBuilds:
   # ships prebuilt binaries; its install script only builds from source
   "@parcel/watcher": false
 minimumReleaseAgeExclude:
-  - arocapi@5.0.0-beta.7
+  - arocapi@5.0.0-beta.9
