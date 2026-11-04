@@ -4,7 +4,7 @@ import { type buildTestApp, ocflRepository, ocflStorage, type TestApp, type Test
 import type { Browser } from '../../test/oidc.ts';
 import type { rowIds as crateRowIds } from '../indexer/database.ts';
 import type { countDocuments } from '../indexer/search.ts';
-import { hasState, type Repository, State } from '../repository.ts';
+import { hasState, type IndexType, type Repository, State } from '../repository.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 const EXTRA = `${PEOPLE}/extra`;
@@ -238,6 +238,18 @@ describe('index and delete actions', () => {
     expect(await rowIds(PEOPLE)).toEqual(ids);
     expect(await searchCount(ids)).toBe(ids.length);
     expect(await repository.getState(PEOPLE)).toEqual({ database: 'indexed', search: 'indexed' });
+  });
+
+  it.each<[string, IndexType[] | undefined]>([
+    ['search', ['search']],
+    ['database and search', undefined],
+  ])('reads a crate as not indexed as soon as its %s indexes are deleted', async (_, type) => {
+    await repository.createIndex(BUNDLED);
+    expect(await repository.getState(BUNDLED)).toEqual({ database: 'indexed', search: 'indexed' });
+
+    await repository.deleteIndex(BUNDLED, type);
+
+    expect(hasState(await repository.getState(BUNDLED, 'search'), State.INDEXED)).toBe(false);
   });
 
   it('deletes every index', async () => {

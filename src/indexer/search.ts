@@ -34,8 +34,7 @@ const fields = {
 
 type Document = SearchDocument<typeof fields>;
 
-export const createSearchBackend = (client: Client, options: { refresh?: boolean | 'wait_for' } = {}) =>
-  OpenSearchBackend({ client, fields, indexName: config.search.entityIndex, ...options });
+export const createSearchBackend = (client: Client) => OpenSearchBackend({ client, fields, indexName: config.search.entityIndex });
 
 type SearchBackend = ReturnType<typeof createSearchBackend>;
 
@@ -219,6 +218,7 @@ export class SearchIndexer extends Indexer {
       for (const batch of batches(await rowIds(crateId))) {
         await this.search.remove(batch);
       }
+      await this.refresh();
     } else {
       await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }
@@ -229,31 +229,40 @@ export class SearchIndexer extends Indexer {
     return await countDocuments(this.search, await rowIds(crateId));
   }
 
+  /** Makes changes searchable now, rather than at OpenSearch's next periodic refresh */
+  async refresh() {
+    await this.client.indices.refresh({ index: this.indexName, ignore_unavailable: true });
+  }
+
   /** Only entities with a row, as arocapi drops a hit without one but still counts it */
   async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
     await this.search.createIndex();
     const crateId = crate.rootId;
     const rows = new Map((await crateRows(crateId)).map(({ id, rootCollection }) => [id, rootCollection]));
     const docs: Document[] = [];
-    for (const entity of crate.entities()) {
-      if (!recordType(entity)) {
-        continue;
+    try {
+      for (const entity of crate.entities()) {
+        if (!recordType(entity)) {
+          continue;
+        }
+        const entityId = entity['@id'];
+        const rootCollection = rows.get(entityId);
+        if (rootCollection === undefined) {
+          log.warn({ crateId, entityId }, 'Skipped: no database row');
+          continue;
+        }
+        const doc = await searchDocument(crate, crateObject, entity, license, rootCollection, paths.get(entityId));
+        if (doc.text) {
+          // Indexed alone to keep each request small
+          await this.indexDocuments([doc]);
+        } else {
+          docs.push(doc);
+        }
       }
-      const entityId = entity['@id'];
-      const rootCollection = rows.get(entityId);
-      if (rootCollection === undefined) {
-        log.warn({ crateId, entityId }, 'Skipped: no database row');
-        continue;
-      }
-      const doc = await searchDocument(crate, crateObject, entity, license, rootCollection, paths.get(entityId));
-      if (doc.text) {
-        // Indexed alone to keep each request small
-        await this.indexDocuments([doc]);
-      } else {
-        docs.push(doc);
-      }
+      await this.indexDocuments(docs);
+    } finally {
+      await this.refresh();
     }
-    await this.indexDocuments(docs);
   }
 
   /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest */

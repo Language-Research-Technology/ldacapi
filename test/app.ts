@@ -43,7 +43,7 @@ export const buildTestApp = async (env: Record<string, string>, options: { repos
     const { Client } = await import('@opensearch-project/opensearch');
     const { createSearchBackend } = await import('../src/indexer/search.ts');
     const opensearchClient = new Client({ node: config.opensearchUrl });
-    const search = createSearchBackend(opensearchClient, { refresh: true });
+    const search = createSearchBackend(opensearchClient);
     const repo = typeof options.repository === 'function' ? await options.repository({ opensearchClient, search }) : (options.repository ?? repository);
     /** Builds another app, as another server process would */
     const build = () => buildApp({ repository: repo, search });
