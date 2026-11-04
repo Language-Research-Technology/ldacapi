@@ -62,6 +62,12 @@ describe('searchDocument', () => {
     expect((await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).recordType).toBe(label);
   });
 
+  it.each(['http://schema.org/MediaObject', 'https://schema.org/MediaObject'])('labels %s as File, whichever the scheme', async (uri) => {
+    const { crate, entity } = await crateWith({}, { File: uri });
+
+    expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).toMatchObject({ entityType: uri, recordType: 'File' });
+  });
+
   it.each([
     ['http://schema.org/Thing', 'Thing'],
     ['https://example.com/terms#Widget', 'Widget'],

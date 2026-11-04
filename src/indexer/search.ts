@@ -83,8 +83,8 @@ const CLASS_LABELS: Record<string, string> = {
   'http://schema.org/SoftwareApplication': 'Software Application',
 };
 
-/** A readable label for a class URI, falling back to its last segment */
-const classLabel = (uri: string) => CLASS_LABELS[uri] ?? uri.split(/[#/]/).at(-1) ?? uri;
+/** A readable label for a class URI, either schema.org scheme alike, falling back to its last segment */
+const classLabel = (uri: string) => CLASS_LABELS[uri.replace(/^https:\/\/schema\.org\//, 'http://schema.org/')] ?? uri.split(/[#/]/).at(-1) ?? uri;
 
 const values = (entity: Entity, name: string): unknown[] => [...(entity[name] ?? []), ...(entity[`ldac:${name}`] ?? [])];
 
