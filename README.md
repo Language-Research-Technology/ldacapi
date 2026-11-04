@@ -7,26 +7,59 @@ RO-Crate API. It serves RO-Crates over the
 
 ## How it fits together
 
-The core API (entities, files, search, RO-Crate metadata) comes from
-[arocapi](https://github.com/crate-works/arocapi), which this
-app mounts as a Fastify plugin. ldacapi adds what LDaCA needs on top:
+The API's routes (entities, files, search, RO-Crate metadata) come from
+[arocapi](https://github.com/crate-works/arocapi), which ldacapi mounts as a
+Fastify plugin under `/api` (`src/app.ts`). Its
+[docs](https://arocapi.crate-works.org/) explain each part; ldacapi
+configures them as follows:
 
-- **OCFL storage**: crates live in an [OCFL](https://ocfl.io/) repository on
-  disk (`src/ocfl.ts`).
-- **Indexing**: crates are read from OCFL into the database (the database
-  index, used by arocapi's entity and file routes) and, as one search
-  document per entity, into arocapi's OpenSearch search backend
-  (`src/indexer/`). The search fields are declared in `src/indexer/search.ts`.
+- **Storage backend, Content half**: arocapi's
+  [`OcflStorage`](https://arocapi.crate-works.org/configuration/storage/#ocflstorage)
+  serves crate files from the OCFL repository.
+- **Storage backend, Metadata half**: arocapi's
+  [`EntityMetaMetadata`](https://arocapi.crate-works.org/configuration/storage/#entitymetametadata)
+  serves each entity's virtual crate, built at index time and held in its
+  database row ([ADR 0004](docs/adr/0004-entity-metadata-is-a-virtual-crate.md)).
+- **Search backend**: arocapi's
+  [`OpenSearchBackend`](https://arocapi.crate-works.org/configuration/search/#opensearchbackend),
+  with the [fields](https://arocapi.crate-works.org/configuration/search/#fields)
+  declared in `src/indexer/search.ts`, where `entityType` filters on an
+  entity's class URI and the "Record Type" facet, `recordType`, shows a
+  readable label for it.
+- **Visibility**: every entity is visible to everyone, through arocapi's
+  all-visible [visibility filters](https://arocapi.crate-works.org/configuration/visibility/)
+  ([ADR 0003](docs/adr/0003-every-entity-is-visible.md)).
+- **Access**: arocapi's
+  [`LicenceAccess`](https://arocapi.crate-works.org/configuration/access/#access),
+  with the licences a user holds looked up in REMS
+  ([licence checks against an external authority](https://arocapi.crate-works.org/strategies/access/#licence-checks-against-an-external-authority));
+  see [Licences](#licences) (`src/auth.ts`).
+
+ldacapi adds what LDaCA needs on top (terms as in [GLOSSARY.md](GLOSSARY.md)):
+
+- **OCFL repository**: each crate is one [OCFL](https://ocfl.io/) object on
+  disk, imported with `pnpm crates:import` (`src/ocfl.ts`).
+- **Indexing**: `pnpm index` and the admin pages build the database index (the
+  Entity and File rows arocapi reads) and the search index (one search
+  document per entity) from the repository (`src/indexer/`). Both can be
+  rebuilt at any time.
+- **Collections**: an entity's `rootCollection` is the top-level collection
+  it sits under, and is empty on a top-level collection
+  ([membership](https://arocapi.crate-works.org/concepts/entities/#membership)).
+  Indexing finds it by following `memberOf` up through the parent crates in
+  the repository, so a crate in a distributed collection gets the
+  distributed collection's root whatever order the crates are indexed in. If
+  a parent collection moves, reindex the crates under it: they keep the old
+  `rootCollection` until then.
+- **Sign-in**: the API is its own OIDC provider, signing users in at an
+  upstream provider such as CILogon (`src/oidc/`,
+  [ADR 0001](docs/adr/0001-own-oidc-provider.md)).
 - **Admin pages**: server-rendered pages at `/admin/` on their own origin,
   where admins, who sign in through our own OIDC provider, see and rebuild or
-  delete indexes (`src/admin/`).
-- **Sign-in**: the API is its own OIDC provider, signing users in at an
-  upstream provider such as CILogon (`src/oidc/`).
-- **Access control**: every entity is visible, and what a request may read is
-  decided by licence, checked against REMS (`src/auth.ts`).
-- **Files and metadata**: arocapi serves crate files from the OCFL repository
-  through its OCFL storage backend, and each entity's RO-Crate metadata from
-  the database index (`src/app.ts`).
+  delete indexes (`src/admin/`,
+  [ADR 0002](docs/adr/0002-server-rendered-admin-pages.md)).
+
+The ADRs linked here are ldacapi's own, in `docs/adr/`, not arocapi's.
 
 ## Getting started
 
@@ -114,10 +147,28 @@ have no defaults and must be set.
 
 ### Licences
 
-Content under a licence that isn't open needs an entitlement to it in REMS,
-looked up at `REMS_ENDPOINT` with `REMS_USER` and `REMS_KEY`. A user without
-one is offered an enrolment link: `ENROLLMENT_URL` with every `{licenseId}`
-replaced by the URL-encoded licence id, e.g.
+Every entity has a metadata licence, which guards its RO-Crate metadata
+(`/entity/:id/metadata`), and a content licence, which guards a file's bytes
+(`/file/:id`)
+([two licences per entity](https://arocapi.crate-works.org/concepts/licences/#two-licences-per-entity)).
+The indexer takes the metadata licence from the `license` of
+`ro-crate-metadata.json`, and the content licence from the entity's own
+`license` or else the root dataset's.
+
+A licence that isn't one of the open licences in `src/configuration.ts` needs
+an entitlement to it in REMS, looked up at `REMS_ENDPOINT` with `REMS_USER`
+and `REMS_KEY`, once per request. If REMS can't be reached or returns an
+error, the API logs it and treats the user as holding no licences, so
+restricted entities are refused until it recovers.
+
+A refused request gets 401 if it is anonymous, so the client can prompt a
+sign-in, and 403 if it is signed in
+([Denied is 401 or 403](https://arocapi.crate-works.org/concepts/visibility-vs-access/#denied-is-401-or-403-never-404)).
+The enrolment link isn't on the error: every entity the API returns carries
+an `access` object, and for each licence the user doesn't hold it has a
+`metadataAuthorizationUrl` or `contentAuthorizationUrl`. That link is
+`ENROLLMENT_URL` with every `{licenseId}` replaced by the URL-encoded licence
+id, e.g.
 
 ```dotenv
 ENROLLMENT_URL=https://rems.example.org/apply-for?resource={licenseId}
@@ -199,9 +250,11 @@ username to `ADMIN_USERS` in `.env`. Anyone else sees "Not an admin".
 
 The admin pages are at `<ADMIN_ORIGIN>/admin/`. `ADMIN_ORIGIN` is an origin,
 with no path, such as `https://admin.example.org`, and must differ from
-`OIDC_ISSUER`: crate files are served on the API's origin with their own
-content type, so HTML or SVG in a crate could run script there, and a separate
-origin keeps that away from admin. It defaults to `http://admin.localhost:8080`
+`OIDC_ISSUER`. Crate files are served on the API's origin with their own
+content type. arocapi sandboxes them, except audio and video, but that rests
+on each response's headers, so a separate origin keeps any script a crate file
+does run away from admin (ldacapi's
+[ADR 0002](docs/adr/0002-server-rendered-admin-pages.md)). It defaults to `http://admin.localhost:8080`
 outside production, which browsers resolve to this machine; in production it
 must be https. The admin pages are on only when sign-in is and `ADMIN_ORIGIN`
 is set; otherwise startup logs a warning and `/admin/` is not found. On the
@@ -319,11 +372,15 @@ from Let's Encrypt on its own. It serves two hostnames:
 | `DOMAIN`       | everything else                                           | Oni                                                          |
 | `ADMIN_DOMAIN` | `/admin/*`                                                | The API's admin pages                                        |
 
-The admin pages need their own hostname, so that script in a crate file can
-never run on their origin (ADR 0002). arocapi serves crate files, other than
-audio and video, with a `sandbox` Content-Security-Policy, which gives any HTML
-or SVG in a crate file an opaque origin, so its scripts can't reach Oni's
-sign-in on `DOMAIN`.
+The admin pages need their own hostname (see [Admin pages](#admin-pages)).
+Caddy sets no Content-Security-Policy on the API's responses: arocapi sends
+crate files with `nosniff` and, except audio and video, a `sandbox`
+Content-Security-Policy, which gives any HTML or SVG in a crate an opaque
+origin, so its scripts can't reach Oni's sign-in on `DOMAIN`
+([protective headers](https://arocapi.crate-works.org/configuration/storage/#protective-headers)).
+Audio and video are left out so they play when opened directly. On both
+hostnames Caddy adds HSTS, `nosniff` and a `strict-origin-when-cross-origin`
+referrer policy, and Oni's pages also get `X-Frame-Options: SAMEORIGIN`.
 
 No other container publishes a port, on the host or on localhost, so Postgres,
 OpenSearch, the API and Oni are reachable only from within the stack.
@@ -401,6 +458,16 @@ docker compose exec -T db pg_dump -U ldacapi -Fc ldacapi > ldacapi-$(date +%F).d
 docker compose pull
 docker compose stop api
 docker compose run --rm api pnpm db:deploy
+docker compose up -d
+```
+
+If an upgrade changes the search fields, the API and `pnpm index` stop with an
+error naming the changed field. Delete the search index (named by
+`ENTITY_INDEX`, `entities` by default), rebuild both indexes, and start again:
+
+```sh
+docker compose exec opensearch curl -sX DELETE localhost:9200/entities
+docker compose run --rm api pnpm index
 docker compose up -d
 ```
 

@@ -17,3 +17,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 ## Database migrations
 
 A migration that creates or changes arocapi's models (`prisma/arocapi`, symlinked from the arocapi package) is named after the arocapi version: after an arocapi upgrade that changes the models, run `pnpm db:migrate --name arocapi-<version>`. Name migrations for our own models (`prisma/models`) after what they change.
+
+## Upgrading arocapi
+
+After any arocapi upgrade, recheck the README's links to arocapi's docs (arocapi.crate-works.org is unversioned): each page and anchor should still exist and still say what the README relies on.
