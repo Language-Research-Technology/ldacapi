@@ -18,12 +18,7 @@ type RemsUserEntitlement = {
   mail: string;
 };
 
-const renderTemplate = new Function('licenseId', `return \`${config.enrollmentUrl}\`;`);
-function enrollmentUrl(licenseId: string): string {
-  return renderTemplate(encodeURIComponent(licenseId));
-}
-
-export const access = LicenceAccess({ hasLicence, authorisationUrl: enrollmentUrl });
+export const access = LicenceAccess({ hasLicence, ...(config.enrollmentUrl && { authorisationUrl: config.enrollmentUrl }) });
 
 export const isAuthenticated: IsAuthenticated = async ({ request }) => Boolean(await authenticateUser(request));
 

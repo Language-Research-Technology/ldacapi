@@ -112,6 +112,21 @@ set.
 With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
 have no defaults and must be set.
 
+### Licences
+
+Content under a licence that isn't open needs an entitlement to it in REMS,
+looked up at `REMS_ENDPOINT` with `REMS_USER` and `REMS_KEY`. A user without
+one is offered an enrolment link: `ENROLLMENT_URL` with every `{licenseId}`
+replaced by the URL-encoded licence id, e.g.
+
+```dotenv
+ENROLLMENT_URL=https://rems.example.org/apply-for?resource={licenseId}
+```
+
+Without `ENROLLMENT_URL` no link is offered. The API refuses to start if it
+has no `{licenseId}`, isn't a URL (https in production), or uses the old
+`${licenseId}` form (drop the `$`).
+
 ### Sign-in
 
 The API is an OIDC provider with `OIDC_ISSUER`, its public origin, as the
