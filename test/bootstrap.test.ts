@@ -3,8 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@opensearch-project/opensearch';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/configuration.ts';
+import { createSearchBackend } from '../src/indexer/search.ts';
 import { prisma } from '../src/prisma.ts';
 
 const crateIds = [
@@ -37,14 +38,25 @@ describe('seed and index', () => {
 
   it('indexes every crate into OpenSearch', async () => {
     const opensearch = new Client({ node: config.opensearchUrl });
-    const indexed = await Promise.all(
-      crateIds.map(async (id) => {
-        const { body } = await opensearch.count({ index: config.search.entityIndex, body: { query: { term: { rootCollection: id } } } });
-        return body.count > 0;
-      }),
-    );
-    await opensearch.close();
+    const search = createSearchBackend(opensearch);
+    const rows = await prisma.entity.findMany({ select: { id: true } });
+    const ids = rows.map(({ id }) => id);
+    expect(ids).toEqual(expect.arrayContaining(crateIds));
 
-    expect(indexed).toEqual(crateIds.map(() => true));
+    // Documents are searchable after OpenSearch's next refresh
+    await vi.waitFor(async () => {
+      const { total } = await search.search({
+        searchType: 'basic',
+        query: '',
+        filters: { terms: {}, ranges: {} },
+        limit: 1,
+        offset: 0,
+        sort: 'relevance',
+        order: 'asc',
+        visibility: { id: { in: ids } },
+      });
+      expect(total).toBe(ids.length);
+    });
+    await opensearch.close();
   });
 });

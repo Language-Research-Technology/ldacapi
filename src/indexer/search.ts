@@ -5,7 +5,7 @@ import type { Entity, ROCrate } from 'ro-crate';
 import { config } from '../configuration.ts';
 import { logger } from '../logger.ts';
 import { firstStringOrId } from '../utils.ts';
-import { pickSingleMemberOf } from './database.ts';
+import { countRows, pickSingleMemberOf, rowIds } from './database.ts';
 import type { BaseOptions, CrateObject } from './indexer.ts';
 import { entityClass, Indexer, recordType } from './indexer.ts';
 
@@ -32,7 +32,8 @@ const fields = {
 
 type Document = SearchDocument<typeof fields>;
 
-export const createSearchBackend = (client: Client) => OpenSearchBackend({ client, fields, indexName: config.search.entityIndex });
+export const createSearchBackend = (client: Client, options: { refresh?: boolean | 'wait_for' } = {}) =>
+  OpenSearchBackend({ client, fields, indexName: config.search.entityIndex, ...options });
 
 type SearchBackend = ReturnType<typeof createSearchBackend>;
 
@@ -160,9 +161,10 @@ export class SearchIndexer extends Indexer {
     await this.search.createIndex();
   }
 
+  /** A crate's documents are found by its database rows, so delete them before the rows */
   async delete(crateId?: string) {
     if (crateId) {
-      await this.client.deleteByQuery({ index: this.indexName, refresh: true, body: { query: { term: { rootCollection: crateId } } } });
+      await this.search.remove(await rowIds(crateId));
     } else {
       await this.client.indices.delete({ index: this.indexName, ignore_unavailable: true });
     }
@@ -170,15 +172,7 @@ export class SearchIndexer extends Indexer {
   }
 
   async count(crateId?: string) {
-    try {
-      const res = await this.client.count({
-        index: this.indexName,
-        ...(crateId && { body: { query: { term: { rootCollection: crateId } } } }),
-      });
-      return res.body.count;
-    } catch {
-      return 0;
-    }
+    return await countRows(crateId);
   }
 
   async _index({ crateObject, crate, paths, license }: Parameters<Indexer['_index']>[0]) {
@@ -197,7 +191,6 @@ export class SearchIndexer extends Indexer {
       }
     }
     await this.indexDocuments(docs);
-    await this.client.indices.refresh({ index: this.indexName });
   }
 
   /** Index a batch, falling back to one at a time so one bad document doesn't lose the rest */

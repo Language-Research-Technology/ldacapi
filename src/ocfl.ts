@@ -142,6 +142,21 @@ export async function getState(crateId: string, type?: string) {
   return type ? { [type]: stateCache[crateId]?.[type] } : { ...stateCache[crateId] };
 }
 
+/** The search index finds a crate's documents by its database rows, so is deleted from first */
+const DELETE_ORDER = ['search', 'database'];
+
+/** Stops at the first failure, so the rows that find a crate's search documents outlive them */
+async function deleteFrom(types: string[], crateId?: string) {
+  for (const t of types.toSorted((a, b) => DELETE_ORDER.indexOf(a) - DELETE_ORDER.indexOf(b))) {
+    try {
+      await INDEXER[t]?.delete(crateId);
+    } catch (error) {
+      log.error({ err: error, crateId, indexer: t }, 'Error deleting index');
+      throw error;
+    }
+  }
+}
+
 async function indexObject(crateId: string, types: string[], force?: boolean) {
   try {
     const ocflObject = repository.object(crateId);
@@ -150,16 +165,21 @@ async function indexObject(crateId: string, types: string[], force?: boolean) {
     const jsonContent = await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text();
     const rawCrate = JSON.parse(jsonContent);
     const crate = await ROCrate.create(rawCrate);
+    if (force) {
+      setState(ocflObject.id, types, State.INDEXING);
+      try {
+        await deleteFrom(types, crate.rootId);
+      } catch {
+        setState(ocflObject.id, types);
+        return;
+      }
+    }
     for (const t of types) {
       const indexer = INDEXER[t];
       if (indexer) {
         setState(ocflObject.id, t, State.INDEXING);
         try {
-          if (force) {
-            await indexer.delete(crate.rootId);
-          }
-          const crateObject = wrap(ocflObject);
-          await indexer.index({ crateObject, crate });
+          await indexer.index({ crateObject: wrap(ocflObject), crate });
         } catch (error) {
           log.error({ err: error, crateId: ocflObject.id, indexer: t }, 'Error indexing object');
         } finally {
@@ -201,10 +221,12 @@ export async function createIndex(crateIds?: string | string[] | RegExp, type?: 
 
 export async function deleteIndex(crateId?: string, type?: string | string[]) {
   const types = type ? ([] as string[]).concat(type) : Object.keys(INDEXER);
-  const indexers = types.map((t) => INDEXER[t]).filter((i) => !!i);
   setState(crateId, types, State.DELETING);
-  await Promise.allSettled(indexers.map((indexer) => indexer.delete(crateId)));
-  setState(crateId, types);
+  try {
+    await deleteFrom(types, crateId);
+  } finally {
+    setState(crateId, types);
+  }
 }
 
 export async function* objects(prefix?: string, refresh?: boolean) {

@@ -46,7 +46,7 @@ export class DatabaseIndexer extends Indexer {
           rootCollection: crate.rootId,
           metadataLicenseId: metadataLicense,
           contentLicenseId,
-          meta: { rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
+          meta: { crateId, rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
         },
       };
       if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
@@ -81,15 +81,23 @@ export class DatabaseIndexer extends Indexer {
   }
 
   async delete(crateId?: string) {
-    await prisma.file.deleteMany({ where: crateId ? { entity: { rootCollection: crateId } } : {} });
-    await prisma.entity.deleteMany({ where: crateId ? { rootCollection: crateId } : {} });
+    await prisma.file.deleteMany({ where: { entity: rowsOf(crateId) } });
+    await prisma.entity.deleteMany({ where: rowsOf(crateId) });
     log.debug({ crateId }, 'Index deleted');
   }
 
   async count(crateId?: string) {
-    return await prisma.entity.count(crateId ? { where: { id: crateId } } : undefined);
+    return await countRows(crateId);
   }
 }
+
+/** The entity rows indexed from `crateId`, or every row */
+const rowsOf = (crateId?: string): Prisma.EntityWhereInput => (crateId ? { meta: { path: ['crateId'], equals: crateId } } : {});
+
+export const countRows = (crateId?: string) => prisma.entity.count({ where: rowsOf(crateId) });
+
+/** The ids of the entity rows indexed from `crateId` */
+export const rowIds = async (crateId: string) => (await prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true } })).map(({ id }) => id);
 
 export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
