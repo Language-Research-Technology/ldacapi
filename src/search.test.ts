@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ocflRepository } from '../test/admin.ts';
 import { buildTestApp } from '../test/app.ts';
 
-const COLLECTION = 'http://pcdm.org/models#Collection';
 const OBJECT = 'http://pcdm.org/models#Object';
 const MEDIA = 'http://schema.org/MediaObject';
 const BUNDLED = 'arcp://name,bundled';
@@ -36,21 +35,31 @@ afterAll(async () => {
   await rm(storage, { recursive: true, force: true });
 });
 
-describe('search by entityType', () => {
-  it('declares an entityType facet and no type facet', async () => {
+describe('search by recordType and entityType', () => {
+  it('declares a recordType facet, and entityType as a filter only', async () => {
     const response = await started.app.inject({ method: 'GET', url: `${started.config.prefix}/capabilities` });
 
-    const { facets } = response.json().search;
-    expect(facets).toHaveProperty('entityType');
+    const { facets, filters } = response.json().search;
+    expect(facets).toHaveProperty('recordType');
+    expect(facets).not.toHaveProperty('entityType');
     expect(facets).not.toHaveProperty('type');
+    expect(filters).toHaveProperty('entityType');
   });
 
-  it("facets on each entity's class URI", async () => {
+  it("facets on a readable label for each entity's class", async () => {
     const { facets } = await search({ query: '' });
 
-    const names = facets.entityType.map(({ name }: { name: string }) => name);
-    expect(names).toEqual(expect.arrayContaining([COLLECTION, OBJECT, MEDIA]));
-    expect(names.every((name: string) => /^https?:\/\//.test(name))).toBe(true);
+    expect(facets).not.toHaveProperty('entityType');
+    const names = facets.recordType.map(({ name }: { name: string }) => name);
+    expect(names).toEqual(expect.arrayContaining(['Collection', 'Object', 'File']));
+    expect(names.some((name: string) => name.includes('://'))).toBe(false);
+  });
+
+  it('filters on recordType', async () => {
+    const { total, entities } = await search({ query: '', filters: { recordType: ['File'] }, limit: 100 });
+
+    expect(total).toBeGreaterThan(0);
+    expect(entities.every(({ entityType }: { entityType: string }) => entityType === MEDIA)).toBe(true);
   });
 
   it('filters on entityType, agreeing with listing entities by entityType', async () => {

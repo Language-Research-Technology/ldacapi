@@ -6,9 +6,9 @@ import { searchDocument } from './search.ts';
 const ROOT = 'arcp://name,test';
 const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
 
-const crateWith = async (entity: Record<string, unknown>) => {
+const crateWith = async (entity: Record<string, unknown>, terms: Record<string, string> = {}) => {
   const crate = await ROCrate.create({
-    '@context': ['https://w3id.org/ro/crate/1.1/context', { '@vocab': 'http://schema.org/', ldac: 'https://w3id.org/ldac/terms#' }],
+    '@context': ['https://w3id.org/ro/crate/1.1/context', { '@vocab': 'http://schema.org/', ldac: 'https://w3id.org/ldac/terms#', ...terms }],
     '@graph': [
       { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', about: { '@id': ROOT }, license: { '@id': LICENSE } },
       { '@id': ROOT, '@type': ['Dataset', 'RepositoryCollection'], name: 'Root', hasPart: [{ '@id': 'data.txt' }] },
@@ -38,6 +38,7 @@ describe('searchDocument', () => {
       id: `${ROOT}/data.txt`,
       name: 'Data',
       entityType: 'http://schema.org/MediaObject',
+      recordType: 'File',
       inLanguage: ['English'],
       communicationMode: ['https://w3id.org/ldac/terms#SpokenLanguage'],
       encodingFormat: ['text/plain'],
@@ -47,6 +48,29 @@ describe('searchDocument', () => {
       location: { lat: -27.47, lng: 153.02 },
       text: 'hello world',
     });
+  });
+
+  it.each([
+    [['Dataset', 'RepositoryCollection'], 'https://w3id.org/ldac/profile#Collection', 'Collection'],
+    [['Dataset', 'RepositoryObject'], 'https://w3id.org/ldac/profile#Object', 'Object'],
+    ['Person', 'https://w3id.org/ldac/profile#Person', 'Person'],
+    ['Organization', 'https://w3id.org/ldac/profile#Organization', 'Organisation'],
+    ['SoftwareApplication', 'https://w3id.org/ldac/profile#SoftwareApplication', 'Software Application'],
+  ])('labels a %s record as %s', async (type, profile, label) => {
+    const { crate, entity } = await crateWith({ '@type': type, conformsTo: { '@id': profile } });
+
+    expect((await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).recordType).toBe(label);
+  });
+
+  it.each([
+    ['http://schema.org/Thing', 'Thing'],
+    ['https://example.com/terms#Widget', 'Widget'],
+  ])('labels an unknown class %s by its last segment', async (uri, label) => {
+    const { crate, entity } = await crateWith({}, { File: uri });
+
+    const doc = await searchDocument(crate, crateObject, entity, LICENSE, ROOT);
+
+    expect(doc).toMatchObject({ entityType: uri, recordType: label });
   });
 
   it('has no type field', async () => {

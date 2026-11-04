@@ -77,7 +77,7 @@ describe('an entity whose row fails to be written', () => {
 
     expect(entities.map(({ id }: { id: string }) => id).sort()).toEqual([ROOT, WRITTEN]);
     expect(total).toBe(2);
-    expect(facets.entityType.reduce((sum: number, { count }: { count: number }) => sum + count, 0)).toBe(2);
+    expect(facets.recordType.reduce((sum: number, { count }: { count: number }) => sum + count, 0)).toBe(2);
   });
 
   it('is not counted when the search index is rebuilt alone', async () => {

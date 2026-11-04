@@ -15,7 +15,8 @@ const fields = {
   name: { type: 'text', label: 'Name', weight: 3, advanced: true, sort: true },
   description: { type: 'text', label: 'Description', advanced: true },
   text: { type: 'text', label: 'Text', advanced: true },
-  entityType: { type: 'keyword', label: 'Record Type', facet: true },
+  entityType: { type: 'keyword', label: 'Entity Type', filter: true },
+  recordType: { type: 'keyword', label: 'Record Type', facet: true },
   inLanguage: { type: 'keyword', label: 'Language', advanced: true, facet: true },
   communicationMode: { type: 'keyword', label: 'Communication Mode', facet: true },
   linguisticGenre: { type: 'keyword', label: 'Linguistic Genre', facet: true },
@@ -41,6 +42,18 @@ type SearchOptions = BaseOptions & {
   client: Client;
   search: SearchBackend;
 };
+
+const CLASS_LABELS: Record<string, string> = {
+  'http://pcdm.org/models#Collection': 'Collection',
+  'http://pcdm.org/models#Object': 'Object',
+  'http://schema.org/MediaObject': 'File',
+  'http://schema.org/Person': 'Person',
+  'http://schema.org/Organization': 'Organisation',
+  'http://schema.org/SoftwareApplication': 'Software Application',
+};
+
+/** A readable label for a class URI, falling back to its last segment */
+const classLabel = (uri: string) => CLASS_LABELS[uri] ?? uri.split(/[#/]/).at(-1) ?? uri;
 
 const values = (entity: Entity, name: string): unknown[] => [...(entity[name] ?? []), ...(entity[`ldac:${name}`] ?? [])];
 
@@ -112,6 +125,7 @@ export async function searchDocument(
 ): Promise<Document> {
   const id: string = entity['@id'];
   const type = recordType(entity);
+  const entityType = type && entityClass(crate, type);
   const [datePublished] = dates(entity, 'datePublished');
   const memberOf = pickSingleMemberOf(entity);
   const point = location(entity);
@@ -120,7 +134,7 @@ export async function searchDocument(
     id,
     name: entity.name?.join('; ') || id,
     description: labels(entity, 'description'),
-    ...(type && { entityType: entityClass(crate, type) }),
+    ...(entityType && { entityType, recordType: classLabel(entityType) }),
     inLanguage: labels(entity, 'inLanguage'),
     communicationMode: labels(entity, 'communicationMode'),
     linguisticGenre: labels(entity, 'linguisticGenre'),
