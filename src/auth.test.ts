@@ -1,6 +1,6 @@
 import type { EntityRow, RequestContext } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { access, isAuthenticated } from './auth.ts';
 
 const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
@@ -22,18 +22,39 @@ const entity = (metadataLicenseId: string, contentLicenseId: string): EntityRow 
 
 const anonymous = () => ({ request: { headers: {} } as FastifyRequest }) as RequestContext;
 
+/** `access` as configured by `ENROLLMENT_URL`, read on first import */
+const accessWith = async (enrollmentUrl: string) => {
+  vi.stubEnv('ENROLLMENT_URL', enrollmentUrl);
+  vi.resetModules();
+  try {
+    return (await import('./auth.ts')).access;
+  } finally {
+    vi.unstubAllEnvs();
+  }
+};
+
 describe('access', () => {
   it('grants metadata and content under open licences', async () => {
     const open = entity(OPEN, OPEN);
     expect(await access(open, anonymous(), open)).toEqual({ metadata: true, content: true });
   });
 
-  it('denies content under a restricted licence and offers an enrolment link', async () => {
+  it('denies content under a restricted licence and offers its enrolment link', async () => {
+    const access = await accessWith('https://rems.example.org/apply-for?resource={licenseId}');
     const restricted = entity(OPEN, RESTRICTED);
-    const result = await access(restricted, anonymous(), restricted);
-    expect(result).toMatchObject({ metadata: true, content: false });
-    expect(result).toHaveProperty('contentAuthorizationUrl');
-    expect(result).not.toHaveProperty('metadataAuthorizationUrl');
+
+    expect(await access(restricted, anonymous(), restricted)).toEqual({
+      metadata: true,
+      content: false,
+      contentAuthorizationUrl: 'https://rems.example.org/apply-for?resource=https%3A%2F%2Fexample.org%2Flicenses%2Frestricted',
+    });
+  });
+
+  it('offers no enrolment link when ENROLLMENT_URL is unset', async () => {
+    const access = await accessWith('');
+    const restricted = entity(OPEN, RESTRICTED);
+
+    expect(await access(restricted, anonymous(), restricted)).toEqual({ metadata: true, content: false });
   });
 });
 

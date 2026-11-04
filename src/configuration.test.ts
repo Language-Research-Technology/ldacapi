@@ -226,6 +226,56 @@ describe('loadConfig', () => {
     expect(loadConfig({}).adminUsers).toEqual([]);
   });
 
+  describe('ENROLLMENT_URL', () => {
+    const LICENCE = 'https://example.org/licenses/restricted#A';
+
+    it('offers no enrolment URL when unset or empty', () => {
+      expect(loadConfig({}).enrollmentUrl).toBeUndefined();
+      expect(loadConfig({ ENROLLMENT_URL: '' }).enrollmentUrl).toBeUndefined();
+    });
+
+    it('fills every {licenseId} with the URL-encoded licence id', () => {
+      const { enrollmentUrl } = loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource={licenseId}&return={licenseId}' });
+
+      expect(enrollmentUrl?.(LICENCE)).toBe(
+        'https://rems.example.org/apply-for?resource=https%3A%2F%2Fexample.org%2Flicenses%2Frestricted%23A&return=https%3A%2F%2Fexample.org%2Flicenses%2Frestricted%23A',
+      );
+    });
+
+    it('rejects the old JavaScript template form, saying to use {licenseId}', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the old form, literally
+      expect(() => loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource=${licenseId}' })).toThrow(
+        /Use \{licenseId\}, not \$\{licenseId\}[\s\S]*ENROLLMENT_URL/,
+      );
+    });
+
+    it('rejects a value without {licenseId}', () => {
+      expect(() => loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for' })).toThrow(/\{licenseId\}[\s\S]*ENROLLMENT_URL/);
+    });
+
+    it('rejects a value that is not an absolute URL', () => {
+      expect(() => loadConfig({ ENROLLMENT_URL: '/apply-for?resource={licenseId}' })).toThrow(/ENROLLMENT_URL/);
+    });
+
+    it('rejects {licenseId} where a licence id would not make a URL', () => {
+      expect(() => loadConfig({ ENROLLMENT_URL: 'https://{licenseId}.rems.example.org/apply-for' })).toThrow(/ENROLLMENT_URL/);
+    });
+
+    it('keeps a literal ${ other than the old placeholder', () => {
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal ${ in the URL
+      const fragment = '#${x}';
+      const { enrollmentUrl } = loadConfig({ ENROLLMENT_URL: `https://rems.example.org/apply-for?resource={licenseId}${fragment}` });
+
+      expect(enrollmentUrl?.('A')).toBe(`https://rems.example.org/apply-for?resource=A${fragment}`);
+    });
+
+    it('requires an https ENROLLMENT_URL in production', () => {
+      expect(() => loadConfig({ ...PRODUCTION, ENROLLMENT_URL: 'http://rems.example.org/apply-for?resource={licenseId}' })).toThrow(
+        /https[\s\S]*ENROLLMENT_URL/,
+      );
+    });
+  });
+
   describe('ADMIN_ORIGIN', () => {
     const signIn = { ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' };
 

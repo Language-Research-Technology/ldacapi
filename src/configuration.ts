@@ -62,6 +62,10 @@ const commaList = z.string().transform((value) =>
 
 const cookieKeys = commaList.pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')).min(1, 'Needs at least one key'));
 
+const SAMPLE_LICENSE_ID = 'https://example.org/licence#A';
+
+const fillLicenseId = (template: string, licenseId: string) => template.replaceAll('{licenseId}', encodeURIComponent(licenseId));
+
 const REQUIRED_WITH_UPSTREAM = 'Required when OIDC_UPSTREAM_ISSUER is set';
 
 const requiredWithUpstream = (production: boolean) => {
@@ -95,6 +99,18 @@ export function loadConfig(processEnv: Env) {
     }
     return origin;
   });
+  const enrollmentUrl = z
+    .string()
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: names the old form
+    .refine((template) => !template.includes('${licenseId}'), 'Use {licenseId}, not ${licenseId}')
+    .refine((template) => template.includes('{licenseId}'), 'Must contain {licenseId}')
+    .superRefine((template, ctx) => {
+      for (const issue of url.safeParse(fillLicenseId(template, SAMPLE_LICENSE_ID)).error?.issues ?? []) {
+        ctx.addIssue({ ...issue });
+      }
+    })
+    .transform((template) => (licenseId: string) => fillLicenseId(template, licenseId))
+    .optional();
   const prefix = '/api';
 
   const result = z
@@ -113,7 +129,7 @@ export function loadConfig(processEnv: Env) {
       REMS_USER: optional,
       REMS_KEY: optional,
       REMS_ENDPOINT: optional,
-      ENROLLMENT_URL: optional,
+      ENROLLMENT_URL: enrollmentUrl,
       OIDC_ISSUER: nodeEnv === 'production' ? origin.optional() : origin.default('http://localhost:8080'),
       OIDC_CLIENTS: oidcClients.default([]),
       OIDC_UPSTREAM_ISSUER: url.optional(),
