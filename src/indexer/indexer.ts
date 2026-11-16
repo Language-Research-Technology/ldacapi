@@ -29,14 +29,11 @@ export type LogicalPaths = Map<string, string>;
 
 export interface CrateFile {
   size: number;
-  crc32: string;
 }
 
 export interface CrateObject {
   /** The id of the OCFL object holding the crate */
   id: string;
-  /** The absolute path of the root directory of the crate */
-  root: string;
   /** The text content of a file within the crate */
   text(path: string): Promise<string>;
   /** The metadata of a file within the crate, such as size */
@@ -117,20 +114,20 @@ export class Indexer {
     const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
     const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
     if (!rootDataset) {
-      log.warn({ path: crateObject.root }, 'Skipped: Does not contain an ROCrate with a valid root dataset');
+      log.warn({ crateId: crateObject.id }, 'Skipped: Does not contain an ROCrate with a valid root dataset');
     } else if (crateId === './') {
-      log.warn({ path: crateObject.root }, "Skipped: Cannot process a crate with invalid identifier ('./')");
+      log.warn({ crateId: crateObject.id }, "Skipped: Cannot process a crate with invalid identifier ('./')");
     } else if (!metadataLicense) {
-      log.warn({ path: crateObject.root, crateId }, 'Skipped: No metadata license found');
+      log.warn({ crateId }, 'Skipped: No metadata license found');
     } else if (!license) {
-      log.warn({ path: crateObject.root, crateId }, 'Skipped: No license found');
+      log.warn({ crateId }, 'Skipped: No license found');
     } else {
       log.info({ crateId }, 'Indexing crate');
       const paths = this.deriveUniqueEntityIds(crate);
       try {
         await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
       } catch (error) {
-        log.error({ err: error, crateId, path: crateObject.root }, 'Error indexing crate');
+        log.error({ err: error, crateId }, 'Error indexing crate');
       }
     }
   }

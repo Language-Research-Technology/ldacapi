@@ -25,7 +25,7 @@ export const repositoryOf = (crates: { id: string; name?: string; state: Record<
     storage: () => ({ content: {} }),
     async *objects() {
       for (const { id, name = id, state } of crates) {
-        yield { id, name, path: '', state };
+        yield { id, name, state };
       }
     },
     getState: async (crateId: string) => crates.find(({ id }) => id === crateId)?.state ?? {},

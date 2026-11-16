@@ -126,7 +126,6 @@ set.
 | `DATABASE_URL`                                             | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 | `OPENSEARCH_URL`                                           | `http://localhost:9200`                               |
 | `OCFL_ROOT`                                                | `storage/ocfl`                                        |
-| `OCFL_SCRATCH`                                             | `scratch` beside `OCFL_ROOT`                          |
 | `LDACAPI_PORT`                                             | `8080`                                                |
 | `LDACAPI_HOST`                                             | `localhost`                                           |
 | `LDACAPI_MAX_PARAM_LENGTH`                                 | `500`                                                 |
@@ -352,11 +351,10 @@ docker run --rm ldacapi pnpm generate-keys >> ldacapi.env
 ### Storage
 
 The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
-(and `OCFL_SCRATCH`, if you need it elsewhere) to paths inside the container
-(above, `OCFL_ROOT=/storage/ocfl`). The API runs as the
-image's `node` user, uid 1000, so the OCFL repository must be readable by uid
-1000 and the scratch directory writable by it. `pnpm crates:import` writes to the
-repository, so give it write access too when you run it.
+to a path inside the container (above, `OCFL_ROOT=/storage/ocfl`). The API runs
+as the image's `node` user, uid 1000, so the OCFL repository must be readable by
+uid 1000. `pnpm crates:import` writes to the repository, so give it write access
+too when you run it.
 
 ## Production with Docker Compose
 
@@ -399,10 +397,11 @@ sudo sysctl --system
 ```
 
 Storage is a directory on the host, usually an NFS mount, set by `STORAGE_DIR`
-in `.env`. The OCFL repository is its `ocfl` directory, and imports are staged
-in its `scratch` directory. Both must be in the one mount: OCFL commits an
-import by renaming it from scratch into the repository, and a rename can't
-cross mounts. The API runs as uid 1000, so the directory must be writable by
+in `.env`. The OCFL repository is its `ocfl` directory. Imports are staged
+inside the repository, in `extensions/ocfl-js-workspace`, and committed by
+renaming them into place, so the repository must be on one filesystem, with no
+mount point inside it, and that filesystem must support hard links, as NFS
+does. The API runs as uid 1000, so the directory must be writable by
 uid 1000: on NFS, set the owner on the server or map the export to uid 1000, as
 root in the container is squashed. Otherwise `pnpm ocfl:init` fails with
 `EACCES: permission denied, mkdir '/storage/ocfl'`. Serving and indexing only

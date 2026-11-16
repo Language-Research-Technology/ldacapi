@@ -49,14 +49,13 @@ describe('DatabaseIndexer', () => {
     });
     const crateObject: CrateObject = {
       id: 'database-test',
-      root: '/nowhere',
       text: async () => '',
       file: async (path) => {
         const size = inventory[path];
         if (size === undefined) {
           throw new Error(`Not in inventory: ${path}`);
         }
-        return { size, crc32: '' };
+        return { size };
       },
     };
     await indexer.index({ crateObject, crate, topCollection: ROOT });
