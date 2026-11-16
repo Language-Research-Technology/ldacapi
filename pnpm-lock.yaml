@@ -185,8 +185,8 @@ importers:
         specifier: ^12.0.1
         version: 12.0.1
       '@ocfl/ocfl-fs':
-        specifier: ^1.0.0-beta.58
-        version: 1.0.0-beta.58
+        specifier: 1.0.0-beta.59
+        version: 1.0.0-beta.59
       '@opensearch-project/opensearch':
         specifier: ^3.9.0
         version: 3.9.0
@@ -197,8 +197,8 @@ importers:
         specifier: ^7.10.1
         version: 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
       arocapi:
-        specifier: 5.0.0-beta.9
-        version: 5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.58)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
+        specifier: 5.0.0-beta.10
+        version: 5.0.0-beta.10(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.59)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
       eta:
         specifier: ^4.6.0
         version: 4.6.0
@@ -515,8 +515,8 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
-  '@ocfl/ocfl-fs@1.0.0-beta.58':
-    resolution: {integrity: sha512-+dbRKEQmpZNr/C2VjHyXciktmBLOr+V0q65PH2Gknqlh135gU8HXP1UFBBH2koBmjNfSo6hwTE9ro+VV9gcfgQ==}
+  '@ocfl/ocfl-fs@1.0.0-beta.59':
+    resolution: {integrity: sha512-CoF8xJ6xz7rlDLahNI+VOMp2OMcvUmFjHUS/7GZ72idVMx2Tr8QFet4fuYNrUqWN6w1tqAFbWc6GrFOoM8ItWA==}
     engines: {node: '>=22.12.0'}
 
   '@opensearch-project/opensearch@3.9.0':
@@ -1498,13 +1498,13 @@ packages:
     resolution: {integrity: sha512-VipTB0gXgGIFO2Rg9yEVN5wLt2AurJcZqDbgmYSwPwsykhLrQhs240/bfceev4w68lI8JshoOJIk9uW7tFzROw==}
     engines: {node: '>=22'}
 
-  arocapi@5.0.0-beta.9:
-    resolution: {integrity: sha512-qBT0SqR9AsvjHbOZyk3GvzGstdqxm5zp4ufANCXcAJ2UpIefEnZma+1BourvY3gbvYNpcGx/9fx2l4s74Zsj9g==}
+  arocapi@5.0.0-beta.10:
+    resolution: {integrity: sha512-BXxqc5tywkcbszcKIU8c2wX4aaiydXYVvaQpjlakT/YEB7WF1SHn/ljM5SHJwO/q/3BSkiXXxvTekuyhdN0oIA==}
     engines: {node: '>=22.18'}
     peerDependencies:
       '@aws-sdk/client-s3': ^3
       '@aws-sdk/s3-request-presigner': ^3
-      '@ocfl/ocfl-fs': ^0.4.0
+      '@ocfl/ocfl-fs': ^1.0.0-beta.59
       '@opensearch-project/opensearch': ^3.9.0
       '@prisma/client': ^7.10.0
       fastify: ^5.12.7
@@ -3344,7 +3344,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@ocfl/ocfl-fs@1.0.0-beta.58': {}
+  '@ocfl/ocfl-fs@1.0.0-beta.59': {}
 
   '@opensearch-project/opensearch@3.9.0':
     dependencies:
@@ -4137,7 +4137,7 @@ snapshots:
 
   argue-cli@3.2.0: {}
 
-  arocapi@5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.58)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
+  arocapi@5.0.0-beta.10(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.59)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
     dependencies:
       '@fastify/sensible': 6.0.7
       '@prisma/client': 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
@@ -4146,7 +4146,7 @@ snapshots:
       fastify-type-provider-zod: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
       zod: 4.6.7
     optionalDependencies:
-      '@ocfl/ocfl-fs': 1.0.0-beta.58
+      '@ocfl/ocfl-fs': 1.0.0-beta.59
       '@opensearch-project/opensearch': 3.9.0
     transitivePeerDependencies:
       - '@fastify/swagger'

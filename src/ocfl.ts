@@ -1,4 +1,4 @@
-import { OcflError, type OcflObject, type StorageRoot } from '@ocfl/ocfl-fs';
+import type { OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
 import type { StorageBackend } from 'arocapi';
 import { OcflStorage } from 'arocapi/storage/ocfl';
@@ -124,10 +124,10 @@ const loadObject = (crateId: string) => repository.open(crateId);
 /** Each crate's OCFL object, logging those that can't be read */
 async function* readableObjects() {
   for await (const entry of repository.objects()) {
-    if (entry instanceof OcflError) {
-      log.error({ err: entry }, 'Error reading object');
+    if ('object' in entry) {
+      yield entry.object;
     } else {
-      yield entry;
+      log.error({ err: entry.error, objectRoot: entry.objectRoot, crateId: entry.id }, 'Error reading object');
     }
   }
 }
