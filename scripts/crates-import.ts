@@ -10,7 +10,10 @@ const source = resolve(process.argv[2] ?? 'test-data');
 
 /** Merges the crate at `path` into its OCFL object, creating the object on first import */
 async function importCrate(repository: StorageRoot, crateId: string, path: string) {
-  const details: VersionDetails = { message: `Imported from ${path}`, user: { name: 'ldacapi crates:import' } };
+  const details: VersionDetails = {
+    message: `Imported from ${path}`,
+    user: { name: 'ldacapi crates:import', address: 'https://github.com/Language-Research-Technology/ldacapi' },
+  };
   try {
     return await repository.create(crateId, details, (draft) => draft.import(path));
   } catch (error) {

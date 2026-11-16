@@ -28,7 +28,11 @@ describe('crates:import', () => {
   it('records who imported each crate, and from where', async () => {
     importCrates();
 
-    expect(await head(BUNDLED)).toMatchObject({ number: 1, message: `Imported from ${join(source, 'bundled')}`, user: { name: 'ldacapi crates:import' } });
+    expect(await head(BUNDLED)).toMatchObject({
+      number: 1,
+      message: `Imported from ${join(source, 'bundled')}`,
+      user: { name: 'ldacapi crates:import', address: 'https://github.com/Language-Research-Technology/ldacapi' },
+    });
   });
 
   it('adds no version when a crate is imported again unchanged', async () => {
