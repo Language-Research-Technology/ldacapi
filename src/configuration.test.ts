@@ -31,7 +31,7 @@ describe('loadConfig', () => {
     expect(config.databaseUrl).toBe('postgresql://ldacapi:ldacapi@localhost:5432/ldacapi');
     expect(config.opensearchUrl).toBe('http://localhost:9200');
     expect(config.port).toBe(8080);
-    expect(config.ocfl).toEqual({ root: resolve('storage/ocfl'), scratch: resolve('storage/scratch') });
+    expect(config.ocfl).toEqual({ root: resolve('storage/ocfl') });
   });
 
   it('uses the test database and index, and logs nothing, in test', () => {
@@ -47,11 +47,6 @@ describe('loadConfig', () => {
 
     expect(config.port).toBe(9000);
     expect(config.search.entityIndex).toBe('other');
-  });
-
-  it('puts OCFL scratch beside the OCFL root unless set', () => {
-    expect(loadConfig({ OCFL_ROOT: '/data/ocfl' }).ocfl).toEqual({ root: '/data/ocfl', scratch: '/data/scratch' });
-    expect(loadConfig({ OCFL_ROOT: '/data/ocfl', OCFL_SCRATCH: '/tmp/ocfl' }).ocfl.scratch).toBe('/tmp/ocfl');
   });
 
   it('treats empty values as unset', () => {

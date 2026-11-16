@@ -185,8 +185,8 @@ importers:
         specifier: ^12.0.1
         version: 12.0.1
       '@ocfl/ocfl-fs':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^1.0.0-beta.58
+        version: 1.0.0-beta.58
       '@opensearch-project/opensearch':
         specifier: ^3.9.0
         version: 3.9.0
@@ -198,7 +198,7 @@ importers:
         version: 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
       arocapi:
         specifier: 5.0.0-beta.9
-        version: 5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@0.4.0)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
+        version: 5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.58)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
       eta:
         specifier: ^4.6.0
         version: 4.6.0
@@ -236,9 +236,6 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^21.2.4
         version: 21.2.4
-      '@ocfl/ocfl':
-        specifier: ^0.4.0
-        version: 0.4.0
       '@tailwindcss/cli':
         specifier: ^4.3.3
         version: 4.3.3
@@ -518,12 +515,9 @@ packages:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
 
-  '@ocfl/ocfl-fs@0.4.0':
-    resolution: {integrity: sha512-eugqs7N5J7OdvMorMLji60DQfORRs2Ef39SITuVp0o80ZKdcuEctltl+OosaHY/rA1YJdcXgwSfGGWjsLtg0pw==}
-
-  '@ocfl/ocfl@0.4.0':
-    resolution: {integrity: sha512-c9LpGa/V+iYYNmLVIYF1SThx9SPMohe1Y8QsTeyKIyBQAOgMzb45my3HxVkTBA+Gkh+hRglx9adu2Pv8+F8RAg==}
-    engines: {node: '>=18.0.0'}
+  '@ocfl/ocfl-fs@1.0.0-beta.58':
+    resolution: {integrity: sha512-+dbRKEQmpZNr/C2VjHyXciktmBLOr+V0q65PH2Gknqlh135gU8HXP1UFBBH2koBmjNfSo6hwTE9ro+VV9gcfgQ==}
+    engines: {node: '>=22.12.0'}
 
   '@opensearch-project/opensearch@3.9.0':
     resolution: {integrity: sha512-ksIEi0wyIjVncfRwaxt5v6H4qL1aQO2eE3MxKyXGCLnR70YTSCDp+JGhdx2LpyMjtCFvr71DWtYQg9SK3pcNnA==}
@@ -2033,9 +2027,6 @@ packages:
   graphmatch@1.1.1:
     resolution: {integrity: sha512-5ykVn/EXM1hF0XCaWh05VbYvEiOL2lY1kBxZtaYsyvjp7cmWOU1XsAdfQBwClraEofXDT197lFbXOEVMHpvQOg==}
 
-  hash-wasm@4.12.0:
-    resolution: {integrity: sha512-+/2B2rYLb48I/evdOIhP+K/DD2ca2fgBjp6O+GBEnCDk2e4rpeXIK8GvIyRPjTezgmWn9gmKwkQjjx6BtqDHVQ==}
-
   help-me@5.0.0:
     resolution: {integrity: sha512-7xgomUX6ADmcYzFik0HzAxh/73YlKR9bmFzf51CZwR+b6YtzU2m0u49hQCqV6SvlqIqsaxovfwdvbnsw3b/zpg==}
 
@@ -2109,9 +2100,6 @@ packages:
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
     engines: {node: '>=10'}
-
-  js-sha512@0.9.0:
-    resolution: {integrity: sha512-mirki9WS/SUahm+1TbAPkqvbCiCfOAAsyXeHxK1UkullnJVVqoJG2pL9ObvT05CN+tM7fxhfYm0NbXn+1hWoZg==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -3356,14 +3344,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.4
     optional: true
 
-  '@ocfl/ocfl-fs@0.4.0':
-    dependencies:
-      '@ocfl/ocfl': 0.4.0
-
-  '@ocfl/ocfl@0.4.0':
-    dependencies:
-      hash-wasm: 4.12.0
-      js-sha512: 0.9.0
+  '@ocfl/ocfl-fs@1.0.0-beta.58': {}
 
   '@opensearch-project/opensearch@3.9.0':
     dependencies:
@@ -4156,7 +4137,7 @@ snapshots:
 
   argue-cli@3.2.0: {}
 
-  arocapi@5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@0.4.0)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
+  arocapi@5.0.0-beta.9(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.58)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
     dependencies:
       '@fastify/sensible': 6.0.7
       '@prisma/client': 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
@@ -4165,7 +4146,7 @@ snapshots:
       fastify-type-provider-zod: 7.0.0(@fastify/swagger@9.9.1)(fastify@5.12.7)(openapi-types@12.1.3)(zod@4.6.7)
       zod: 4.6.7
     optionalDependencies:
-      '@ocfl/ocfl-fs': 0.4.0
+      '@ocfl/ocfl-fs': 1.0.0-beta.58
       '@opensearch-project/opensearch': 3.9.0
     transitivePeerDependencies:
       - '@fastify/swagger'
@@ -4615,8 +4596,6 @@ snapshots:
 
   graphmatch@1.1.1: {}
 
-  hash-wasm@4.12.0: {}
-
   help-me@5.0.0: {}
 
   http-assert@1.5.0:
@@ -4678,8 +4657,6 @@ snapshots:
   jose@6.2.13: {}
 
   joycon@3.1.1: {}
-
-  js-sha512@0.9.0: {}
 
   js-tokens@4.0.0: {}
 

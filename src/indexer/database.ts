@@ -64,7 +64,7 @@ export class DatabaseIndexer extends Indexer {
           filename: (ocflPath ?? entityId).split('/').pop(),
           mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
           size: f?.size ?? statedSize(entity.contentSize?.[0]),
-          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath, crc32: f?.crc32 ?? '' } satisfies OcflStorageMeta & { crc32: string }) : {},
+          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath } satisfies OcflStorageMeta) : {},
         };
       }
       try {

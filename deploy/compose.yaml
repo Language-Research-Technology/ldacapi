@@ -58,7 +58,6 @@ services:
       DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
       OPENSEARCH_URL: http://opensearch:9200
       OCFL_ROOT: /storage/ocfl
-      OCFL_SCRATCH: /storage/scratch
       OIDC_ISSUER: https://${DOMAIN:?Set DOMAIN in .env}
       ADMIN_ORIGIN: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
       OIDC_CLIENTS: >-

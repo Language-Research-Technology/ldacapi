@@ -20,7 +20,7 @@ export type IndexStates = Partial<Record<IndexType, IndexState | undefined>>;
 export const hasState = (state: IndexStates, ...values: IndexState[]) => Object.values(state).some((value) => value !== undefined && values.includes(value));
 
 /** A crate in the repository, with the state of each index that isn't idle */
-export type RepositoryObject = { id: string; path: string; name?: string | undefined; state: IndexStates };
+export type RepositoryObject = { id: string; name?: string | undefined; state: IndexStates };
 
 /**
  * Abstraction for repository operations, such as indexing and listing objects. This is used by the API routes to interact with the underlying data store, which can be an OCFL storage or a database.

@@ -1,6 +1,4 @@
-import { crc32 } from 'node:zlib';
-import type { OcflObject, OcflObjectFile } from '@ocfl/ocfl';
-import ocfl from '@ocfl/ocfl-fs';
+import { OcflError, type OcflObject, type StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
 import type { StorageBackend } from 'arocapi';
 import { OcflStorage } from 'arocapi/storage/ocfl';
@@ -10,6 +8,7 @@ import { DatabaseIndexer } from './indexer/database.ts';
 import { type CrateObject, type Indexer, parentCollection } from './indexer/indexer.ts';
 import { createSearchBackend, SearchIndexer } from './indexer/search.ts';
 import { logger } from './logger.ts';
+import { openRepository } from './ocfl-repository.ts';
 import { INDEX_TYPES, type IndexState, type IndexStates, type IndexType, State } from './repository.ts';
 
 const log = logger.child({ module: 'ocfl' });
@@ -18,7 +17,7 @@ const { defaultLicense, defaultMetadataLicense } = config;
 
 const stateCache: Record<string, IndexStates> = {};
 let INDEXER: Record<IndexType, Indexer>;
-let repository: ReturnType<typeof ocfl.storage>;
+let repository: StorageRoot;
 let backend: StorageBackend;
 
 export async function init(opts: { opensearchClient: Client; search?: ReturnType<typeof createSearchBackend> }) {
@@ -35,16 +34,8 @@ export async function init(opts: { opensearchClient: Client; search?: ReturnType
       search: opts.search ?? createSearchBackend(opts.opensearchClient),
     }),
   };
-  repository = createStorage();
-  try {
-    await repository.load();
-    backend = await OcflStorage({ root: config.ocfl.root });
-  } catch (e) {
-    if (await repository.exists()) {
-      throw e;
-    }
-    throw new Error(`Cannot load the OCFL repository at ${config.ocfl.root}. Run \`pnpm ocfl:init\` to create it.`, { cause: e });
-  }
+  repository = await openRepository();
+  backend = await OcflStorage({ root: config.ocfl.root });
 }
 
 /** arocapi's storage backend over the repository */
@@ -52,40 +43,9 @@ export function storage() {
   return backend;
 }
 
-/** The OCFL repository, created empty if it doesn't exist yet */
-export async function openOrCreateStorage() {
-  const storage = createStorage();
-  if (await storage.exists()) {
-    await storage.load();
-  } else {
-    await storage.create();
-  }
-  return storage;
-}
-
-export function createStorage() {
-  return ocfl.storage({
-    root: config.ocfl.root,
-    workspace: config.ocfl.scratch,
-    ocflVersion: '1.1',
-    fixityAlgorithms: ['crc32'],
-    layout: {
-      extensionName: '000N-path-direct-storage-layout',
-    },
-  });
-}
-
-async function calculateCrc32(file: OcflObjectFile) {
-  let crc = 0;
-  for await (const chunk of await file.stream()) {
-    crc = crc32(chunk, crc);
-  }
-  return crc.toString(16).padStart(8, '0');
-}
-
 function wrap(ocflObject: OcflObject): CrateObject {
-  const getInventoryFile = (path: string) => {
-    const file = ocflObject.getFile({ logicalPath: path });
+  const fileAt = (path: string) => {
+    const file = ocflObject.head.files.get(path);
     if (!file) {
       throw new Error(`File not found in ocfl inventory: ${path}`);
     }
@@ -93,17 +53,8 @@ function wrap(ocflObject: OcflObject): CrateObject {
   };
   return {
     id: ocflObject.id,
-    root: ocflObject.root,
-    async text(path: string) {
-      return await getInventoryFile(path).text();
-    },
-    async file(path: string) {
-      const file = getInventoryFile(path);
-      return {
-        size: Number(file.size ?? file.fixity?.size ?? (await file.stat()).size),
-        crc32: file.fixity?.crc32 ?? (await calculateCrc32(file)),
-      };
-    },
+    text: (path) => fileAt(path).text(),
+    file: async (path) => ({ size: await fileAt(path).size() }),
   };
 }
 
@@ -156,17 +107,29 @@ async function deleteFrom(types: IndexType[], crateId?: string) {
   }
 }
 
-const readCrateJson = async (ocflObject: OcflObject): Promise<{ '@graph': RawEntity[] }> =>
-  JSON.parse(await ocflObject.getFile({ logicalPath: 'ro-crate-metadata.json' }).text());
+const readCrateJson = async (ocflObject: OcflObject): Promise<{ '@graph': RawEntity[] }> => {
+  const file = ocflObject.head.files.get('ro-crate-metadata.json');
+  if (!file) {
+    throw new Error(`No ro-crate-metadata.json in ${ocflObject.id}`);
+  }
+  return JSON.parse(await file.text());
+};
 
 /** The root entity of a crate's raw JSON-LD, whose id is the OCFL object's */
 const rawRoot = (json: { '@graph': RawEntity[] }, crateId: string) => json['@graph'].find((e) => e['@id'] === crateId);
 
 /** A crate's OCFL object, whose id is the crate's root id */
-async function loadObject(crateId: string) {
-  const ocflObject = repository.object(crateId);
-  await ocflObject.load();
-  return ocflObject;
+const loadObject = (crateId: string) => repository.open(crateId);
+
+/** Each crate's OCFL object, logging those that can't be read */
+async function* readableObjects() {
+  for await (const entry of repository.objects()) {
+    if (entry instanceof OcflError) {
+      log.error({ err: entry }, 'Error reading object');
+    } else {
+      yield entry;
+    }
+  }
 }
 
 /**
@@ -246,8 +209,7 @@ async function indexObject(crateId: string, types: IndexType[], findTopCollectio
 
 async function idsMatching(pattern?: RegExp) {
   const ids: string[] = [];
-  for await (const ocflObject of repository) {
-    await ocflObject.load();
+  for await (const ocflObject of readableObjects()) {
     if (!pattern || ocflObject.id.match(pattern)) {
       ids.push(ocflObject.id);
     }
@@ -288,13 +250,13 @@ export async function* objects(prefix?: string, refresh?: boolean) {
   } else if (prefix == null) {
     prefix = '';
   }
-  for await (const ocflObject of repository) {
+  for await (const ocflObject of readableObjects()) {
+    const { id } = ocflObject;
     try {
-      const inv = await ocflObject.getInventory();
-      const name = rawRoot(await readCrateJson(ocflObject), inv.id)?.name?.toString();
-      yield { id: inv.id, name, path: ocflObject.root, state: await getState(inv.id) };
+      const name = rawRoot(await readCrateJson(ocflObject), id)?.name?.toString();
+      yield { id, name, state: await getState(id) };
     } catch (error) {
-      log.error({ err: error, path: ocflObject.root }, 'Error reading object');
+      log.error({ err: error, crateId: id }, 'Error reading object');
     }
   }
 }
