@@ -1,5 +1,5 @@
 import type { CrateState, StateName } from '../index-queue/index-queue.ts';
-import { STATES } from '../index-queue/index-queue.ts';
+import { ancestorIds, STATES } from '../index-queue/index-queue.ts';
 
 type Crate = CrateState & { label: string; children: Crate[] };
 
@@ -7,16 +7,6 @@ type Crate = CrateState & { label: string; children: Crate[] };
 const REFRESH_SECONDS = 5;
 
 const CHANGING: StateName[] = ['queued', 'indexing', 'deleting'];
-
-/** The ids of the crates `id` is under, nearest first */
-function* ancestorIds(id: string) {
-  let path = id.replace(/\/+$/, '');
-  for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/')) {
-    path = path.slice(0, slash);
-    yield path;
-    yield `${path}/`;
-  }
-}
 
 const parentOf = (id: string, crates: Map<string, Crate>) => {
   for (const ancestor of ancestorIds(id)) {
@@ -46,8 +36,8 @@ const buildTree = (states: CrateState[]) => {
   return sortTree(roots);
 };
 
-/** A form posting `crateId` (none for every crate) to an action */
-type ActionForm = { action: 'index' | 'delete'; label: string; crateId?: string | undefined; force?: boolean; confirm?: string };
+/** A form posting `crateId` (none for every crate), and with `under` the crates under it, to an action */
+type ActionForm = { action: 'index' | 'delete'; label: string; crateId?: string | undefined; force?: boolean; under?: boolean; confirm?: string };
 
 type CrateRow = { id: string; label: string; state: StateName; detail?: string | undefined; actions: ActionForm[]; children: CrateRow[] };
 
@@ -69,22 +59,31 @@ const detail = (crate: CrateState) => {
   }
 };
 
+const crateActions = (crate: Crate): ActionForm[] => [
+  { action: 'index', label: 'Index', crateId: crate.id },
+  { action: 'index', label: 'Reindex', crateId: crate.id, force: true },
+  { action: 'delete', label: 'Delete', crateId: crate.id, confirm: `Delete the indexes of ${crate.label}?` },
+];
+
+const underActions = (crate: Crate): ActionForm[] => [
+  { action: 'index', label: 'Index tree', crateId: crate.id, under: true },
+  { action: 'index', label: 'Reindex tree', crateId: crate.id, force: true, under: true },
+  { action: 'delete', label: 'Delete tree', crateId: crate.id, under: true, confirm: `Delete the indexes of ${crate.label} and the crates under it?` },
+];
+
 const crateRow = (crate: Crate): CrateRow => ({
   id: crate.id,
   label: crate.label,
   state: crate.state,
   detail: detail(crate),
-  actions: [
-    { action: 'index', label: 'Index', crateId: crate.id },
-    { action: 'index', label: 'Reindex', crateId: crate.id, force: true },
-    { action: 'delete', label: 'Delete', crateId: crate.id, confirm: `Delete the indexes of ${crate.label}?` },
-  ],
+  actions: [...crateActions(crate), ...(crate.children.length > 0 ? underActions(crate) : [])],
   children: crate.children.map(crateRow),
 });
 
 const ALL_ACTIONS: ActionForm[] = [
   { action: 'index', label: 'Index all' },
   { action: 'index', label: 'Reindex all', force: true },
+  { action: 'delete', label: 'Delete all', confirm: 'Delete every index?' },
 ];
 
 /** The crates as a tree, how many are in each state, and a refresh while any is changing */

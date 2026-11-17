@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@opensearch-project/opensearch';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/configuration.ts';
 import { prisma } from '../src/prisma.ts';
 import { collection, crate, writeCrates } from './crate-builder.ts';
@@ -17,15 +17,19 @@ const crateIds = [
 
 const emptyEverything = () => prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
 
-/** A new OCFL repository, imported from `source` (test-data by default), and how to run `pnpm index` over it */
+/**
+ * A new OCFL repository, imported by `pnpm crates:import` from `source` (test-data by default) with `args`, and how to run
+ * `pnpm index` over it
+ */
 const repository = () => {
   let storage: string;
   const env = () => ({ ...process.env, OCFL_ROOT: join(storage, 'ocfl'), LOG_LEVEL: 'silent', DEFAULT_LICENSE: '' });
   return {
-    async create(source?: (scratch: string) => Promise<string>) {
+    /** Returns the import's exit status */
+    async create(source?: (scratch: string) => Promise<string>, ...args: string[]) {
       storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
       const sources = source ? [await source(storage)] : [];
-      execFileSync('node', ['scripts/crates-import.ts', ...sources], { env: env(), stdio: 'ignore' });
+      return spawnSync('node', ['scripts/crates-import.ts', ...args, ...sources], { env: env(), stdio: 'ignore' }).status;
     },
     index: (...args: string[]) => spawnSync('node', ['scripts/index.ts', ...args], { env: env(), stdio: 'ignore' }).status,
     remove: () => rm(storage, { recursive: true, force: true }),
@@ -37,14 +41,13 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe('import and index', () => {
+describe('import', () => {
   const testData = repository();
   let status: number | null;
 
   beforeAll(async () => {
     await emptyEverything();
-    await testData.create();
-    status = testData.index();
+    status = await testData.create();
   });
 
   afterAll(() => testData.remove());
@@ -79,7 +82,7 @@ describe('import and index', () => {
     expect(records.map(({ indexedVersion }) => indexedVersion)).toEqual(crateIds.map(() => 1));
   });
 
-  it('leaves indexed crates alone, unless forced to reindex them', async () => {
+  it('leaves indexed crates alone when every crate is indexed, unless forced to reindex them', async () => {
     const indexedAt = async () => (await prisma.crateRecord.findUniqueOrThrow({ where: { id: 'arcp://name,bundled' } })).indexedAt;
     const before = await indexedAt();
 
@@ -91,26 +94,36 @@ describe('import and index', () => {
   });
 });
 
-describe('index, when a crate fails', () => {
+describe('when a crate fails to index', () => {
   const FAILING = 'arcp://name,no-licence';
   const failing = repository();
+  const crates = async (scratch: string) => {
+    const source = join(scratch, 'crates');
+    await writeCrates(source, [crate(collection(FAILING, { licence: null })), crate(collection('arcp://name,licensed'))]);
+    return source;
+  };
+  const indexedVersions = async () => (await prisma.crateRecord.findMany({ orderBy: { id: 'asc' } })).map(({ id, indexedVersion }) => [id, indexedVersion]);
 
-  beforeAll(async () => {
-    await emptyEverything();
-    await failing.create(async (scratch) => {
-      const source = join(scratch, 'crates');
-      await writeCrates(source, [crate(collection(FAILING, { licence: null })), crate(collection('arcp://name,licensed'))]);
-      return source;
-    });
+  beforeEach(emptyEverything);
+
+  afterEach(() => failing.remove());
+
+  it('import exits with an error, once it has indexed the rest', async () => {
+    expect(await failing.create(crates)).toBe(1);
+
+    expect(await indexedVersions()).toEqual([
+      ['arcp://name,licensed', 1],
+      [FAILING, null],
+    ]);
   });
 
-  afterAll(() => failing.remove());
+  it('indexing the repository in place exits with an error, once it has indexed the rest', async () => {
+    expect(await failing.create(crates, '--no-index')).toBe(0);
+    expect(await prisma.crateRecord.count()).toBe(0);
 
-  it('exits with an error, once it has indexed the rest', async () => {
     expect(failing.index()).toBe(1);
 
-    const records = await prisma.crateRecord.findMany({ orderBy: { id: 'asc' } });
-    expect(records.map(({ id, indexedVersion }) => [id, indexedVersion])).toEqual([
+    expect(await indexedVersions()).toEqual([
       ['arcp://name,licensed', 1],
       [FAILING, null],
     ]);

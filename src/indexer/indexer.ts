@@ -5,7 +5,7 @@ import type { StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
 import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
-import { prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
+import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { firstStringOrId } from '../utils.ts';
 import { openCrate } from './crate.ts';
 import { DocumentsWriter } from './documents.ts';
@@ -47,7 +47,36 @@ async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: st
   await writers.rows.delete(crateId);
 }
 
-async function indexCrate({ prisma, repository }: IndexerDeps, writers: Writers, job: Job) {
+/** Empties both indexes wholesale, keeping every crate's record as not indexed */
+async function deleteEverything({ prisma, opensearch, search }: IndexerDeps) {
+  await prisma.crateRecord.updateMany({ data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
+  await deleteSearchIndex(opensearch);
+  await prepareSearchIndex(opensearch, search);
+  await prisma.file.deleteMany();
+  await prisma.entity.deleteMany();
+}
+
+/** Deletes the indexes of a crate gone from the repository, and its record */
+async function removeCrate(prisma: PrismaClient, writers: Writers, crateId: string) {
+  await deleteIndexes(prisma, writers, crateId);
+  await prisma.crateRecord.delete({ where: { id: crateId } });
+  return { removed: true };
+}
+
+type CrateJob = Job & { crateId: string };
+
+async function runJob(deps: IndexerDeps, writers: Writers, job: Job) {
+  if (job.crateId === null) {
+    return deleteEverything(deps);
+  }
+  const crateJob = { ...job, crateId: job.crateId };
+  if (!(await deps.repository.has(crateJob.crateId))) {
+    return removeCrate(deps.prisma, writers, crateJob.crateId);
+  }
+  return crateJob.kind === 'delete' ? deleteIndexes(deps.prisma, writers, crateJob.crateId) : indexCrate(deps, writers, crateJob);
+}
+
+async function indexCrate({ prisma, repository }: IndexerDeps, writers: Writers, job: CrateJob) {
   const opened = await openCrate(repository, job.crateId);
   const record = await prisma.crateRecord.findUniqueOrThrow({ where: { id: job.crateId } });
   if (job.kind === 'index' && record.indexedVersion === opened.version) {
@@ -71,7 +100,7 @@ async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: J
   const started = Date.now();
   log.info({ ...fields, attempt: job.attempts }, 'Job started');
   try {
-    const result = job.kind === 'delete' ? await deleteIndexes(deps.prisma, writers, job.crateId) : await indexCrate(deps, writers, job);
+    const result = await runJob(deps, writers, job);
     await succeed(deps.prisma, workerId, job);
     log.info({ ...fields, ...result, milliseconds: Date.now() - started }, 'Job finished');
   } catch (error) {

@@ -39,7 +39,7 @@ ldacapi adds what LDaCA needs on top (terms as in [GLOSSARY.md](GLOSSARY.md)):
 
 - **OCFL repository**: each crate is one [OCFL](https://ocfl.io/) object on
   disk, imported with `pnpm crates:import` (`src/repository/`).
-- **Indexing**: `pnpm index` and the admin pages ask for index jobs
+- **Indexing**: `pnpm index`, `pnpm crates:import` and the admin pages ask for index jobs
   (`src/index-queue/`), and a worker (`src/worker.ts`) runs them, building the
   database index (the Entity and File rows arocapi reads) and the search index
   (one search document per entity) from the repository (`src/indexer/`). Jobs
@@ -70,7 +70,7 @@ You need Node.js 26 (26.13 or later), [pnpm](https://pnpm.io/) and Docker.
 ```sh
 pnpm install
 docker compose up -d --wait   # Postgres, OpenSearch, Oni and a fake upstream provider
-pnpm bootstrap                # migrate the database, import test-data into OCFL, index
+pnpm bootstrap                # migrate the database, import test-data into OCFL and index it
 pnpm dev
 ```
 
@@ -96,10 +96,10 @@ it in `.env`.
 | `pnpm build`               | Build the admin pages' stylesheet (run before deploying)                         |
 | `pnpm test`                | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`                | Biome, Knip and TypeScript                                                       |
-| `pnpm bootstrap`           | `db:deploy`, `crates:import` and `index` in one go                               |
+| `pnpm bootstrap`           | `db:deploy` and `crates:import` in one go                                        |
 | `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
-| `pnpm crates:import [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
-| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), then run the queue until it is empty; fails if any crate does |
+| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`) until the queue is empty; fails if any crate does |
+| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until it is empty; fails if any crate does |
 | `pnpm worker`              | Run index jobs as they are asked for                                             |
 | `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
@@ -112,7 +112,12 @@ it in `.env`.
 
 Each folder in `test-data/` is one RO-Crate. `pnpm crates:import` imports them into the
 OCFL repository at `storage/ocfl` (gitignored), and re-running it only adds a
-new OCFL version for crates that changed. Run `pnpm index` afterwards.
+new OCFL version for crates that changed. It then indexes the crates it
+imported.
+
+To index an OCFL repository that already holds crates, in place, point
+`OCFL_ROOT` at it and run `pnpm index`: it lists every crate in the repository
+and indexes each one.
 
 The indexer skips a crate that has no metadata licence (the `license` of
 `ro-crate-metadata.json`) or no content licence (the `license` of the root
@@ -291,15 +296,15 @@ API restarts. An admin session lasts 8 hours, and signing out of the admin
 pages also ends the session at our provider, ending on a signed-out page with a
 link to sign in again.
 
-The crates page shows every crate's state in each index. It can index,
-reindex or delete one crate's indexes, or index, reindex or delete all of them.
-An action on a crate covers the crate and the crates under it: those whose id
-is the crate's id followed by `/`. A crate that is already indexed needs
-reindexing. Indexing is refused while any crate it covers is being deleted,
-queued or indexing, deleting is refused while any crate it covers is queued or
-indexing, and an action on a crate that isn't in the repository is refused. The page reloads
-itself until the work finishes. Each action, accepted or refused, is logged at
-`info` with the admin's `sub`.
+The crates page shows each crate's index state. It can index, reindex or
+delete one crate's indexes, or a crate's and those of the crates under it (the
+"tree" actions): the crates whose id is the crate's id followed by `/`. It can
+also index or reindex every crate in the repository, which deletes the indexes
+of crates gone from it, or delete every index, which empties both indexes,
+discards the jobs waiting and leaves every crate listed as not indexed. An
+action on a crate the page doesn't list is refused. The page reloads itself
+until the work finishes. Each action, accepted or refused, is logged at `info`
+with the admin's `sub`.
 
 The admin pages are a client of our provider that needs no entry in
 `OIDC_CLIENTS`; their client secret and session keys are derived from
@@ -464,8 +469,10 @@ crates read-only:
 
 ```sh
 docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import /import
-docker compose run --rm api pnpm index
 ```
+
+To index a repository that already holds crates in place, run
+`docker compose run --rm api pnpm index`.
 
 The stack runs the API's `main` image. To upgrade, back up the database and
 `STORAGE_DIR`, then pull the new images, apply any new migrations and restart:

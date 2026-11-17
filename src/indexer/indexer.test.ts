@@ -14,6 +14,7 @@ const ORPHAN = 'arcp://name,orphan';
 const NO_METADATA = 'arcp://name,no-metadata';
 const OTHER = 'arcp://name,other';
 const UNNAMED = 'arcp://name,unnamed';
+const GONE = 'arcp://name,gone';
 
 /** `built` without the metadata descriptor's licence */
 const withoutMetadataLicence = (built: Crate): Crate => ({
@@ -38,6 +39,10 @@ const testbed = ocflTestbed(
 );
 
 const details = { message: 'Changed by a test', user: { name: 'Test' } };
+
+/** Adds a collection crate `crateId` to the repository */
+const addCrate = (crateId: string) =>
+  testbed.started.repository.create(crateId, details, (draft) => draft.write('ro-crate-metadata.json', JSON.stringify(crate(collection(crateId)).metadata)));
 
 const run = async (ask: () => Promise<unknown>) => {
   await ask();
@@ -131,10 +136,24 @@ describe('an index job', () => {
     });
   });
 
-  it('fails for a crate that isn’t in the repository', async () => {
+  it('succeeds for a crate that isn’t in the repository, no longer listing it', async () => {
     await index('arcp://name,missing');
 
-    expect(await state('arcp://name,missing')).toMatchObject({ state: 'failed' });
+    expect(await state('arcp://name,missing')).toBeUndefined();
+    expect(await testbed.started.prisma.indexJob.count()).toBe(0);
+  });
+
+  it('deletes the indexes of a crate gone from the repository, and no longer lists it', async () => {
+    await addCrate(GONE);
+    await index(GONE);
+    await index(OTHER);
+    await testbed.started.repository.remove(GONE);
+
+    await index(GONE);
+
+    expect(await state(GONE)).toBeUndefined();
+    expect(await rowIds()).toEqual([OTHER]);
+    expect(await searchableIds()).toEqual([OTHER]);
   });
 
   it('fails for an object with no crate metadata', async () => {
@@ -202,6 +221,82 @@ describe('a delete job', () => {
     expect(await state(ROOT)).toEqual({ id: ROOT, name: 'Indexer', state: 'not indexed' });
     expect(await rowIds()).toEqual([OTHER]);
     expect(await searchableIds()).toEqual([OTHER]);
+  });
+});
+
+describe('a delete job for a crate gone from the repository, asked for by indexing everything', () => {
+  it('removes the crate from search and the crates listed', async () => {
+    await addCrate(GONE);
+    await index(GONE);
+    await testbed.started.repository.remove(GONE);
+
+    await run(() => testbed.started.indexQueue.indexEverything());
+
+    expect((await testbed.started.indexQueue.crates()).map(({ id }) => id)).not.toContain(GONE);
+    expect(await searchableIds()).not.toContain(GONE);
+  });
+});
+
+describe('deleting everything', () => {
+  it('empties both indexes and leaves every crate listed as not indexed', async () => {
+    await index(ROOT);
+    await index(OTHER);
+
+    await run(() => testbed.started.indexQueue.deleteEverything());
+
+    expect((await testbed.started.indexQueue.crates()).map(({ id, state }) => [id, state])).toEqual(
+      [
+        [ROOT, 'not indexed'],
+        [OTHER, 'not indexed'],
+      ].sort(),
+    );
+    expect(await rowIds()).toEqual([]);
+    expect(await searchableIds()).toEqual([]);
+    expect(await testbed.started.prisma.indexJob.count()).toBe(0);
+  });
+
+  it('logs when it starts and finishes', async () => {
+    await run(() => testbed.started.indexQueue.deleteEverything());
+
+    expect(logs).toContainEqual(expect.objectContaining({ level: 30, crateId: null, kind: 'delete', msg: 'Job finished' }));
+  });
+
+  it('then indexes a crate asked for after it', async () => {
+    await index(ROOT);
+
+    await run(async () => {
+      await testbed.started.indexQueue.deleteEverything();
+      await testbed.started.indexQueue.index(OTHER);
+    });
+
+    expect(await state(ROOT)).toMatchObject({ state: 'not indexed' });
+    expect(await state(OTHER)).toMatchObject({ state: 'indexed' });
+    expect(await rowIds()).toEqual([OTHER]);
+  });
+
+  it('waits for jobs running elsewhere, and so do the crates asked for after it', async () => {
+    const { prisma } = testbed.started;
+    await prisma.crateRecord.createMany({ data: [{ id: ROOT }, { id: OTHER }] });
+    await prisma.indexJob.create({ data: { crateId: ROOT, kind: 'index', status: 'running', workerId: 'elsewhere' } });
+    await testbed.started.indexQueue.deleteEverything();
+    await testbed.started.indexQueue.index(OTHER);
+
+    await testbed.started.workTheQueue();
+
+    expect(await prisma.indexJob.findMany({ select: { crateId: true, status: true }, orderBy: { id: 'asc' } })).toEqual([
+      { crateId: ROOT, status: 'running' },
+      { crateId: null, status: 'waiting' },
+      { crateId: OTHER, status: 'waiting' },
+    ]);
+  });
+
+  it('replaces an earlier failure of deleting everything', async () => {
+    const { prisma } = testbed.started;
+    await prisma.indexJob.create({ data: { kind: 'delete', status: 'failed', error: 'Error: earlier' } });
+
+    await run(() => testbed.started.indexQueue.deleteEverything());
+
+    expect(await prisma.indexJob.count()).toBe(0);
   });
 });
 

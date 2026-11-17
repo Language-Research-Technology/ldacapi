@@ -12,6 +12,7 @@ const importers = {
   'src/indexer/crate.ts': './indexer.ts',
   'scripts/index.ts': '../src/indexer/indexer.ts',
   'test/app.ts': '../src/indexer/indexer.ts',
+  'src/crates-import.test.ts': './indexer/indexer.ts',
 };
 
 describe('the rule on importing the indexer', () => {
@@ -40,7 +41,7 @@ describe('the rule on importing the indexer', () => {
     expect(output).toContain(`${path}:1:30 lint/style/noRestrictedImports`);
   });
 
-  it.each(['src/worker.ts', 'src/indexer/crate.ts', 'scripts/index.ts', 'test/app.ts'])('allows an import from %s', (path) => {
+  it.each(['src/worker.ts', 'src/indexer/crate.ts', 'scripts/index.ts', 'test/app.ts', 'src/crates-import.test.ts'])('allows an import from %s', (path) => {
     expect(output).not.toContain(`${path}:`);
   });
 });

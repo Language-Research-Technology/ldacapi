@@ -26,13 +26,13 @@ describe('the audit log', () => {
 
     await browser.post('/admin/index', { crateId: PEOPLE, force: 'true' });
     await browser.post('/admin/delete', {});
-    await browser.post('/admin/index', { crateId: 'arcp://name,elsewhere' });
+    await browser.post('/admin/index', { crateId: 'arcp://name,elsewhere', under: 'true' });
     await emptyEverything();
 
     expect(logs.filter(({ action }) => action)).toEqual([
-      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: PEOPLE, force: true, accepted: true }),
-      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'delete', crateId: 'all', force: false, accepted: false }),
-      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: 'arcp://name,elsewhere', force: false, accepted: false }),
+      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: PEOPLE, under: false, force: true, accepted: true }),
+      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'delete', crateId: 'all', under: false, force: false, accepted: true }),
+      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: 'arcp://name,elsewhere', under: true, force: false, accepted: false }),
     ]);
   });
 });

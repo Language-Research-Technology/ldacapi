@@ -2,9 +2,16 @@ import { cp, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Client } from '@opensearch-project/opensearch';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { collection, crate, writeCrates } from '../test/crate-builder.ts';
+import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
+import { createIndexQueue } from './index-queue/index-queue.ts';
+import { workTheQueue } from './indexer/indexer.ts';
+import { prisma } from './prisma.ts';
 import { openOrCreateRepository } from './repository/repository.ts';
+import { createSearchBackend } from './search-backend.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 
@@ -54,5 +61,47 @@ describe('crates:import', () => {
     const after = await head(BUNDLED);
     expect(after.number).toBe(2);
     expect([...after.files.keys()].sort()).toEqual([...before, 'notes.txt'].sort());
+  });
+
+  describe('indexing what it imports', () => {
+    const opensearch = new Client({ node: config.opensearchUrl });
+
+    /** Imports `source` into the repository, asking for each crate it writes to be indexed, then works the queue */
+    const importAndIndex = async () => {
+      const repository = await openOrCreateRepository(root());
+      const indexQueue = createIndexQueue({ prisma, repository });
+      const drain = () => workTheQueue({ prisma, repository, opensearch, search: createSearchBackend(opensearch), licences: config }, { until: 'empty' });
+      return { imported: await importInto(repository, source, { indexQueue, workTheQueue: drain }), indexQueue };
+    };
+
+    beforeEach(async () => {
+      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+    });
+
+    afterAll(async () => {
+      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+      await Promise.all([prisma.$disconnect(), opensearch.close()]);
+    });
+
+    it('leaves each crate it imports indexed', async () => {
+      const { imported, indexQueue } = await importAndIndex();
+
+      expect(imported).toBe(true);
+      expect(await indexQueue.crate(BUNDLED)).toMatchObject({ state: 'indexed', version: 1 });
+      expect(await indexQueue.counts()).toMatchObject({ indexed: (await indexQueue.crates()).length });
+    });
+
+    it('fails when a crate it imports fails to index, once the rest are indexed', async () => {
+      await rm(source, { recursive: true });
+      await writeCrates(source, [crate(collection('arcp://name,no-licence', { licence: null })), crate(collection('arcp://name,licensed'))]);
+
+      const { imported, indexQueue } = await importAndIndex();
+
+      expect(imported).toBe(false);
+      expect((await indexQueue.crates()).map(({ id, state }) => [id, state])).toEqual([
+        ['arcp://name,licensed', 'indexed'],
+        ['arcp://name,no-licence', 'failed'],
+      ]);
+    });
   });
 });

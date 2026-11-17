@@ -8,7 +8,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import type { AuthConfig } from '../configuration.ts';
 import type { IndexQueue } from '../index-queue/index-queue.ts';
 import { logger } from '../logger.ts';
-import { deleteIndexes, type Flash, indexCrates } from './actions.ts';
+import { type Asked, deleteIndexes, type Flash, indexCrates } from './actions.ts';
 import { ADMIN_HOME, ADMIN_PATH, ADMIN_SIGNED_OUT, derivedKey } from './client.ts';
 import { cratesPage } from './crates.ts';
 import { createSignIn, type SignInTransaction } from './sign-in.ts';
@@ -64,8 +64,8 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
     cookie: { ...cookie, maxAge: seconds },
   });
   const actions = {
-    index: (crateId: string | undefined, force: boolean) => indexCrates(indexQueue, crateId, force),
-    delete: (crateId: string | undefined) => deleteIndexes(indexQueue, crateId),
+    index: (asked: Asked, force: boolean) => indexCrates(indexQueue, asked, force),
+    delete: (asked: Asked) => deleteIndexes(indexQueue, asked),
   };
 
   fastify.addHook('onRoute', (route) => {
@@ -148,11 +148,15 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
       });
 
       for (const [action, run] of Object.entries(actions)) {
-        pages.post<{ Body: { crateId?: string; force?: string } }>(`/${action}`, async (request, reply) => {
+        pages.post<{ Body: { crateId?: string; force?: string; under?: string } }>(`/${action}`, async (request, reply) => {
           const crateId = request.body?.crateId || undefined;
           const force = Boolean(request.body?.force);
-          const flash = await run(crateId, force);
-          request.log.info({ sub: request.session.get('admin')?.sub, action, crateId: crateId ?? 'all', force, accepted: flash.accepted }, flash.message);
+          const under = Boolean(request.body?.under);
+          const flash = await run({ crateId, under }, force);
+          request.log.info(
+            { sub: request.session.get('admin')?.sub, action, crateId: crateId ?? 'all', under, force, accepted: flash.accepted },
+            flash.message,
+          );
           request.session.set('flash', flash);
           return reply.redirect(ADMIN_HOME, 303);
         });

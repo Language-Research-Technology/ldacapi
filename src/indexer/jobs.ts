@@ -1,6 +1,7 @@
 import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 
-export type Job = { id: number; crateId: string; kind: IndexJobKind; attempts: number };
+/** A job with no crate deletes everything */
+export type Job = { id: number; crateId: string | null; kind: IndexJobKind; attempts: number };
 
 /** Records a worker as alive, now */
 export const heartbeat = async (prisma: PrismaClient, workerId: string) => {
@@ -12,13 +13,21 @@ export const removeWorker = async (prisma: PrismaClient, workerId: string) => {
   await prisma.indexWorker.deleteMany({ where: { id: workerId } });
 };
 
-/** Claims the oldest waiting job whose crate has none running, for `workerId` */
+/**
+ * Claims the oldest waiting job whose crate has none running, for `workerId`. Deleting everything waits for every running job,
+ * and every job asked for after it waits for it
+ */
 export async function claim(prisma: PrismaClient, workerId: string): Promise<Job | undefined> {
   const [job] = await prisma.$queryRaw<Job[]>`
     UPDATE index_job SET status = 'running', "workerId" = ${workerId}, attempts = attempts + 1, "startedAt" = now()
     WHERE id = (
       SELECT id FROM index_job waiting
-      WHERE status = 'waiting' AND NOT EXISTS (SELECT 1 FROM index_job running WHERE running."crateId" = waiting."crateId" AND running.status = 'running')
+      WHERE status = 'waiting'
+        AND NOT EXISTS (
+          SELECT 1 FROM index_job running
+          WHERE running.status = 'running' AND (running."crateId" = waiting."crateId" OR running."crateId" IS NULL OR waiting."crateId" IS NULL)
+        )
+        AND NOT EXISTS (SELECT 1 FROM index_job everything WHERE everything."crateId" IS NULL AND everything.status = 'waiting' AND everything.id < waiting.id)
       ORDER BY id
       LIMIT 1
       FOR UPDATE SKIP LOCKED

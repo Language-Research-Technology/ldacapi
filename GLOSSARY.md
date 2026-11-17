@@ -17,7 +17,7 @@ A person, organisation or software entity that more than one crate may describe.
 _Avoid_: Duplicate (a collection, object or file in two crates, which is an error)
 
 **Import**:
-Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`).
+Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`), then indexing them.
 _Avoid_: Seed, deposit
 
 **Deposit**:

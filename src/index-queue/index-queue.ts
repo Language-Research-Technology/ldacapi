@@ -18,6 +18,21 @@ type IndexState =
   | { state: 'indexed'; version: number; indexedAt: Date; entities: number; files: number }
   | { state: 'failed'; error: string; failedAt: Date; attempts: number };
 
+/** The ids of the crates `id` is under, nearest first: a crate is under another when its id extends the other's by a path */
+export function* ancestorIds(id: string) {
+  let path = id.replace(/\/+$/, '');
+  for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/')) {
+    path = path.slice(0, slash);
+    yield path;
+    yield `${path}/`;
+  }
+}
+
+const isWithin = (id: string, crateId: string) => id === crateId || ancestorIds(id).some((ancestor) => ancestor === crateId);
+
+/** Asks for the crate alone, or with `under`, for it and every crate under it */
+type Scope = { under?: boolean };
+
 export type CrateState = { id: string; name: string | null } & IndexState;
 
 type StateRow = {
@@ -34,7 +49,7 @@ type StateRow = {
   attempts: number;
 };
 
-/** Each crate with its state, and the columns that state shows */
+/** Each crate with its state, and the columns that state shows. A job with no crate, deleting everything, is every crate's */
 const stateRows = (where: Prisma.Sql) => Prisma.sql`
   SELECT crate.id, crate.name, crate."indexedVersion", crate."indexedAt", crate.entities, crate.files,
     active."startedAt", failed.error, failed."failedAt", failed.attempts,
@@ -49,8 +64,8 @@ const stateRows = (where: Prisma.Sql) => Prisma.sql`
   FROM crate
   LEFT JOIN LATERAL (
     SELECT kind, status, "startedAt" FROM index_job
-    WHERE "crateId" = crate.id AND status IN ('running', 'waiting')
-    ORDER BY status = 'running' DESC LIMIT 1
+    WHERE ("crateId" = crate.id OR "crateId" IS NULL) AND status IN ('running', 'waiting')
+    ORDER BY status = 'running' DESC, id LIMIT 1
   ) active ON true
   LEFT JOIN LATERAL (
     SELECT id, error, "failedAt", attempts FROM index_job
@@ -90,22 +105,57 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
     ]);
   };
 
+  const recordIds = async () => (await prisma.crateRecord.findMany({ select: { id: true } })).map(({ id }) => id);
+
+  /** `crateId` and, with `under`, the crates under it, in the repository or listed */
+  const covered = async (crateId: string, { under = false }: Scope) => {
+    if (!under) {
+      return [crateId];
+    }
+    const ids = new Set([crateId, ...(await Array.fromAsync(crateIds(repository))), ...(await recordIds())]);
+    return [...ids].filter((id) => isWithin(id, crateId));
+  };
+
+  const askFor = async (crateId: string, kind: IndexJobKind, scope: Scope = {}) => {
+    const asked = await covered(crateId, scope);
+    for (const id of asked) {
+      await ask(id, kind);
+    }
+    return asked;
+  };
+
   const states = (where = Prisma.empty) => prisma.$queryRaw<StateRow[]>`${stateRows(where)} ORDER BY crate.id`;
 
   return {
-    index: (crateId: string) => ask(crateId, 'index'),
+    /** Asks to index `crateId`, or it and those under it, returning the ids asked for */
+    index: (crateId: string, scope?: Scope) => askFor(crateId, 'index', scope),
 
     /** Index regardless of the indexed version */
-    reindex: (crateId: string) => ask(crateId, 'reindex'),
+    reindex: (crateId: string, scope?: Scope) => askFor(crateId, 'reindex', scope),
 
-    delete: (crateId: string) => ask(crateId, 'delete'),
+    delete: (crateId: string, scope?: Scope) => askFor(crateId, 'delete', scope),
 
-    /** Asks to index, or reindex, every crate in the repository, returning their ids */
+    /** Asks to empty both indexes and clear every crate's indexed version, discarding the jobs waiting */
+    async deleteEverything() {
+      await prisma.$transaction([
+        prisma.indexJob.deleteMany({ where: { status: 'waiting' } }),
+        prisma.$executeRaw`INSERT INTO index_job (kind) VALUES ('delete') ON CONFLICT ("crateId") WHERE status = 'waiting' DO NOTHING`,
+      ]);
+    },
+
+    /** Asks to index, or reindex, every crate in the repository, and delete each listed crate gone from it, returning their ids */
     async indexEverything({ reindex = false } = {}) {
       const asked: string[] = [];
       for await (const crateId of crateIds(repository)) {
         await ask(crateId, reindex ? 'reindex' : 'index');
         asked.push(crateId);
+      }
+      const listed = new Set(asked);
+      for (const crateId of await recordIds()) {
+        if (!listed.has(crateId) && !(await repository.has(crateId))) {
+          await ask(crateId, 'delete');
+          asked.push(crateId);
+        }
       }
       return asked;
     },

@@ -5,12 +5,14 @@ import { collection, crate, object, person } from '../../test/crate-builder.ts';
 import type { Browser } from '../../test/oidc.ts';
 
 const BUNDLED = 'arcp://name,bundled';
+const UNDER = `${BUNDLED}/sub`;
 
 const testbed = adminTestbed();
 const { ocflRoot } = ocflStorage({
   crates: [
     crate(collection(BUNDLED, { name: 'Bundled', hasMember: [`${BUNDLED}/object`] }), [object(`${BUNDLED}/object`, { memberOf: BUNDLED })]),
     crate(collection(PEOPLE, { name: 'People' }), [person('https://example.org/alice', { name: 'Alice' })]),
+    crate(collection(UNDER, { name: 'Under', memberOf: BUNDLED })),
   ],
 });
 
@@ -69,6 +71,7 @@ describe('asking for crates to be indexed', () => {
     expect(flash(page.body)).toBe('Indexing every crate has been queued.');
     expect(await jobs()).toEqual([
       { crateId: BUNDLED, kind: 'index', status: 'waiting' },
+      { crateId: UNDER, kind: 'index', status: 'waiting' },
       { crateId: PEOPLE, kind: 'index', status: 'waiting' },
     ]);
     expect(row(page.body, BUNDLED)).toContain('queued');
@@ -111,7 +114,44 @@ describe('asking for crates to be indexed', () => {
     const page = await act(browser, 'index', { force: 'true' });
 
     expect(flash(page.body)).toBe('Reindexing every crate has been queued.');
-    expect((await jobs()).map(({ kind }) => kind)).toEqual(['reindex', 'reindex']);
+    expect((await jobs()).map(({ kind }) => kind)).toEqual(['reindex', 'reindex', 'reindex']);
+  });
+
+  it.each([
+    [{}, 'index', `Indexing ${BUNDLED} and the crates under it has been queued.`],
+    [{ force: 'true' }, 'reindex', `Reindexing ${BUNDLED} and the crates under it has been queued.`],
+  ])('queues a crate and those under it, one job each, given %o', async (form, kind, message) => {
+    await started.indexQueue.index(BUNDLED);
+    await started.workTheQueue();
+    const browser = await signIn();
+
+    const page = await act(browser, 'index', { crateId: BUNDLED, under: 'true', ...form });
+
+    expect(flash(page.body)).toBe(message);
+    expect(await jobs()).toEqual([
+      { crateId: BUNDLED, kind, status: 'waiting' },
+      { crateId: UNDER, kind, status: 'waiting' },
+    ]);
+  });
+
+  it('offers a crate with crates under it the actions on them all', async () => {
+    await started.indexQueue.index(BUNDLED);
+    await started.indexQueue.index(UNDER);
+    await started.indexQueue.index(PEOPLE);
+    const browser = await signIn();
+
+    const { body } = await browser.get('/admin/');
+
+    const unders = [
+      ...body.matchAll(
+        /<form [^>]*action="\/admin\/(\w+)"[^>]*><input type="hidden" name="crateId" value="([^"]+)">(?:<input type="hidden" name="force" value="true">)?<input type="hidden" name="under"/g,
+      ),
+    ];
+    expect(unders.map(([, action, crateId]) => [action, crateId])).toEqual([
+      ['index', BUNDLED],
+      ['index', BUNDLED],
+      ['delete', BUNDLED],
+    ]);
   });
 
   it('adds nothing when asked again while the crate waits', async () => {
@@ -163,6 +203,41 @@ describe('asking for a crate’s indexes to be deleted', () => {
     expect(await searchableIds()).not.toContain(BUNDLED);
   });
 
+  it('queues a delete of a crate and those under it', async () => {
+    await started.indexQueue.index(BUNDLED, { under: true });
+    await started.workTheQueue();
+    const browser = await signIn();
+
+    const page = await act(browser, 'delete', { crateId: BUNDLED, under: 'true' });
+
+    expect(flash(page.body)).toBe(`Deleting the indexes of ${BUNDLED} and the crates under it has been queued.`);
+    expect((await jobs()).map(({ crateId, kind }) => [crateId, kind])).toEqual([
+      [BUNDLED, 'delete'],
+      [UNDER, 'delete'],
+    ]);
+  });
+
+  it('deletes every index, leaving every crate listed as not indexed', async () => {
+    await started.indexQueue.indexEverything();
+    await started.workTheQueue();
+    await started.indexQueue.index(PEOPLE);
+    const browser = await signIn();
+
+    const page = await act(browser, 'delete');
+
+    expect(flash(page.body)).toBe('Deleting every index has been queued.');
+    expect(row(page.body, PEOPLE)).toContain('deleting');
+    expect(await jobs()).toEqual([{ crateId: null, kind: 'delete', status: 'waiting' }]);
+
+    await started.workTheQueue();
+
+    const deleted = await browser.get('/admin/');
+    for (const crateId of [BUNDLED, UNDER, PEOPLE]) {
+      expect(row(deleted.body, crateId)).toContain('not indexed');
+    }
+    expect(await searchableIds()).toEqual([]);
+  });
+
   it('asks before deleting, by a script the page loads', async () => {
     await started.indexQueue.index(BUNDLED);
     await started.indexQueue.index(PEOPLE);
@@ -170,7 +245,7 @@ describe('asking for a crate’s indexes to be deleted', () => {
     const page = await browser.get('/admin/');
 
     const deletes = [...page.body.matchAll(/<form [^>]*action="\/admin\/delete"[^>]*>/g)].map(([form]) => form);
-    expect(deletes).toHaveLength(2);
+    expect(deletes).toHaveLength(3);
     for (const form of deletes) {
       expect(form).toMatch(/data-confirm="[^"]+"/);
     }
@@ -179,23 +254,18 @@ describe('asking for a crate’s indexes to be deleted', () => {
 });
 
 describe('protecting the actions', () => {
-  it.each(['index', 'delete'])('refuses to %s a crate that isn’t listed', async (action) => {
+  it.each([
+    ['index', {}],
+    ['delete', {}],
+    ['index', { under: 'true' }],
+    ['delete', { under: 'true' }],
+  ])('refuses to %s a crate that isn’t listed, given %o', async (action, form) => {
     const browser = await signIn();
 
-    const page = await act(browser, action, { crateId: 'arcp://name,elsewhere' });
+    const page = await act(browser, action, { crateId: 'arcp://name,elsewhere', ...form });
 
-    expect(flash(page.body)).toMatch(/arcp:\/\/name,elsewhere was refused: it was not found\.$/);
+    expect(flash(page.body)).toMatch(/arcp:\/\/name,elsewhere( and the crates under it)? was refused: it was not found\.$/);
     expect(await jobs()).toEqual([]);
-  });
-
-  it('refuses to delete every index', async () => {
-    await started.indexQueue.index(BUNDLED);
-    const browser = await signIn();
-
-    const page = await act(browser, 'delete');
-
-    expect(flash(page.body)).toBe('Deleting every index was refused: choose a crate to delete the indexes of.');
-    expect((await jobs()).map(({ kind }) => kind)).toEqual(['index']);
   });
 
   it.each([

@@ -1,3 +1,5 @@
+import { writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ocflStorage } from '../../test/app.ts';
 import { collection, crate } from '../../test/crate-builder.ts';
@@ -8,8 +10,20 @@ import { createIndexQueue, type IndexQueue, WORKER_SILENT_MILLISECONDS } from '.
 
 const A = 'arcp://name,a';
 const B = 'arcp://name,b';
+const UNDER_A = `${A}/sub`;
+const UNDER_UNDER_A = `${UNDER_A}/sub`;
+const GONE = 'arcp://name,gone';
+const DAMAGED = 'arcp://name,damaged';
 
-const { ocflRoot } = ocflStorage({ crates: [crate(collection(A)), crate(collection(B))] });
+const { ocflRoot } = ocflStorage({
+  crates: [
+    crate(collection(A)),
+    crate(collection(B)),
+    crate(collection(UNDER_A, { memberOf: A })),
+    crate(collection(UNDER_UNDER_A, { memberOf: UNDER_A })),
+    crate(collection(DAMAGED)),
+  ],
+});
 
 let queue: IndexQueue;
 
@@ -23,6 +37,7 @@ const record = (id: string, data: Partial<Prisma.CrateRecordUncheckedCreateInput
 const INDEXED = { name: 'A', indexedVersion: 2, indexedAt: new Date('2026-11-15T08:00:00Z'), entities: 5, files: 3 };
 
 beforeAll(async () => {
+  await writeFile(join(ocflRoot(), 'arcp_name_damaged', '__object__', 'inventory.json'), 'not json');
   queue = createIndexQueue({ prisma, repository: await openRepository(ocflRoot()) });
 });
 
@@ -91,12 +106,126 @@ describe('asking for a job', () => {
     [{}, 'index'],
     [{ reindex: true }, 'reindex'],
   ])('asks for every crate in the repository, given %o', async (options, kind) => {
-    expect((await queue.indexEverything(options)).sort()).toEqual([A, B]);
+    expect((await queue.indexEverything(options)).sort()).toEqual([A, UNDER_A, UNDER_UNDER_A, B]);
 
     expect(await jobs()).toEqual([
       { crateId: A, kind, status: 'waiting' },
+      { crateId: UNDER_A, kind, status: 'waiting' },
+      { crateId: UNDER_UNDER_A, kind, status: 'waiting' },
       { crateId: B, kind, status: 'waiting' },
     ]);
+  });
+
+  it('asks, with everything, to delete each listed crate gone from the repository', async () => {
+    await record(GONE, INDEXED);
+
+    expect(await queue.indexEverything()).toContain(GONE);
+
+    expect(await jobs()).toContainEqual({ crateId: GONE, kind: 'delete', status: 'waiting' });
+  });
+
+  it('keeps, with everything, a listed crate the repository holds but can’t read', async () => {
+    await record(DAMAGED, INDEXED);
+
+    expect(await queue.indexEverything()).not.toContain(DAMAGED);
+
+    expect(await jobs()).not.toContainEqual(expect.objectContaining({ crateId: DAMAGED }));
+  });
+
+  it.each([
+    ['index', (crateId: string) => queue.index(crateId, { under: true })],
+    ['reindex', (crateId: string) => queue.reindex(crateId, { under: true })],
+  ])('asks to %s a crate and each crate under it, by id, one job each', async (kind, ask) => {
+    expect((await ask(A)).sort()).toEqual([A, UNDER_A, UNDER_UNDER_A]);
+
+    expect(await jobs()).toEqual([
+      { crateId: A, kind, status: 'waiting' },
+      { crateId: UNDER_A, kind, status: 'waiting' },
+      { crateId: UNDER_UNDER_A, kind, status: 'waiting' },
+    ]);
+  });
+
+  it('asks to delete a crate and each crate under it, including a listed crate gone from the repository', async () => {
+    await record(`${UNDER_A}/gone`);
+
+    expect((await queue.delete(UNDER_A, { under: true })).sort()).toEqual([UNDER_A, `${UNDER_A}/gone`, UNDER_UNDER_A].sort());
+
+    expect((await jobs()).map(({ crateId, kind }) => [crateId, kind])).toEqual([
+      [UNDER_A, 'delete'],
+      [`${UNDER_A}/gone`, 'delete'],
+      [UNDER_UNDER_A, 'delete'],
+    ]);
+  });
+
+  it('asks for only the crate, unless asked for those under it', async () => {
+    expect(await queue.index(A)).toEqual([A]);
+
+    expect(await jobs()).toEqual([{ crateId: A, kind: 'index', status: 'waiting' }]);
+  });
+});
+
+describe('asking to delete everything', () => {
+  it('queues one job with no crate, discarding the waiting jobs', async () => {
+    await queue.index(A);
+    await queue.reindex(B);
+
+    await queue.deleteEverything();
+
+    expect(await jobs()).toEqual([{ crateId: null, kind: 'delete', status: 'waiting' }]);
+  });
+
+  it('leaves running jobs to finish, and keeps the records', async () => {
+    await record(A, INDEXED);
+    await job(A, { status: 'running' });
+
+    await queue.deleteEverything();
+
+    expect(await jobs()).toEqual([
+      { crateId: A, kind: 'index', status: 'running' },
+      { crateId: null, kind: 'delete', status: 'waiting' },
+    ]);
+    expect(await prisma.crateRecord.count()).toBe(1);
+  });
+
+  it('adds nothing when asked again while it waits', async () => {
+    await queue.deleteEverything();
+    await queue.deleteEverything();
+
+    expect(await jobs()).toEqual([{ crateId: null, kind: 'delete', status: 'waiting' }]);
+  });
+
+  it('keeps a crate asked for afterwards', async () => {
+    await queue.deleteEverything();
+
+    await queue.index(A);
+
+    expect(await jobs()).toEqual([
+      { crateId: A, kind: 'index', status: 'waiting' },
+      { crateId: null, kind: 'delete', status: 'waiting' },
+    ]);
+  });
+
+  it.each(['waiting', 'running'] as const)('shows every crate as deleting while it is %s', async (status) => {
+    await record(A, INDEXED);
+    await record(B);
+    await prisma.indexJob.create({ data: { kind: 'delete', status } });
+
+    expect(await queue.counts()).toMatchObject({ deleting: 2, indexed: 0, 'not indexed': 0 });
+  });
+
+  it('shows a crate with a running job as indexing', async () => {
+    await record(A);
+    await job(A, { status: 'running', startedAt: new Date() });
+    await queue.deleteEverything();
+
+    expect(await queue.crate(A)).toMatchObject({ state: 'indexing' });
+  });
+
+  it('shows a crate asked for afterwards as deleting, as the delete runs first', async () => {
+    await queue.deleteEverything();
+    await queue.index(A);
+
+    expect(await queue.crate(A)).toMatchObject({ state: 'deleting' });
   });
 });
 

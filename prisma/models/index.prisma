@@ -14,10 +14,10 @@ enum IndexJobStatus {
   @@map("index_job_status")
 }
 
-/// A request to index, reindex or delete one crate's indexes. The migration adds partial unique indexes allowing one waiting and one running job per crate
+/// A request to index, reindex or delete one crate's indexes, or with no crate to delete everything. The migration adds partial unique indexes allowing one waiting and one running job per crate, and one of each with no crate
 model IndexJob {
   id        Int            @id @default(autoincrement())
-  crateId   String
+  crateId   String?
   kind      IndexJobKind
   status    IndexJobStatus @default(waiting)
   attempts  Int            @default(0)
@@ -27,7 +27,7 @@ model IndexJob {
   startedAt DateTime?
   failedAt  DateTime?
 
-  crate CrateRecord @relation(fields: [crateId], references: [id], onDelete: Cascade)
+  crate CrateRecord? @relation(fields: [crateId], references: [id], onDelete: Cascade)
 
   @@index([crateId])
   @@map("index_job")

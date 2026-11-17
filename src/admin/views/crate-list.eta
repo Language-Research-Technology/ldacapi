@@ -12,7 +12,7 @@
       <span class="index-detail break-words text-zinc-600"><%= crate.detail %></span>
 <% } %>
     </div>
-    <div class="crate-actions flex gap-2 sm:w-56 sm:justify-end">
+    <div class="crate-actions flex flex-wrap gap-2 sm:w-56 sm:justify-end">
 <% for (const form of crate.actions) { %>
       <%~ include('./action-form', { form }) %>
 <% } %>
