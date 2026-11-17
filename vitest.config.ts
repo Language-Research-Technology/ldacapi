@@ -13,10 +13,10 @@ export default defineConfig({
       thresholds: {
         // Raised by vitest whenever a run beats them; commit the change
         autoUpdate: true,
-        lines: 97.29,
-        branches: 92.91,
-        functions: 97.96,
-        statements: 97.33,
+        lines: 97.33,
+        branches: 93.3,
+        functions: 98.03,
+        statements: 97.39,
         'src/indexer/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
         'src/index-queue/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
       },

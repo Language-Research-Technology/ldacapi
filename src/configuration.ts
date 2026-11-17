@@ -6,15 +6,6 @@ import { generateCookieKey, generateSigningKey, type Jwk, SIGNING_ALG } from './
 
 type Env = Record<string, string | undefined>;
 
-const indexType = {
-  RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
-  RepositoryObject: 'https://w3id.org/ldac/profile#Object',
-  File: '',
-  Person: 'https://w3id.org/ldac/profile#Person',
-  Organization: 'https://w3id.org/ldac/profile#Organization',
-  SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication',
-};
-
 const oidcClient = z.strictObject({
   client_id: z.string().min(1),
   client_secret: z.string().min(1).optional(),
@@ -203,7 +194,6 @@ export function loadConfig(processEnv: Env) {
     auth: env.auth,
     adminOrigin: env.ADMIN_ORIGIN,
     adminUsers: env.ADMIN_USERS,
-    indexType,
     search: { entityIndex: env.ENTITY_INDEX },
   };
 }

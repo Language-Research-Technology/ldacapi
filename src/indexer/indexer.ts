@@ -3,15 +3,15 @@ import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
+import { isOpenLicence } from '../access/licences.ts';
 import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
-import { firstStringOrId } from '../utils.ts';
 import { openCrate } from './crate.ts';
+import { derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
 import { claim, fail, heartbeat, type Job, removeWorker, succeed } from './jobs.ts';
 import { countRows, RowsWriter } from './rows.ts';
-import type { Licences } from './writer.ts';
 
 const log = logger.child({ module: 'indexer' });
 
@@ -20,7 +20,7 @@ export type IndexerDeps = {
   repository: StorageRoot;
   opensearch: Client;
   search: SearchBackend;
-  licences: Licences;
+  licences: { defaultLicense: string; defaultMetadataLicense: string };
 };
 
 export type WorkOptions = (
@@ -76,21 +76,25 @@ async function runJob(deps: IndexerDeps, writers: Writers, job: Job) {
   return crateJob.kind === 'delete' ? deleteIndexes(deps.prisma, writers, crateJob.crateId) : indexCrate(deps, writers, crateJob);
 }
 
-async function indexCrate({ prisma, repository }: IndexerDeps, writers: Writers, job: CrateJob) {
+async function indexCrate({ prisma, repository, licences }: IndexerDeps, writers: Writers, job: CrateJob) {
   const opened = await openCrate(repository, job.crateId);
   const record = await prisma.crateRecord.findUniqueOrThrow({ where: { id: job.crateId } });
   if (job.kind === 'index' && record.indexedVersion === opened.version) {
     log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
     return { skipped: true };
   }
-  const read = await opened.read();
+  const { crate, files, topCollection } = await opened.read();
+  const derivation = derive(crate, { topCollection, ...licences, isOpenLicence });
+  for (const { msg, ...warning } of derivation.warnings) {
+    log.warn({ crateId: job.crateId, ...warning }, msg);
+  }
   await deleteIndexes(prisma, writers, job.crateId);
-  await writers.rows.index(read);
-  await writers.documents.index(read);
+  const written = await writers.rows.write(derivation, files);
+  await writers.documents.write(derivation, files, written);
   const counts = await countRows(prisma, job.crateId);
   await prisma.crateRecord.update({
     where: { id: job.crateId },
-    data: { name: firstStringOrId(read.crate.root.name) ?? null, indexedVersion: opened.version, indexedAt: new Date(), ...counts },
+    data: { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts },
   });
   return { version: opened.version, ...counts };
 }
@@ -111,8 +115,8 @@ async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: J
 
 /** Runs index jobs one at a time, until none is waiting or until stopped, as the worker and the CLI do */
 export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
-  const { prisma, opensearch, search, licences } = deps;
-  const writers = { rows: new RowsWriter(prisma, licences), documents: new DocumentsWriter(prisma, search, licences) };
+  const { prisma, opensearch, search } = deps;
+  const writers = { rows: new RowsWriter(prisma), documents: new DocumentsWriter(prisma, search) };
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   await heartbeat(prisma, workerId);
   const beating = setInterval(() => heartbeat(prisma, workerId), options.heartbeatMilliseconds ?? 30_000);

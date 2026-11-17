@@ -1,76 +1,71 @@
 import type { OcflStorageMeta } from 'arocapi';
-import { type Entity, ROCrate } from 'ro-crate';
-import { accessControlFor } from '../access/access-control.ts';
-import type { EntityMeta } from '../entity-meta.ts';
 import type { Prisma, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
-import { firstStringOrId } from '../utils.ts';
-import { type CrateFile, entityClass, type Licences, memberOf, recordType, rootCollection, type WriteParams, Writer } from './writer.ts';
+import type { Derivation, DerivedEntity } from './derive.ts';
+import type { CrateFiles } from './files.ts';
 
 const log = logger.child({ module: 'indexer/rows' });
 
-type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
+/** Rows per transaction */
+const BATCH_SIZE = 1000;
+
+const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / BATCH_SIZE) }, (_, i) => items.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE));
+
+/** The entity rows indexed from `crateId` */
+const rowsOf = (crateId: string): Prisma.EntityWhereInput => ({ meta: { path: ['crateId'], equals: crateId } });
+
+async function fileRow(files: CrateFiles, { file }: DerivedEntity): Promise<Prisma.FileCreateManyInput | undefined> {
+  if (!file) {
+    return;
+  }
+  const { path, statedSize, ...row } = file;
+  return {
+    ...row,
+    size: (path === undefined ? undefined : await files.size(path)) ?? statedSize,
+    meta: path ? ({ ocflObject: files.id, ocflPath: path } satisfies OcflStorageMeta) : {},
+  };
+}
 
 /** Writes a crate's Entity and File rows */
-export class RowsWriter extends Writer {
+export class RowsWriter {
   prisma: PrismaClient;
 
-  constructor(prisma: PrismaClient, licences: Licences) {
-    super(licences);
+  constructor(prisma: PrismaClient) {
     this.prisma = prisma;
   }
 
-  override async write({ crateObject, crate, paths, license, metadataLicense, topCollection }: WriteParams) {
-    const crateId = crate.rootId;
-    for (const entity of crate.entities()) {
-      const entityType = recordType(entity);
-      if (!entityType) {
-        continue;
-      }
-      log.debug({ crateId, entityId: entity['@id'] }, 'Indexing entity');
-      const entityId = entity['@id'];
-      const rocrate = entityAsCrate(crate, entity, license);
-      const contentLicenseId = firstStringOrId(entity.license) || license;
-      const param: IndexRecord = {
-        entity: {
-          id: entityId,
-          name: entity.name?.join('; ') || entityId,
-          description: entity.description?.join('; ') || '',
-          entityType: entityClass(crate, entityType),
-          memberOf: pickSingleMemberOf(entity),
-          rootCollection: rootCollection(topCollection, entityId),
-          metadataLicenseId: metadataLicense,
-          contentLicenseId,
-          meta: { crateId, rocrate, accessControl: accessControlFor(contentLicenseId) } satisfies EntityMeta,
-        },
-      };
-      if (entityType.endsWith('://schema.org/MediaObject') || entityType === 'File') {
-        const ocflPath = paths.get(entityId);
-        let f: CrateFile | undefined;
-        if (ocflPath) {
-          try {
-            f = await crateObject.file(ocflPath);
-          } catch (error) {
-            log.error({ err: error, crateId, entityId, ocflPath }, 'Cannot read file');
-          }
-        }
-        param.file = {
-          id: entityId,
-          filename: (ocflPath ?? entityId).split('/').pop(),
-          mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
-          size: f?.size ?? statedSize(entity.contentSize?.[0]),
-          meta: ocflPath ? ({ ocflObject: crateObject.id, ocflPath } satisfies OcflStorageMeta) : {},
-        };
-      }
+  /** The ids of the rows written: an entity another crate already has a row for keeps that row */
+  async write(derivation: Derivation, files: CrateFiles) {
+    const written = new Set<string>();
+    for (const batch of batches(derivation.entities)) {
+      const fileRows = await Promise.all(batch.map((entity) => fileRow(files, entity)));
       try {
-        await this.prisma.entity.create({ data: param.entity });
-        if (param.file) {
-          await this.prisma.file.create({ data: param.file });
+        await this.writeBatch(batch, fileRows, written);
+      } catch {
+        // Row by row, to skip only the entity that can't be written
+        for (const [i, entity] of batch.entries()) {
+          await this.writeBatch([entity], [fileRows[i]], written).catch((error) =>
+            log.error({ err: error, crateId: derivation.crateId, entityId: entity.row.id }, 'Error indexing entity'),
+          );
         }
-      } catch (error) {
-        log.error({ err: error, crateId, entityId }, 'Error indexing entity');
       }
     }
+    return written;
+  }
+
+  private writeBatch(batch: DerivedEntity[], fileRows: (Prisma.FileCreateManyInput | undefined)[], written: Set<string>) {
+    return this.prisma.$transaction(async (tx) => {
+      const created = await tx.entity.createManyAndReturn({
+        data: batch.map(({ row }) => ({ ...row, meta: row.meta as Prisma.InputJsonValue })),
+        skipDuplicates: true,
+        select: { id: true },
+      });
+      const ids = new Set(created.map(({ id }) => id));
+      await tx.file.createMany({ data: fileRows.filter((row) => row && ids.has(row.id)) as Prisma.FileCreateManyInput[] });
+      for (const id of ids) {
+        written.add(id);
+      }
+    });
   }
 
   async delete(crateId: string) {
@@ -79,49 +74,12 @@ export class RowsWriter extends Writer {
   }
 }
 
-/** The entity rows indexed from `crateId` */
-const rowsOf = (crateId: string): Prisma.EntityWhereInput => ({ meta: { path: ['crateId'], equals: crateId } });
-
-/** The id and rootCollection of each entity row indexed from `crateId` */
-export const crateRows = (prisma: PrismaClient, crateId: string) =>
-  prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true, rootCollection: true } });
+/** The id of each entity row indexed from `crateId` */
+export const crateRowIds = async (prisma: PrismaClient, crateId: string) =>
+  (await prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true } })).map(({ id }) => id);
 
 /** How many entity and file rows were indexed from `crateId` */
 export const countRows = async (prisma: PrismaClient, crateId: string) => ({
   entities: await prisma.entity.count({ where: rowsOf(crateId) }),
   files: await prisma.file.count({ where: { entity: rowsOf(crateId) } }),
 });
-
-export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
-  const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
-  for (const key in entity) {
-    newCrate.root[key] = entity[key];
-  }
-  newCrate.root['@type'].push('Dataset');
-  if (!entity.conformsTo) {
-    newCrate.root.conformsTo = crate.root.conformsTo;
-  }
-  if (!entity.license) {
-    newCrate.root.license = license;
-  }
-  return newCrate.toJSON();
-}
-
-/** The leading integer of a schema.org contentSize, which is text such as "14384 bytes", or -1 */
-function statedSize(contentSize: unknown) {
-  const size = Number.parseInt(String(contentSize), 10);
-  return Number.isNaN(size) ? -1 : size;
-}
-
-export function pickSingleMemberOf(entity: Entity) {
-  return (
-    memberOf(entity) ||
-    entity['@reverse']['pcdm:hasMember']?.[0]?.['@id'] ||
-    entity['@reverse'].hasMember?.[0]?.['@id'] ||
-    entity.isPartOf?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
-    entity['@reverse'].hasPart?.find((e: Entity) => e['@type'].includes('RepositoryObject'))?.['@id'] ||
-    entity.isPartOf?.[0]['@id'] ||
-    entity['@reverse'].hasPart?.[0]?.['@id'] ||
-    null
-  );
-}

@@ -15,6 +15,13 @@ const NO_METADATA = 'arcp://name,no-metadata';
 const OTHER = 'arcp://name,other';
 const UNNAMED = 'arcp://name,unnamed';
 const GONE = 'arcp://name,gone';
+const LARGE = 'arcp://name,large';
+const SEVERAL_PARENTS = 'arcp://name,several-parents';
+const UNPROFILED = 'arcp://name,unprofiled';
+// More rows and documents than fit in one batch, and more text than fits in one bulk request,
+// each text short enough for search to highlight
+const LARGE_TEXTS = ['a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt', 'f.txt'];
+const LARGE_AUDIO = Array.from({ length: 2100 }, (_, i) => `audio/${i}.wav`);
 
 /** `built` without the metadata descriptor's licence */
 const withoutMetadataLicence = (built: Crate): Crate => ({
@@ -35,6 +42,13 @@ const testbed = ocflTestbed(
   withoutMetadataLicence(crate(collection(NO_METADATA_LICENCE))),
   crate(collection(ORPHAN, { memberOf: 'arcp://name,not-in-the-repository' })),
   crate(collection(OTHER)),
+  crate({ entity: { '@id': UNPROFILED, '@type': 'Dataset', name: 'Unprofiled' } }),
+  crate(collection(SEVERAL_PARENTS), [object(`${SEVERAL_PARENTS}/object`, { 'pcdm:memberOf': [{ '@id': SEVERAL_PARENTS }, { '@id': OTHER }] })]),
+  crate(collection(LARGE, { hasPart: [...LARGE_TEXTS, ...LARGE_AUDIO] }), [
+    ...LARGE_TEXTS.map((path) => file(path, { content: 'words '.repeat(160_000), encodingFormat: 'text/plain' })),
+    ...LARGE_AUDIO.map((path) => fileDescribedButNotHeld(path, { encodingFormat: 'audio/wav' })),
+    fileDescribedButNotHeld('https://example.org/media/outside.wav'),
+  ]),
   crate({ entity: { '@id': UNNAMED, '@type': ['Dataset', 'RepositoryCollection'], conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' } } }),
 );
 
@@ -84,7 +98,7 @@ describe('an index job', () => {
 
     const missing = await testbed.started.prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/missing.txt` } });
     expect(missing.meta).toEqual({ ocflObject: ROOT, ocflPath: 'missing.txt' });
-    expect(logs.filter(({ msg }) => msg === 'Cannot read file').map(({ module }) => module)).toEqual(['indexer/rows', 'indexer/documents']);
+    expect(logs.filter(({ msg }) => msg === 'Cannot read file').map(({ path }) => path)).toEqual(['missing.txt', 'missing.txt']);
   });
 
   it('skips a crate whose head version is already indexed', async () => {
@@ -108,6 +122,33 @@ describe('an index job', () => {
 
     expect(await state(OTHER)).toMatchObject({ name: 'Renamed', state: 'indexed', version: 2 });
     expect((await testbed.search({ query: 'Renamed' })).entities.map(({ id }: { id: string }) => id)).toEqual([OTHER]);
+  });
+
+  it('writes every row and document of a crate larger than one batch', async () => {
+    await index(LARGE);
+
+    expect(await state(LARGE)).toMatchObject({ state: 'indexed', entities: 2108, files: 2107 });
+    expect((await testbed.search({ query: '', limit: 1 })).total).toBe(2108);
+    expect((await testbed.search({ query: 'words', limit: 10 })).total).toBe(LARGE_TEXTS.length);
+  });
+
+  it('logs a warning for each entity with several candidate parents', async () => {
+    await index(SEVERAL_PARENTS);
+
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        level: 40,
+        crateId: SEVERAL_PARENTS,
+        entityId: `${SEVERAL_PARENTS}/object`,
+        msg: 'Several candidate parents; using the first',
+      }),
+    );
+  });
+
+  it('indexes a crate with nothing to index', async () => {
+    await index(UNPROFILED);
+
+    expect(await state(UNPROFILED)).toMatchObject({ name: 'Unprofiled', state: 'indexed', entities: 0, files: 0 });
   });
 
   it('records no name for a crate without one', async () => {
