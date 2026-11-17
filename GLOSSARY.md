@@ -48,6 +48,14 @@ _Avoid_: Structural index
 The search documents in arocapi's search backend, one per entity that has a row.
 _Avoid_: OpenSearch index (one backend's storage)
 
+**Index state**:
+What is known about a crate's indexes: not indexed, queued, indexing, deleting, indexed or failed. One state covers both indexes.
+_Avoid_: Status
+
+**Indexed version**:
+The OCFL version of a crate that its indexes were built from.
+_Avoid_: Head version (the latest in the repository, which may be newer)
+
 **Virtual crate**:
 The Metadata served for one entity: an RO-Crate with that entity as its root and everything it links to (ADR 0004). Never the crate as deposited.
 _Avoid_: Entity crate, exploded crate
