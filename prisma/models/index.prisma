@@ -55,7 +55,7 @@ model CrateRecord {
   @@map("crate")
 }
 
-/// A worker, or a CLI run working the queue, and when it last showed it was alive
+/// A worker, or a CLI command working the queue, and when it last showed it was alive
 model IndexWorker {
   id          String   @id
   heartbeatAt DateTime @default(now())

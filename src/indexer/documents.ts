@@ -13,7 +13,6 @@ const log = logger.child({ module: 'indexer/documents' });
 const MAX_DOCUMENTS = 1000;
 const MAX_BYTES = 5 * 1024 * 1024;
 
-/** Writes a crate's search documents */
 export class DocumentsWriter {
   prisma: PrismaClient;
   search: SearchBackend;

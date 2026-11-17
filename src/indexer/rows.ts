@@ -137,6 +137,5 @@ export class RowsWriter {
   }
 }
 
-/** The id of each entity `crateId` contains */
 const crateEntityIds = async (prisma: PrismaClient, crateId: string) =>
   (await prisma.crateLink.findMany({ where: { crateId }, select: { entityId: true } })).map(({ entityId }) => entityId);

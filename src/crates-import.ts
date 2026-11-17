@@ -28,7 +28,6 @@ async function importCrate(repository: StorageRoot, crateId: string, path: strin
   return object.update(details, (draft) => draft.import(path));
 }
 
-/** Imports each crate directory under `source`, asking `indexQueue`, if given, to index each crate it writes */
 async function importAll(repository: StorageRoot, source: string, indexQueue?: IndexQueue): Promise<Imported> {
   const imported: Imported = { written: [], failed: false };
   for (const directory of (await readdir(source, { withFileTypes: true })).filter((entry) => entry.isDirectory())) {

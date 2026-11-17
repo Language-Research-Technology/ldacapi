@@ -17,7 +17,7 @@ const testbed = ocflTestbed(crate(collection(FIRST)), crate(collection(SECOND)),
 const indexAndSummarise = async (ask: () => Promise<string[]>, options?: { pollMilliseconds: number }) => {
   const { indexer, indexQueue } = testbed.started;
   // Imported once the testbed has read its configuration
-  const { indexAndSummarise } = await import('./index-run.ts');
+  const { indexAndSummarise } = await import('./index-and-summarise.ts');
   return indexAndSummarise(indexer, indexQueue, ask, options);
 };
 

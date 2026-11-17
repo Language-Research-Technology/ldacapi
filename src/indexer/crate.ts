@@ -26,7 +26,7 @@ const readCrateJson = async (object: OcflObject): Promise<CrateJson> => {
  * Each crate's parent collection, by the digest of the metadata it was read from: ids only, so a worker keeps it while
  * it runs, and parses a parent crate's metadata once rather than once per child
  */
-export class Parents {
+export class ParentCache {
   #known = new Map<string, { digest: string; parent: string | undefined }>();
   repository: StorageRoot;
 
@@ -56,7 +56,7 @@ export class Parents {
  * The collections above a crate's root, nearest first, found by following memberOf up through the parent crates in the
  * repository, so they don't depend on which crates are indexed yet. The last is the crate's top collection
  */
-async function parentCrates(parents: Parents, crate: ROCrate) {
+async function parentCrates(parents: ParentCache, crate: ROCrate) {
   const chain: string[] = [];
   let parent = parentCollection(crate);
   const seen = new Set([crate.rootId]);
@@ -122,7 +122,7 @@ const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => a
 export type ReadText = ReturnType<typeof textReader>;
 
 /** The crate `crateId` at its head version in `repository` */
-export async function openCrate(repository: StorageRoot, parents: Parents, crateId: string) {
+export async function openCrate(repository: StorageRoot, parents: ParentCache, crateId: string) {
   const object = await repository.open(crateId);
   return {
     version: object.head.number,

@@ -6,7 +6,6 @@ export type Shape = 'one-crate' | 'split';
 export const SHAPES: readonly Shape[] = ['one-crate', 'split'];
 
 export type CollectionSize = {
-  /** Sub-collections under the top collection */
   collections: number;
   objectsPerCollection: number;
   /** Each object's files: one text transcript, the rest audio */

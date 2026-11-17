@@ -10,7 +10,7 @@ import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
 import { countStates, createIndexQueue } from './index-queue/index-queue.ts';
 import { indexerDeps } from './indexer/deps.ts';
-import { indexAndSummarise } from './indexer/index-run.ts';
+import { indexAndSummarise } from './indexer/index-and-summarise.ts';
 import { prisma } from './prisma.ts';
 import { openOrCreateRepository } from './repository/repository.ts';
 

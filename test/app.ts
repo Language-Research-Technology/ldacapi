@@ -13,7 +13,6 @@ import { type Crate, writeCrates } from './crate-builder.ts';
 
 type Storage = StorageBackend['content'];
 
-/** Content storage holding nothing */
 const noContent: Storage = async () => null;
 
 /** Content storage whose every file holds `content`, served as the file's media type */
@@ -35,7 +34,6 @@ export const emptyEverything = async (prisma: PrismaClient, opensearch: Client) 
 /** What `buildApp` needs besides search, for an app that serves no content and is never asked to index */
 export const noRepository = { storage: noContent, indexQueue: {} as IndexQueue };
 
-/** A repository with no crates */
 const emptyRepository = { async *objects() {} } as unknown as StorageRoot;
 
 /**
@@ -144,7 +142,6 @@ export const ocflTestbed = (...crates: Crate[]) => {
       await started.workTheQueue();
     },
 
-    /** The index state of `crateId` */
     state: (crateId: string) => started.indexQueue.crate(crateId),
 
     /** Empties everything, then indexes `crateIds` in that order */

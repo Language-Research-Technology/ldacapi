@@ -97,7 +97,7 @@ const crateState = (row: StateRow): CrateState => ({ id: row.id, name: row.name,
 
 type Failure = { crateId: string; error: string; stage: string | null; failedOn: string | null };
 
-/** What became of the crates a run asked for */
+/** What became of the crates asked for */
 export type Summary = { indexed: number; skipped: number; deleted: number; failed: Failure[] };
 
 type OutcomeRow = { id: string; listed: boolean; indexedVersion: number | null; indexedAt: Date | null } & Pick<Failure, 'error' | 'stage' | 'failedOn'>;
@@ -137,7 +137,6 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
     /** Asks to index `crateId`, or it and those under it, returning the ids asked for */
     index: (crateId: string, scope?: Scope) => askFor(crateId, 'index', scope),
 
-    /** Index regardless of the indexed version */
     reindex: (crateId: string, scope?: Scope) => askFor(crateId, 'reindex', scope),
 
     delete: (crateId: string, scope?: Scope) => askFor(crateId, 'delete', scope),
@@ -165,17 +164,16 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
       return [...indexed, ...gone];
     },
 
-    /** Every crate known to be in the repository, by id */
     crates: async () => (await states()).map(crateState),
 
     /** The crate `crateId`, if it is known to be in the repository */
     crate: async (crateId: string) => (await states(Prisma.sql`WHERE crate.id = ${crateId}`)).map(crateState)[0],
 
     /**
-     * Starts a run, noting when each crate was last indexed. Its `summary` says what became of the crates it asked for,
-     * once their jobs are finished: a crate indexed at the same time as before was skipped
+     * Notes when each crate was last indexed. Its `summary` says what became of the crates asked for since, once their
+     * jobs are finished: a crate indexed at the same time as before was skipped
      */
-    async startRun() {
+    async startSummary() {
       const before = new Map(
         (await prisma.crateRecord.findMany({ select: { id: true, indexedAt: true } })).map(({ id, indexedAt }) => [id, indexedAt?.getTime()]),
       );
@@ -204,7 +202,7 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
       };
     },
 
-    /** Whether any worker, or CLI run working the queue, has a fresh heartbeat */
+    /** Whether any worker, or CLI command working the queue, has a fresh heartbeat */
     workerRunning: async () => (await prisma.indexWorker.count({ where: { heartbeatAt: { gt: new Date(Date.now() - WORKER_SILENT_MILLISECONDS) } } })) > 0,
   };
 }

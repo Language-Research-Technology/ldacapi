@@ -14,10 +14,10 @@ export async function indexAndSummarise(
   ask: () => Promise<string[]>,
   intervals: Pick<WorkOptions, 'pollMilliseconds'> = {},
 ): Promise<Summary> {
-  const run = await indexQueue.startRun();
+  const outcomes = await indexQueue.startSummary();
   const crateIds = await ask();
   await workTheQueue(deps, { until: 'finished', crateIds, ...intervals });
-  const summary = await run.summary(crateIds);
+  const summary = await outcomes.summary(crateIds);
   const { failed, ...counts } = summary;
   log.info({ ...counts, failed: failed.length }, 'Indexing finished');
   for (const failure of failed) {

@@ -17,7 +17,6 @@ import { prisma } from './prisma.ts';
 
 type AppDeps = {
   search: SearchBackend;
-  /** Serves the content of files */
   storage: StorageBackend['content'];
   indexQueue: IndexQueue;
 };

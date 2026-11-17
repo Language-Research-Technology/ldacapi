@@ -7,7 +7,7 @@ import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { AggregatesWriter } from './aggregates.ts';
-import { openCrate, Parents } from './crate.ts';
+import { openCrate, ParentCache } from './crate.ts';
 import { type DeriveFacts, derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
 import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, returnDeadWorkersJobs, succeed, unfinished } from './jobs.ts';
@@ -86,7 +86,7 @@ async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, pro
 }
 
 /** Deletes everything, or the crate's indexes (then its record, if it is gone from the repository), or indexes it */
-async function runJob(deps: IndexerDeps, writers: Writers, parents: Parents, job: Job, progress: Progress): Promise<Outcome> {
+async function runJob(deps: IndexerDeps, writers: Writers, parents: ParentCache, job: Job, progress: Progress): Promise<Outcome> {
   const { crateId, kind } = job;
   if (crateId === null) {
     return deleteEverything(deps, progress);
@@ -105,7 +105,7 @@ async function runJob(deps: IndexerDeps, writers: Writers, parents: Parents, job
 async function indexCrate(
   { prisma, repository, licences }: IndexerDeps,
   writers: Writers,
-  parents: Parents,
+  parents: ParentCache,
   crateId: string,
   kind: IndexJobKind,
   progress: Progress,
@@ -138,7 +138,7 @@ async function indexCrate(
 type Running = { job: Job; progress: Progress; claimLost: AbortController };
 
 /** Runs the job and records its result, unless it was stopped or met an outage, which the caller releases it for */
-async function run(deps: IndexerDeps, writers: Writers, parents: Parents, workerId: string, { job, progress, claimLost }: Running) {
+async function run(deps: IndexerDeps, writers: Writers, parents: ParentCache, workerId: string, { job, progress, claimLost }: Running) {
   const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
   const started = Date.now();
   log.info({ ...fields, attempt: job.attempts }, 'Job started');
@@ -178,7 +178,7 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
     documents: new DocumentsWriter(prisma, search),
     aggregates: new AggregatesWriter(prisma),
   };
-  const parents = new Parents(deps.repository);
+  const parents = new ParentCache(deps.repository);
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   let running: Running | undefined;
   const beat = async () => {

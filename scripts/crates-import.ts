@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { config } from '../src/configuration.ts';
 import { importCrates } from '../src/crates-import.ts';
 import { openIndexing } from '../src/indexer/deps.ts';
-import { indexAndSummarise } from '../src/indexer/index-run.ts';
+import { indexAndSummarise } from '../src/indexer/index-and-summarise.ts';
 import { logger } from '../src/logger.ts';
 
 const { values, positionals } = parseArgs({ allowPositionals: true, allowNegative: true, options: { index: { type: 'boolean', default: true } } });

@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util';
 import { openIndexing } from '../src/indexer/deps.ts';
-import { indexAndSummarise } from '../src/indexer/index-run.ts';
+import { indexAndSummarise } from '../src/indexer/index-and-summarise.ts';
 
 const { values } = parseArgs({ options: { force: { type: 'boolean', default: false } } });
 
