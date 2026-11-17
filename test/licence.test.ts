@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { generateKeyPair, importJWK, type JWTPayload, SignJWT } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateSigningKey, type Jwk } from '../src/oidc/keys.ts';
-import { buildTestApp, repositoryWithContent, type TestApp } from './app.ts';
+import { buildTestApp, contentEverywhere, type TestApp } from './app.ts';
 
 const ISSUER = 'http://localhost:8080';
 const AUDIENCE = `${ISSUER}/api`;
@@ -91,7 +91,7 @@ beforeAll(async () => {
       ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource={licenseId}',
       OIDC_SIGNING_KEYS: JSON.stringify({ keys: SIGNING_KEYS }),
     },
-    { repository: repositoryWithContent },
+    { storage: contentEverywhere },
   ));
   ({ prefix } = config);
 

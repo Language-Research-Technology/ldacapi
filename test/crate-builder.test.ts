@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { importCrates } from '../src/crates-import.ts';
-import { openOrCreateRepository } from '../src/ocfl-repository.ts';
+import { openOrCreateRepository } from '../src/repository/repository.ts';
 import { type Crate, collection, crate, file, fileDescribedButNotHeld, licence, object, person, writeCrates } from './crate-builder.ts';
 
 const ROOT = 'arcp://name,builder';

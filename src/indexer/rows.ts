@@ -2,38 +2,32 @@ import type { OcflStorageMeta } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
 import { accessControlFor } from '../access/access-control.ts';
 import type { EntityMeta } from '../entity-meta.ts';
-import type { Prisma } from '../generated/prisma/client.ts';
+import type { Prisma, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
-import { prisma } from '../prisma.ts';
 import { firstStringOrId } from '../utils.ts';
-import { type BaseOptions, type CrateFile, entityClass, Indexer, memberOf, recordType, rootCollection } from './indexer.ts';
+import { type CrateFile, entityClass, type Licences, memberOf, recordType, rootCollection, type WriteParams, Writer } from './writer.ts';
 
-const log = logger.child({ module: 'indexer/database' });
+const log = logger.child({ module: 'indexer/rows' });
 
 type IndexRecord = { entity: Prisma.EntityUncheckedCreateInput; file?: Prisma.FileUncheckedCreateInput };
 
-type DatabaseOptions = BaseOptions & {
-  memberOfField?: string;
-};
+/** Writes a crate's Entity and File rows */
+export class RowsWriter extends Writer {
+  prisma: PrismaClient;
 
-export class DatabaseIndexer extends Indexer {
-  memberOfField: string;
-
-  constructor(opt: DatabaseOptions) {
-    super(opt);
-    this.memberOfField = opt.memberOfField || 'pcdm:memberOf';
+  constructor(prisma: PrismaClient, licences: Licences) {
+    super(licences);
+    this.prisma = prisma;
   }
 
-  override async _index({ crateObject, crate, paths, license, metadataLicense, topCollection }: Parameters<Indexer['_index']>[0]) {
+  override async write({ crateObject, crate, paths, license, metadataLicense, topCollection }: WriteParams) {
     const crateId = crate.rootId;
-    let count = 0;
     for (const entity of crate.entities()) {
       const entityType = recordType(entity);
       if (!entityType) {
         continue;
       }
       log.debug({ crateId, entityId: entity['@id'] }, 'Indexing entity');
-      count++;
       const entityId = entity['@id'];
       const rocrate = entityAsCrate(crate, entity, license);
       const contentLicenseId = firstStringOrId(entity.license) || license;
@@ -69,37 +63,34 @@ export class DatabaseIndexer extends Indexer {
         };
       }
       try {
-        await prisma.entity.create({ data: param.entity });
+        await this.prisma.entity.create({ data: param.entity });
         if (param.file) {
-          await prisma.file.create({ data: param.file });
+          await this.prisma.file.create({ data: param.file });
         }
       } catch (error) {
         log.error({ err: error, crateId, entityId }, 'Error indexing entity');
       }
     }
-
-    log.info({ crateId, entities: count }, 'Indexed crate');
   }
 
-  async delete(crateId?: string) {
-    await prisma.file.deleteMany({ where: { entity: rowsOf(crateId) } });
-    await prisma.entity.deleteMany({ where: rowsOf(crateId) });
-    log.debug({ crateId }, 'Index deleted');
-  }
-
-  async count(crateId: string) {
-    return await prisma.entity.count({ where: rowsOf(crateId) });
+  async delete(crateId: string) {
+    await this.prisma.file.deleteMany({ where: { entity: rowsOf(crateId) } });
+    await this.prisma.entity.deleteMany({ where: rowsOf(crateId) });
   }
 }
 
-/** The entity rows indexed from `crateId`, or every row */
-const rowsOf = (crateId?: string): Prisma.EntityWhereInput => (crateId ? { meta: { path: ['crateId'], equals: crateId } } : {});
+/** The entity rows indexed from `crateId` */
+const rowsOf = (crateId: string): Prisma.EntityWhereInput => ({ meta: { path: ['crateId'], equals: crateId } });
 
 /** The id and rootCollection of each entity row indexed from `crateId` */
-export const crateRows = (crateId: string) => prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true, rootCollection: true } });
+export const crateRows = (prisma: PrismaClient, crateId: string) =>
+  prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true, rootCollection: true } });
 
-/** The ids of the entity rows indexed from `crateId` */
-export const rowIds = async (crateId: string) => (await crateRows(crateId)).map(({ id }) => id);
+/** How many entity and file rows were indexed from `crateId` */
+export const countRows = async (prisma: PrismaClient, crateId: string) => ({
+  entities: await prisma.entity.count({ where: rowsOf(crateId) }),
+  files: await prisma.file.count({ where: { entity: rowsOf(crateId) } }),
+});
 
 export function entityAsCrate(crate: ROCrate, entity: Entity, license: string) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });

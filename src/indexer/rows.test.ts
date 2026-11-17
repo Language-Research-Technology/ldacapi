@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import { ROCrate } from 'ro-crate';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { accessControlOf } from '../entity-meta.ts';
 import { prisma } from '../prisma.ts';
-import { DatabaseIndexer, entityAsCrate } from './database.ts';
-import type { CrateObject } from './indexer.ts';
+import { entityAsCrate, RowsWriter } from './rows.ts';
+import type { CrateObject } from './writer.ts';
 
 describe('entityAsCrate', () => {
   it('preserves the original RO-Crate context when serializing an entity', async () => {
@@ -16,16 +16,12 @@ describe('entityAsCrate', () => {
   });
 });
 
-describe('DatabaseIndexer', () => {
+describe('RowsWriter', () => {
   const ROOT = 'arcp://name,database-test';
   const OPEN = 'https://creativecommons.org/licenses/by/4.0/';
   const RESTRICTED = 'https://www.ldaca.edu.au/licenses/restricted/v1/';
 
-  let indexer: DatabaseIndexer;
-
-  beforeAll(async () => {
-    indexer = await DatabaseIndexer.create({});
-  });
+  const indexer = new RowsWriter(prisma, { defaultLicense: '', defaultMetadataLicense: '' });
 
   afterEach(async () => {
     await indexer.delete(ROOT);
@@ -50,7 +46,7 @@ describe('DatabaseIndexer', () => {
     const crateObject: CrateObject = {
       id: 'database-test',
       text: async () => '',
-      file: async (path) => {
+      file: async (path: string) => {
         const size = inventory[path];
         if (size === undefined) {
           throw new Error(`Not in inventory: ${path}`);
@@ -85,6 +81,15 @@ describe('DatabaseIndexer', () => {
 
       expect(await sizeOf('none.txt')).toBe(-1);
       expect(await sizeOf('unknown.txt')).toBe(-1);
+    });
+  });
+
+  describe('a file outside the crate', () => {
+    it('has a row with no storage location, named by the end of its id', async () => {
+      await index([{ '@id': 'https://example.org/media/a.wav', encodingFormat: 'audio/wav' }]);
+
+      const row = await prisma.file.findUniqueOrThrow({ where: { id: 'https://example.org/media/a.wav' } });
+      expect(row).toMatchObject({ filename: 'a.wav', mediaType: 'audio/wav', meta: {} });
     });
   });
 

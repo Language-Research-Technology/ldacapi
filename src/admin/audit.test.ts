@@ -1,6 +1,6 @@
 import { Writable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { ALICE, adminTestbed, PEOPLE, repositoryIn } from '../../test/admin.ts';
+import { ALICE, adminTestbed, PEOPLE } from '../../test/admin.ts';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
@@ -19,17 +19,20 @@ const testbed = adminTestbed();
 
 describe('the audit log', () => {
   it('records each accepted and refused action, with who asked', async () => {
-    const { app } = await testbed.start({ ADMIN_USERS: ALICE.sub }, { repository: repositoryIn('indexed') });
+    const { app, emptyEverything, indexQueue } = await testbed.start({ ADMIN_USERS: ALICE.sub });
+    await emptyEverything();
+    await indexQueue.index(PEOPLE);
     const { browser } = await testbed.signInAsAdmin(app, ALICE);
 
     await browser.post('/admin/index', { crateId: PEOPLE, force: 'true' });
     await browser.post('/admin/delete', {});
-    await browser.post('/admin/index', { crateId: PEOPLE });
+    await browser.post('/admin/index', { crateId: 'arcp://name,elsewhere' });
+    await emptyEverything();
 
     expect(logs.filter(({ action }) => action)).toEqual([
       expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: PEOPLE, force: true, accepted: true }),
-      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'delete', crateId: 'all', force: false, accepted: true }),
-      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: PEOPLE, force: false, accepted: false }),
+      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'delete', crateId: 'all', force: false, accepted: false }),
+      expect.objectContaining({ level: 30, sub: ALICE.sub, action: 'index', crateId: 'arcp://name,elsewhere', force: false, accepted: false }),
     ]);
   });
 });

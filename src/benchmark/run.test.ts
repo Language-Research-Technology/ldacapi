@@ -34,7 +34,7 @@ describe('runBenchmark', () => {
       expect(result.peakMemoryBytes).toBeGreaterThan(10 * 1024 * 1024);
       expect(result.rows).toBe(8);
       expect(result.documents).toBe(8);
-      expect(await readFile(result.logFile, 'utf-8')).toContain('Indexed crate');
+      expect(await readFile(result.logFile, 'utf-8')).toContain('Job finished');
       expect(report(shape, repository, result)).toMatch(new RegExp(`^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; .*: met\\)$`));
 
       await discardRepository(repository);

@@ -9,7 +9,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { config } from '../configuration.ts';
 import { importCrates } from '../crates-import.ts';
 import { PrismaClient } from '../generated/prisma/client.ts';
-import { openOrCreateRepository } from '../ocfl-repository.ts';
+import { openOrCreateRepository } from '../repository/repository.ts';
 import { type GenerateOptions, generateCollection } from './generate.ts';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));

@@ -31,8 +31,7 @@ describe.each([
   ['after', [CONTENT, METADATA, ROOT, BUNDLED]],
 ])('rootCollection, with the distributed parent crate indexed %s its children', (_order, crates) => {
   beforeAll(async () => {
-    await testbed.started.repository.deleteIndex();
-    await testbed.started.repository.createIndex(crates);
+    await testbed.indexOnly(...crates);
   });
 
   it('is empty on a top-level collection', async () => {

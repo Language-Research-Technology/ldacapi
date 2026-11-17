@@ -11,8 +11,7 @@ const SECOND = 'arcp://name,cycle_second';
 const testbed = ocflTestbed(crate(collection(FIRST, { memberOf: SECOND })), crate(collection(SECOND, { memberOf: FIRST })));
 
 beforeAll(async () => {
-  await testbed.started.repository.deleteIndex();
-  await testbed.started.repository.createIndex(FIRST);
+  await testbed.indexOnly(FIRST);
 });
 
 describe('collections that are members of each other', () => {

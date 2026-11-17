@@ -3,37 +3,36 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import type { Client } from '@opensearch-project/opensearch';
+import type { StorageRoot } from '@ocfl/ocfl-fs';
+import type { StorageBackend } from 'arocapi';
 import { afterAll, beforeAll, expect, vi } from 'vitest';
-import type { createSearchBackend } from '../src/indexer/search.ts';
-import { initRepository, type Repository } from '../src/repository.ts';
+import type { IndexQueue } from '../src/index-queue/index-queue.ts';
 import { type Crate, writeCrates } from './crate-builder.ts';
 
-type RepositoryDeps = { opensearchClient: Client; search: ReturnType<typeof createSearchBackend> };
+type Storage = StorageBackend['content'];
 
-/** A repository, or how to build one with the app's search */
-export type TestRepository = Repository | ((deps: RepositoryDeps) => Repository | Promise<Repository>);
+/** Content storage holding nothing */
+const noContent: Storage = async () => null;
 
-/** A repository with no content */
-export const repository = { storage: () => ({ content: {} }), async *objects() {} } as unknown as Repository;
+/** Content storage whose every file holds `content`, served as the file's media type */
+export const contentEverywhere: Storage = async (file) => ({
+  type: 'stream',
+  open: () => Readable.from(['content']),
+  contentLength: 7,
+  contentType: file.mediaType ?? 'text/plain',
+});
 
-/** A repository whose every file holds `content`, served as the file's media type */
-export const repositoryWithContent = {
-  storage: () => ({
-    content: (file: { mediaType?: string }) => ({
-      type: 'stream',
-      open: () => Readable.from(['content']),
-      contentLength: 7,
-      contentType: file.mediaType ?? 'text/plain',
-    }),
-  }),
-} as unknown as Repository;
+/** What `buildApp` needs besides search, for an app that serves no content and is never asked to index */
+export const noRepository = { storage: noContent, indexQueue: {} as IndexQueue };
 
-/** The OCFL repository at `OCFL_ROOT` */
-export const ocflRepository = (deps: Record<string, unknown>) => initRepository('ocfl', deps);
+/** A repository with no crates */
+const emptyRepository = { async *objects() {} } as unknown as StorageRoot;
 
-/** Builds the app with `env` set while configuration is read, which happens on first import */
-export const buildTestApp = async (env: Record<string, string>, options: { repository?: TestRepository } = {}) => {
+/**
+ * Builds the app with `env` set while configuration is read, which happens on first import.
+ * With `ocfl`, it serves and indexes the OCFL repository at `OCFL_ROOT`
+ */
+export const buildTestApp = async (env: Record<string, string>, options: { storage?: Storage; ocfl?: boolean } = {}) => {
   for (const [name, value] of Object.entries(env)) {
     vi.stubEnv(name, value);
   }
@@ -42,13 +41,41 @@ export const buildTestApp = async (env: Record<string, string>, options: { repos
     const { prisma } = await import('../src/prisma.ts');
     const { buildApp } = await import('../src/app.ts');
     const { Client } = await import('@opensearch-project/opensearch');
-    const { createSearchBackend } = await import('../src/indexer/search.ts');
-    const opensearchClient = new Client({ node: config.opensearchUrl });
-    const search = createSearchBackend(opensearchClient);
-    const repo = typeof options.repository === 'function' ? await options.repository({ opensearchClient, search }) : (options.repository ?? repository);
+    const { createSearchBackend, refreshSearchIndex } = await import('../src/search-backend.ts');
+    const { createIndexQueue } = await import('../src/index-queue/index-queue.ts');
+    const { contentStorage, openRepository } = await import('../src/repository/repository.ts');
+    const { workTheQueue } = await import('../src/indexer/indexer.ts');
+    const opensearch = new Client({ node: config.opensearchUrl });
+    const search = createSearchBackend(opensearch);
+    const repository = options.ocfl ? await openRepository(config.ocfl.root) : emptyRepository;
+    const storage = options.storage ?? (options.ocfl ? await contentStorage(config.ocfl.root) : noContent);
+    const indexQueue = createIndexQueue({ prisma, repository });
+    const indexer = { prisma, repository, opensearch, search, licences: config };
     /** Builds another app, as another server process would */
-    const build = () => buildApp({ repository: repo, search });
-    return { app: build(), build, config, prisma, repository: repo, search };
+    const build = () => buildApp({ search, storage, indexQueue });
+    return {
+      app: build(),
+      build,
+      config,
+      prisma,
+      opensearch,
+      search,
+      repository,
+      indexQueue,
+      indexer,
+
+      /** Works the queue until it is empty, as `pnpm index` does, then makes what it indexed searchable */
+      async workTheQueue() {
+        await workTheQueue(indexer, { until: 'empty' });
+        await refreshSearchIndex(opensearch);
+      },
+
+      /** Deletes every index job, crate record, worker, row and search document */
+      async emptyEverything() {
+        await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+        await opensearch.indices.delete({ index: config.search.entityIndex, ignore_unavailable: true });
+      },
+    };
   } finally {
     vi.unstubAllEnvs();
   }
@@ -80,17 +107,17 @@ export const ocflStorage = ({ crates, source }: { crates?: Crate[]; source?: (sc
   return { ocflRoot };
 };
 
-/** The app over a new OCFL repository (see `ocflStorage`), its indexes deleted after the file's tests */
+/** The app over a new OCFL repository (see `ocflStorage`), everything emptied after the file's tests */
 export const ocflTestbed = (...crates: Crate[]) => {
   const { ocflRoot } = ocflStorage({ crates });
   let started: Awaited<ReturnType<typeof buildTestApp>>;
 
   beforeAll(async () => {
-    started = await buildTestApp({ OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' }, { repository: ocflRepository });
+    started = await buildTestApp({ OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' }, { ocfl: true });
   });
 
   afterAll(async () => {
-    await started?.repository.deleteIndex();
+    await started?.emptyEverything();
     await started?.app.close();
     await started?.prisma.$disconnect();
   });
@@ -98,6 +125,15 @@ export const ocflTestbed = (...crates: Crate[]) => {
   return {
     get started() {
       return started;
+    },
+
+    /** Empties everything, then indexes `crateIds` in that order */
+    async indexOnly(...crateIds: string[]) {
+      await started.emptyEverything();
+      for (const crateId of crateIds) {
+        await started.indexQueue.index(crateId);
+      }
+      await started.workTheQueue();
     },
 
     /** POSTs `body` to the search endpoint, expecting success */

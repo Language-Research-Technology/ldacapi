@@ -19,8 +19,7 @@ const testbed = ocflTestbed(
 const { search } = testbed;
 
 beforeAll(async () => {
-  await testbed.started.repository.deleteIndex();
-  await testbed.started.repository.createIndex(ROOT);
+  await testbed.indexOnly(ROOT);
 });
 
 describe('an entity whose row fails to be written', () => {
@@ -32,8 +31,9 @@ describe('an entity whose row fails to be written', () => {
     expect(facets.recordType.reduce((sum: number, { count }: { count: number }) => sum + count, 0)).toBe(2);
   });
 
-  it('is not counted when the search index is rebuilt alone', async () => {
-    await testbed.started.repository.createIndex(ROOT, 'search', true);
+  it('is not counted once the crate is reindexed', async () => {
+    await testbed.started.indexQueue.reindex(ROOT);
+    await testbed.started.workTheQueue();
 
     const { total, entities } = await search({ query: '', limit: 100 });
 
@@ -45,19 +45,7 @@ describe('an entity whose row fails to be written', () => {
     expect(logs).toContainEqual(expect.objectContaining({ level: 40, crateId: ROOT, entityId: UNWRITTEN, msg: 'Skipped: no database row' }));
   });
 
-  it('logs the documents it indexed', () => {
-    expect(logs).toContainEqual(expect.objectContaining({ module: 'indexer/search', crateId: ROOT, documents: 2, msg: 'Indexed crate' }));
-  });
-});
-
-describe('a crate with no database rows', () => {
-  it('logs the skip once for the crate', async () => {
-    await testbed.started.repository.deleteIndex(ROOT);
-    logs.length = 0;
-
-    await testbed.started.repository.createIndex(ROOT, 'search');
-
-    const skips = logs.filter(({ msg }) => typeof msg === 'string' && msg.startsWith('Skipped'));
-    expect(skips).toEqual([expect.objectContaining({ level: 40, crateId: ROOT, skipped: 3, msg: 'Skipped crate: no database rows' })]);
+  it('is not counted among the entities the job wrote', () => {
+    expect(logs).toContainEqual(expect.objectContaining({ module: 'indexer', crateId: ROOT, entities: 2, msg: 'Job finished' }));
   });
 });

@@ -73,6 +73,30 @@ services:
       opensearch:
         condition: service_healthy
 
+  # Runs index jobs; the same image as the API, so upgrade them together
+  worker:
+    <<: *hardening
+    image: ghcr.io/language-research-technology/ldacapi:main
+    command: ["node", "src/worker.ts"]
+    env_file: ldacapi.env
+    environment:
+      DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
+      OPENSEARCH_URL: http://opensearch:9200
+      OCFL_ROOT: /storage/ocfl
+    volumes:
+      - ${STORAGE_DIR:?Set STORAGE_DIR in .env}:/storage
+    read_only: true
+    tmpfs:
+      - /tmp
+    # The image's health check asks the API, which the worker doesn't serve; the admin pages show whether a worker is running
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+
   db:
     <<: *hardening
     image: postgres:18-alpine

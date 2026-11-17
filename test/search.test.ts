@@ -15,8 +15,7 @@ const testbed = ocflTestbed(
 const { search } = testbed;
 
 beforeAll(async () => {
-  await testbed.started.repository.deleteIndex();
-  await testbed.started.repository.createIndex(ROOT);
+  await testbed.indexOnly(ROOT);
 });
 
 describe('search by recordType and entityType', () => {

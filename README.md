@@ -23,7 +23,7 @@ configures them as follows:
 - **Search backend**: arocapi's
   [`OpenSearchBackend`](https://arocapi.crate-works.org/configuration/search/#opensearchbackend),
   with the [fields](https://arocapi.crate-works.org/configuration/search/#fields)
-  declared in `src/indexer/search.ts`, where `entityType` filters on an
+  declared in `src/search-backend.ts`, where `entityType` filters on an
   entity's class URI and the "Record Type" facet, `recordType`, shows a
   readable label for it.
 - **Visibility**: every entity is visible to everyone, through arocapi's
@@ -38,10 +38,12 @@ configures them as follows:
 ldacapi adds what LDaCA needs on top (terms as in [GLOSSARY.md](GLOSSARY.md)):
 
 - **OCFL repository**: each crate is one [OCFL](https://ocfl.io/) object on
-  disk, imported with `pnpm crates:import` (`src/ocfl.ts`).
-- **Indexing**: `pnpm index` and the admin pages build the database index (the
-  Entity and File rows arocapi reads) and the search index (one search
-  document per entity) from the repository (`src/indexer/`). Both can be
+  disk, imported with `pnpm crates:import` (`src/repository/`).
+- **Indexing**: `pnpm index` and the admin pages ask for index jobs
+  (`src/index-queue/`), and a worker (`src/worker.ts`) runs them, building the
+  database index (the Entity and File rows arocapi reads) and the search index
+  (one search document per entity) from the repository (`src/indexer/`). Jobs
+  and each crate's index state are kept in Postgres. Both indexes can be
   rebuilt at any time.
 - **Collections**: an entity's `rootCollection` is the top-level collection
   it sits under, and is empty on a top-level collection
@@ -90,14 +92,15 @@ it in `.env`.
 
 | Script                     | Does                                                                             |
 | -------------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`                 | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
+| `pnpm dev`                 | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet |
 | `pnpm build`               | Build the admin pages' stylesheet (run before deploying)                         |
 | `pnpm test`                | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`                | Biome, Knip and TypeScript                                                       |
 | `pnpm bootstrap`           | `db:deploy`, `crates:import` and `index` in one go                               |
 | `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
 | `pnpm crates:import [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
-| `pnpm index`               | Rebuild both indexes from the OCFL repository                                    |
+| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), then run the queue until it is empty; fails if any crate does |
+| `pnpm worker`              | Run index jobs as they are asked for                                             |
 | `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
 | `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
@@ -446,7 +449,7 @@ OpenSearch is pinned to an exact version in both `deploy/compose.yaml` and the
 development `docker-compose.yml`, so bump the two together: its data directory
 can be upgraded but not downgraded. If it won't start after an upgrade, stop
 it, recreate `data/opensearch` as above, start it and rebuild the indexes with
-`docker compose run --rm api pnpm index`.
+`docker compose run --rm api pnpm index --force`.
 
 Register `https://<DOMAIN>/oauth/callback` as the redirect URI at the upstream
 provider. Compose sets the API's database, OpenSearch, storage, `OIDC_ISSUER`,
@@ -470,12 +473,12 @@ The stack runs the API's `main` image. To upgrade, back up the database and
 ```sh
 docker compose exec -T db pg_dump -U ldacapi -Fc ldacapi > ldacapi-$(date +%F).dump
 docker compose pull
-docker compose stop api
+docker compose stop api worker
 docker compose run --rm api pnpm db:deploy
 docker compose up -d
 ```
 
-`pnpm index` deletes both indexes and rebuilds them, so run it when an upgrade
+`pnpm index --force` rebuilds both indexes of every crate, so run it when an upgrade
 changes what they hold. If an upgrade changes the search fields, the API and
 `pnpm index` stop with an error naming the changed field, as they check the
 search index's mapping before anything else. Delete the search index (named by
@@ -483,7 +486,7 @@ search index's mapping before anything else. Delete the search index (named by
 
 ```sh
 docker compose exec opensearch curl -sX DELETE localhost:9200/entities
-docker compose run --rm api pnpm index
+docker compose run --rm api pnpm index --force
 docker compose up -d
 ```
 

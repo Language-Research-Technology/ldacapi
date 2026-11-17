@@ -1,12 +1,12 @@
 import { ROCrate } from 'ro-crate';
-import { describe, expect, it, vi } from 'vitest';
-import { type CrateObject, Indexer } from './indexer.ts';
-import { countDocuments, searchDocument } from './search.ts';
+import { describe, expect, it } from 'vitest';
+import { searchDocument } from './documents.ts';
+import { type CrateObject, deriveUniqueEntityIds } from './writer.ts';
 
 const ROOT = 'arcp://name,test';
 const LICENSE = 'https://creativecommons.org/licenses/by/4.0/';
 
-const crateWith = async (entity: Record<string, unknown>, terms: Record<string, string> = {}) => {
+const crateWith = async (entity: Record<string, unknown>, terms: Record<string, string> = {}, others: Record<string, unknown>[] = []) => {
   const crate = await ROCrate.create({
     '@context': ['https://w3id.org/ro/crate/1.1/context', { '@vocab': 'http://schema.org/', ldac: 'https://w3id.org/ldac/terms#', ...terms }],
     '@graph': [
@@ -16,9 +16,10 @@ const crateWith = async (entity: Record<string, unknown>, terms: Record<string, 
       { '@id': '#place', '@type': 'Place', geo: { '@id': '#point' } },
       { '@id': '#point', '@type': 'Geometry', asWKT: 'POINT(153.02 -27.47)' },
       { '@id': 'data.txt', '@type': 'File', name: 'Data', encodingFormat: 'text/plain', ...entity },
+      ...others,
     ],
   });
-  const paths = new Indexer().deriveUniqueEntityIds(crate);
+  const paths = deriveUniqueEntityIds(crate);
   const id = `${ROOT}/data.txt`;
   return { crate, entity: crate.getEntity(id), path: paths.get(id) };
 };
@@ -85,6 +86,22 @@ describe('searchDocument', () => {
     expect(await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).not.toHaveProperty('type');
   });
 
+  it('leaves out literals that aren’t text', async () => {
+    const { crate, entity } = await crateWith({ inLanguage: [42, { '@id': '#lang' }] });
+
+    expect((await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).inLanguage).toEqual(['English']);
+  });
+
+  it('takes the first point it finds among the entity’s places', async () => {
+    const { crate, entity } = await crateWith({ contentLocation: ['Somewhere', { '@id': '#nowhere' }, { '@id': '#latlng' }] }, {}, [
+      { '@id': '#nowhere', '@type': 'Place', geo: [5, 'no point here', { '@id': '#empty' }] },
+      { '@id': '#empty', '@type': 'Geometry' },
+      { '@id': '#latlng', '@type': 'Place', latitude: '-33.87', longitude: '151.21' },
+    ]);
+
+    expect((await searchDocument(crate, crateObject, entity, LICENSE, ROOT)).location).toEqual({ lat: -33.87, lng: 151.21 });
+  });
+
   it('leaves out dates it cannot store', async () => {
     const { crate, entity } = await crateWith({ datePublished: 'circa 1900', dateCreated: ['1901-02-03', 'unknown'] });
 
@@ -92,15 +109,5 @@ describe('searchDocument', () => {
 
     expect(doc).not.toHaveProperty('datePublished');
     expect(doc.dateCreated).toEqual(['1901-02-03']);
-  });
-});
-
-describe('countDocuments', () => {
-  it('counts in batches under OpenSearch’s terms limit, summing them', async () => {
-    const search = vi.fn(async ({ visibility }: { visibility: { id: { in: string[] } } }) => ({ total: visibility.id.in.length, hits: [] }));
-    const ids = Array.from({ length: 25_000 }, (_, i) => `id-${i}`);
-
-    expect(await countDocuments({ search } as unknown as Parameters<typeof countDocuments>[0], ids)).toBe(25_000);
-    expect(search.mock.calls.map(([{ visibility }]) => visibility.id.in.length)).toEqual([10_000, 10_000, 5_000]);
   });
 });

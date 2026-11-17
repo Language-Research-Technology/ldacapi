@@ -1,0 +1,56 @@
+enum IndexJobKind {
+  index
+  reindex
+  delete
+
+  @@map("index_job_kind")
+}
+
+enum IndexJobStatus {
+  waiting
+  running
+  failed
+
+  @@map("index_job_status")
+}
+
+/// A request to index, reindex or delete one crate's indexes. The migration adds partial unique indexes allowing one waiting and one running job per crate
+model IndexJob {
+  id        Int            @id @default(autoincrement())
+  crateId   String
+  kind      IndexJobKind
+  status    IndexJobStatus @default(waiting)
+  attempts  Int            @default(0)
+  workerId  String?
+  error     String?
+  createdAt DateTime       @default(now())
+  startedAt DateTime?
+  failedAt  DateTime?
+
+  crate CrateRecord @relation(fields: [crateId], references: [id], onDelete: Cascade)
+
+  @@index([crateId])
+  @@map("index_job")
+}
+
+/// A crate known to be in the repository, and what its last job wrote
+model CrateRecord {
+  id             String    @id
+  name           String?
+  indexedVersion Int?
+  indexedAt      DateTime?
+  entities       Int?
+  files          Int?
+
+  jobs IndexJob[]
+
+  @@map("crate")
+}
+
+/// A worker, or a CLI run working the queue, and when it last showed it was alive
+model IndexWorker {
+  id          String   @id
+  heartbeatAt DateTime @default(now())
+
+  @@map("index_worker")
+}

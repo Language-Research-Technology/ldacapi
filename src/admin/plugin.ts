@@ -4,10 +4,10 @@ import secureSession, { type Session, type SessionData } from '@fastify/secure-s
 import fastifyStatic from '@fastify/static';
 import fastifyView from '@fastify/view';
 import { Eta } from 'eta';
-import type { FastifyBaseLogger, FastifyPluginAsync, FastifyReply } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import type { AuthConfig } from '../configuration.ts';
+import type { IndexQueue } from '../index-queue/index-queue.ts';
 import { logger } from '../logger.ts';
-import type { Repository } from '../repository.ts';
 import { deleteIndexes, type Flash, indexCrates } from './actions.ts';
 import { ADMIN_HOME, ADMIN_PATH, ADMIN_SIGNED_OUT, derivedKey } from './client.ts';
 import { cratesPage } from './crates.ts';
@@ -48,10 +48,10 @@ type Pages = {
 
 const render = <Page extends keyof Pages>(reply: FastifyReply, page: Page, data: Pages[Page], status = 200) => reply.code(status).view(page, data);
 
-type AdminOptions = { auth: AuthConfig; origin: string; adminUsers: string[]; repository: Repository };
+type AdminOptions = { auth: AuthConfig; origin: string; adminUsers: string[]; indexQueue: IndexQueue };
 
 /** The admin pages, for users whose `sub` is in `adminUsers` */
-export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, origin, adminUsers, repository }) => {
+export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { auth, origin, adminUsers, indexQueue }) => {
   const { host, protocol } = new URL(origin);
   const signInFlow = createSignIn(fastify, auth, origin);
   const admins = new Set(adminUsers);
@@ -64,8 +64,8 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
     cookie: { ...cookie, maxAge: seconds },
   });
   const actions = {
-    index: (log: FastifyBaseLogger, crateId: string | undefined, force: boolean) => indexCrates(repository, log, crateId, force),
-    delete: (log: FastifyBaseLogger, crateId: string | undefined) => deleteIndexes(repository, log, crateId),
+    index: (crateId: string | undefined, force: boolean) => indexCrates(indexQueue, crateId, force),
+    delete: (crateId: string | undefined) => deleteIndexes(indexQueue, crateId),
   };
 
   fastify.addHook('onRoute', (route) => {
@@ -143,15 +143,15 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
         if (flash) {
           request.session.set('flash', undefined);
         }
-        const objects = await Array.fromAsync(repository.objects());
-        return render(reply, 'crates', { title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(objects) });
+        const [crates, counts, workerRunning] = await Promise.all([indexQueue.crates(), indexQueue.counts(), indexQueue.workerRunning()]);
+        return render(reply, 'crates', { title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(crates, counts, workerRunning) });
       });
 
       for (const [action, run] of Object.entries(actions)) {
         pages.post<{ Body: { crateId?: string; force?: string } }>(`/${action}`, async (request, reply) => {
           const crateId = request.body?.crateId || undefined;
           const force = Boolean(request.body?.force);
-          const flash = await run(request.log, crateId, force);
+          const flash = await run(crateId, force);
           request.log.info({ sub: request.session.get('admin')?.sub, action, crateId: crateId ?? 'all', force, accepted: flash.accepted }, flash.message);
           request.session.set('flash', flash);
           return reply.redirect(ADMIN_HOME, 303);

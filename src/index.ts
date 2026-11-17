@@ -1,13 +1,14 @@
 import { Client } from '@opensearch-project/opensearch';
 import { buildApp } from './app.ts';
 import { config } from './configuration.ts';
-import { createSearchBackend } from './indexer/search.ts';
-import { initRepository } from './repository.ts';
+import { createIndexQueue } from './index-queue/index-queue.ts';
+import { prisma } from './prisma.ts';
+import { contentStorage, openRepository } from './repository/repository.ts';
+import { createSearchBackend } from './search-backend.ts';
 
-const opensearch = new Client({ node: config.opensearchUrl });
-const search = createSearchBackend(opensearch);
-const repository = await initRepository('ocfl', { opensearchClient: opensearch, search });
-const fastify = buildApp({ repository, search });
+const search = createSearchBackend(new Client({ node: config.opensearchUrl }));
+const repository = await openRepository(config.ocfl.root);
+const fastify = buildApp({ search, storage: await contentStorage(config.ocfl.root), indexQueue: createIndexQueue({ prisma, repository }) });
 
 try {
   await fastify.listen({ port: config.port, host: config.host });

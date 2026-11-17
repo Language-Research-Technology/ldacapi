@@ -1,177 +1,106 @@
-import type { Entity, ROCrate } from 'ro-crate';
-import { config } from '../configuration.ts';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { StorageRoot } from '@ocfl/ocfl-fs';
+import type { Client } from '@opensearch-project/opensearch';
+import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
+import { prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { firstStringOrId } from '../utils.ts';
+import { openCrate } from './crate.ts';
+import { DocumentsWriter } from './documents.ts';
+import { claim, fail, heartbeat, type Job, removeWorker, succeed } from './jobs.ts';
+import { countRows, RowsWriter } from './rows.ts';
+import type { Licences } from './writer.ts';
 
 const log = logger.child({ module: 'indexer' });
 
-export type BaseOptions = {
-  defaultLicense?: string;
-  defaultMetadataLicense?: string;
-  name?: string;
+export type IndexerDeps = {
+  prisma: PrismaClient;
+  repository: StorageRoot;
+  opensearch: Client;
+  search: SearchBackend;
+  licences: Licences;
 };
 
-/** A URI reference relative to the crate root as a decoded path, dropping any query or fragment */
-function crateRelativePath(ref: string) {
-  const path = new URL(ref, 'file:///').pathname.slice(1);
-  if (!path) {
-    return;
+export type WorkOptions = (
+  | { until: 'empty' }
+  | {
+      /** Waits for jobs until `signal` aborts, then stops after the job it is running */
+      until: 'aborted';
+      signal: AbortSignal;
+    }
+) & { heartbeatMilliseconds?: number };
+
+/** How long to wait before looking for a job again when none is waiting */
+const POLL_MILLISECONDS = 1000;
+
+type Writers = { rows: RowsWriter; documents: DocumentsWriter };
+
+const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
+  prisma.crateRecord.update({ where: { id: crateId }, data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
+
+/** Documents first, as they are found by the rows */
+async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: string) {
+  await clearIndexedVersion(prisma, crateId);
+  await writers.documents.delete(crateId);
+  await writers.rows.delete(crateId);
+}
+
+async function indexCrate({ prisma, repository }: IndexerDeps, writers: Writers, job: Job) {
+  const opened = await openCrate(repository, job.crateId);
+  const record = await prisma.crateRecord.findUniqueOrThrow({ where: { id: job.crateId } });
+  if (job.kind === 'index' && record.indexedVersion === opened.version) {
+    log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
+    return { skipped: true };
   }
+  const read = await opened.read();
+  await deleteIndexes(prisma, writers, job.crateId);
+  await writers.rows.index(read);
+  await writers.documents.index(read);
+  const counts = await countRows(prisma, job.crateId);
+  await prisma.crateRecord.update({
+    where: { id: job.crateId },
+    data: { name: firstStringOrId(read.crate.root.name) ?? null, indexedVersion: opened.version, indexedAt: new Date(), ...counts },
+  });
+  return { version: opened.version, ...counts };
+}
+
+async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: Job) {
+  const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
+  const started = Date.now();
+  log.info({ ...fields, attempt: job.attempts }, 'Job started');
   try {
-    return decodeURIComponent(path);
-  } catch {
-    return path;
+    const result = job.kind === 'delete' ? await deleteIndexes(deps.prisma, writers, job.crateId) : await indexCrate(deps, writers, job);
+    await succeed(deps.prisma, workerId, job);
+    log.info({ ...fields, ...result, milliseconds: Date.now() - started }, 'Job finished');
+  } catch (error) {
+    await fail(deps.prisma, workerId, job, error);
+    log.error({ ...fields, err: error }, 'Job failed');
   }
 }
 
-/** Entity id → its path in the crate */
-export type LogicalPaths = Map<string, string>;
-
-export interface CrateFile {
-  size: number;
-}
-
-export interface CrateObject {
-  /** The id of the OCFL object holding the crate */
-  id: string;
-  /** The text content of a file within the crate */
-  text(path: string): Promise<string>;
-  /** The metadata of a file within the crate, such as size */
-  file(path: string): Promise<CrateFile>;
-}
-
-export class Indexer {
-  defaultLicense: string;
-  defaultMetadataLicense: string;
-  name: string;
-
-  constructor(opt?: BaseOptions) {
-    this.defaultLicense = opt?.defaultLicense || '';
-    this.defaultMetadataLicense = opt?.defaultMetadataLicense || '';
-    this.name = opt?.name || Object.getPrototypeOf(this).constructor.name;
-  }
-
-  static async create<T extends Indexer, O>(this: new (opt: O) => T, opt: O) {
-    const indexer = new this(opt);
-    await indexer.init();
-    return indexer;
-  }
-
-  deriveUniqueEntityId(crateRootId: string, entityId: string) {
-    if (entityId.startsWith(crateRootId)) {
-      return entityId;
-    } else if (entityId.match(/.+:.+/)) {
-      return entityId;
-    } else {
-      return `${crateRootId}/${entityId}`;
-    }
-  }
-
-  /**
-   * Rename each entity's @id to its unique id, returning the path in the crate of each entity that has one
-   * Idempotent, as indexers share the crate
-   */
-  deriveUniqueEntityIds(crate: ROCrate) {
-    const descriptorId = crate.descriptor['@id'];
-    const prefix = `${crate.rootId}/`;
-    const paths: LogicalPaths = new Map();
-    for (const entity of crate.entities()) {
-      const original: string = entity['@id'];
-      if (original === descriptorId) {
-        continue;
-      }
-      const id = this.deriveUniqueEntityId(crate.rootId, original);
-      const path = id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length));
-      if (path) {
-        paths.set(id, path);
-      }
-      if (id !== original) {
-        entity['@id'] = id;
+/** Runs index jobs one at a time, until none is waiting or until stopped, as the worker and the CLI do */
+export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
+  const { prisma, opensearch, search, licences } = deps;
+  const writers = { rows: new RowsWriter(prisma, licences), documents: new DocumentsWriter(prisma, search, licences) };
+  const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
+  await heartbeat(prisma, workerId);
+  const beating = setInterval(() => heartbeat(prisma, workerId), options.heartbeatMilliseconds ?? 30_000);
+  try {
+    await prepareSearchIndex(opensearch, search);
+    while (options.until === 'empty' || !options.signal.aborted) {
+      const job = await claim(prisma, workerId);
+      if (job) {
+        await run(deps, writers, workerId, job);
+      } else if (options.until === 'empty') {
+        return;
+      } else {
+        await sleep(POLL_MILLISECONDS, undefined, { signal: options.signal }).catch(() => {});
       }
     }
-    return paths;
-  }
-
-  async init() {}
-
-  async count(_crateId: string): Promise<number> {
-    throw new Error('Not Implemented');
-  }
-
-  /**
-   * Delete the index for a given crateId or all index entries if a crateId is not specified.
-   * All implementation of this method should ensure that when crateId is
-   * null or undefined, the entire index (or all entries) is deleted.
-   */
-  async delete(_crateId?: string) {
-    throw new Error('Not Implemented');
-  }
-
-  /** `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent */
-  async index({ crateObject, crate, topCollection }: { crateObject: CrateObject; crate: ROCrate; topCollection: string }) {
-    const rootDataset = crate.root;
-    const crateId = crate.rootId;
-    const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
-    const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
-    if (!rootDataset) {
-      log.warn({ crateId: crateObject.id }, 'Skipped: Does not contain an ROCrate with a valid root dataset');
-    } else if (crateId === './') {
-      log.warn({ crateId: crateObject.id }, "Skipped: Cannot process a crate with invalid identifier ('./')");
-    } else if (!metadataLicense) {
-      log.warn({ crateId }, 'Skipped: No metadata license found');
-    } else if (!license) {
-      log.warn({ crateId }, 'Skipped: No license found');
-    } else {
-      log.info({ crateId }, 'Indexing crate');
-      const paths = this.deriveUniqueEntityIds(crate);
-      try {
-        await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
-      } catch (error) {
-        log.error({ err: error, crateId }, 'Error indexing crate');
-      }
-    }
-  }
-
-  async _index(_param: {
-    crateObject: CrateObject;
-    crate: ROCrate;
-    paths: LogicalPaths;
-    license: string;
-    metadataLicense: string;
-    topCollection: string;
-  }): Promise<void> {
-    throw new Error('Not Implemented');
-  }
-
-  /** Index a single entity within the crate. This needs to be implemented in the specific concrete indexer implementation. */
-  async _indexEntity(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
-    throw new Error('Not Implemented');
+  } finally {
+    clearInterval(beating);
+    await removeWorker(prisma, workerId);
   }
 }
-
-/** An entity's rootCollection: empty on the top-level collection itself */
-export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
-
-/** The first collection `entity` is a member of, by `pcdm:memberOf` or `memberOf`, in a parsed crate or raw JSON-LD */
-export const memberOf = (entity: Record<string, unknown>) => firstStringOrId(entity['pcdm:memberOf']) || firstStringOrId(entity.memberOf);
-
-/** The id of the collection a crate's root is a member of, if any */
-export function parentCollection(root: Record<string, unknown>, rootId: string): string | undefined {
-  const parent = memberOf(root);
-  return parent && parent !== rootId ? parent : undefined;
-}
-
-const RecordType: Record<string, string> = config.indexType;
-
-/** The entity's first type that we index, if it conforms to that type's profile */
-export function recordType(entity: Entity): string | undefined {
-  const type = entity['@type'].find((t: string) => t in RecordType);
-  const profile = type && RecordType[type];
-  if (profile && !entity.conformsTo?.some((c: { '@id': string }) => c['@id'] === profile)) {
-    return;
-  }
-  return type;
-}
-
-/** The class URI of a record type, as the entity's row holds it */
-export const entityClass = (crate: ROCrate, type: string): string => crate.getContextDefinition(type) || RecordType[type];

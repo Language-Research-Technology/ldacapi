@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildTestApp, ocflRepository, ocflStorage } from './app.ts';
+import { buildTestApp, ocflStorage } from './app.ts';
 import { collection, crate, file } from './crate-builder.ts';
 
 const ROOT = 'arcp://name,open-licences';
@@ -29,13 +29,14 @@ const accessControl = async (id: string) => (await get(`/entity/${encodeURICompo
 const fileStatus = async (id: string) => (await get(`/file/${encodeURIComponent(id)}`)).statusCode;
 
 beforeAll(async () => {
-  started = await buildTestApp({ OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent', OPEN_LICENSES: OPEN }, { repository: ocflRepository });
-  await started.repository.deleteIndex();
-  await started.repository.createIndex(ROOT);
+  started = await buildTestApp({ OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent', OPEN_LICENSES: OPEN }, { ocfl: true });
+  await started.emptyEverything();
+  await started.indexQueue.index(ROOT);
+  await started.workTheQueue();
 });
 
 afterAll(async () => {
-  await started?.repository.deleteIndex();
+  await started?.emptyEverything();
   await started?.app.close();
   await started?.prisma.$disconnect();
 });

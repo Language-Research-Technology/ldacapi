@@ -3,14 +3,14 @@ import { describe, expect, it } from 'vitest';
 import pkg from '../package.json' with { type: 'json' };
 import { buildApp } from '../src/app.ts';
 import { config } from '../src/configuration.ts';
-import { createSearchBackend } from '../src/indexer/search.ts';
-import { buildTestApp, repository, repositoryWithContent } from './app.ts';
+import { createSearchBackend } from '../src/search-backend.ts';
+import { buildTestApp, contentEverywhere, noRepository } from './app.ts';
 
 const search = createSearchBackend(new Client({ node: config.opensearchUrl }));
 
 describe('buildApp', () => {
   it('serves the version', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
 
     const response = await app.inject({ method: 'GET', url: `${config.prefix}/version` });
 
@@ -19,7 +19,7 @@ describe('buildApp', () => {
   });
 
   it('allows any origin to call the API, without credentials', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
     const origin = 'https://elsewhere.example.org';
 
     const preflight = await app.inject({
@@ -41,7 +41,7 @@ describe('buildApp', () => {
   });
 
   it('sends no CORS headers outside the API', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
     const headers = { origin: 'https://elsewhere.example.org', 'access-control-request-method': 'POST' };
 
     for (const url of ['/admin/', '/oauth/token']) {
@@ -52,7 +52,7 @@ describe('buildApp', () => {
   });
 
   it('has no OIDC provider without an upstream provider', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
 
     for (const url of ['/.well-known/openid-configuration', '/oauth/jwks', '/oauth/authorize?client_id=oni']) {
       expect((await app.inject({ method: 'GET', url })).statusCode, url).toBe(404);
@@ -62,7 +62,7 @@ describe('buildApp', () => {
   });
 
   it('has no relay under the API prefix', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
 
     for (const url of ['/.well-known/openid-configuration', '/authorize', '/jwks']) {
       expect((await app.inject({ method: 'GET', url: `${config.prefix}${url}` })).statusCode, url).toBe(404);
@@ -72,7 +72,7 @@ describe('buildApp', () => {
   });
 
   it('has no admin API', async () => {
-    const app = buildApp({ repository, search });
+    const app = buildApp({ search, ...noRepository });
     const headers = { authorization: 'Bearer 1234-1234-1234-1234' };
 
     for (const method of ['GET', 'POST', 'DELETE'] as const) {
@@ -87,7 +87,7 @@ describe('crate file delivery', () => {
   const files = { 'http://test/delivery/page.html': 'text/html', 'http://test/delivery/song.mp3': 'audio/mpeg' };
 
   it('sandboxes crate files but not audio or video, so media plays when opened directly', async () => {
-    const { app, prisma, config } = await buildTestApp({}, { repository: repositoryWithContent });
+    const { app, prisma, config } = await buildTestApp({}, { storage: contentEverywhere });
     for (const [id, mediaType] of Object.entries(files)) {
       await prisma.entity.create({
         data: { id, name: id, description: '', entityType: 'http://schema.org/MediaObject', metadataLicenseId: OPEN, contentLicenseId: OPEN },

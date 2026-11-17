@@ -12,11 +12,12 @@ const testbed = ocflTestbed(crate(collection(PEOPLE)), crate(collection(BUNDLED)
 
 describe('a crate whose OCFL object is damaged', () => {
   beforeAll(async () => {
-    const { config, repository } = testbed.started;
+    const { config, emptyEverything, indexQueue, workTheQueue } = testbed.started;
     expect(config.ocfl.root.startsWith(tmpdir())).toBe(true);
     await writeFile(join(config.ocfl.root, 'arcp_name_people', '__object__', 'inventory.json'), 'not json');
-    await repository.deleteIndex();
-    await repository.createIndex();
+    await emptyEverything();
+    await indexQueue.indexEverything();
+    await workTheQueue();
   });
 
   it('is left out when every crate is indexed, and the rest are indexed', async () => {
@@ -26,7 +27,7 @@ describe('a crate whose OCFL object is damaged', () => {
   });
 
   it('is left out of the list of crates', async () => {
-    const ids = (await Array.fromAsync(testbed.started.repository.objects())).map(({ id }) => id);
+    const ids = (await testbed.started.indexQueue.crates()).map(({ id }) => id);
 
     expect(ids).toContain(BUNDLED);
     expect(ids).not.toContain(PEOPLE);

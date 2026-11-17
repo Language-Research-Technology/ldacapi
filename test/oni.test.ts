@@ -2,10 +2,10 @@ import { Client } from '@opensearch-project/opensearch';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { config } from '../src/configuration.ts';
-import { createSearchBackend } from '../src/indexer/search.ts';
 import { COLLECTION, OBJECT } from '../src/oni.ts';
 import { prisma } from '../src/prisma.ts';
-import { repository } from './app.ts';
+import { createSearchBackend } from '../src/search-backend.ts';
+import { noRepository } from './app.ts';
 
 const MEDIA = 'http://schema.org/MediaObject';
 const PERSON = 'http://schema.org/Person';
@@ -28,7 +28,7 @@ const ENTITIES: Fixture[] = [
   { id: `${ROOT}/person`, entityType: PERSON, memberOf: ROOT },
 ];
 
-const app = buildApp({ repository, search: createSearchBackend(new Client({ node: config.opensearchUrl })) });
+const app = buildApp({ search: createSearchBackend(new Client({ node: config.opensearchUrl })), ...noRepository });
 
 const entity = async (id: string) => (await app.inject({ method: 'GET', url: `${config.prefix}/entity/${encodeURIComponent(id)}` })).json();
 

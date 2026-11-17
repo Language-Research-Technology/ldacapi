@@ -1,5 +1,4 @@
-import { afterAll, beforeAll, vi } from 'vitest';
-import type { Repository } from '../src/repository.ts';
+import { afterAll, beforeAll } from 'vitest';
 import { buildTestApp, type TestApp } from './app.ts';
 import { startFakeUpstream, type UpstreamUser } from './fake-upstream.ts';
 import { Browser } from './oidc.ts';
@@ -18,25 +17,6 @@ const oidcEnv = (upstreamIssuer: string) => ({
   OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
   OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
 });
-
-/** A repository of `crates`, each with its index state, recording what it is asked to do */
-export const repositoryOf = (crates: { id: string; name?: string; state: Record<string, string> }[]) => {
-  const fake = {
-    storage: () => ({ content: {} }),
-    async *objects() {
-      for (const { id, name = id, state } of crates) {
-        yield { id, name, state };
-      }
-    },
-    getState: async (crateId: string) => crates.find(({ id }) => id === crateId)?.state ?? {},
-    createIndex: vi.fn(async () => {}),
-    deleteIndex: vi.fn(async () => {}),
-  };
-  return fake as unknown as Repository & Pick<typeof fake, 'createIndex' | 'deleteIndex'>;
-};
-
-/** A repository with one crate, `PEOPLE`, whose search index is in `state` */
-export const repositoryIn = (state: string) => repositoryOf([{ id: PEOPLE, name: 'People', state: { database: 'indexed', search: state } }]);
 
 /** Runs a fake upstream provider for a file's tests, then closes it and every app started with `start` */
 export const adminTestbed = () => {

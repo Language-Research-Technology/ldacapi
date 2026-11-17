@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { importCrates as importInto } from './crates-import.ts';
-import { openOrCreateRepository } from './ocfl-repository.ts';
+import { openOrCreateRepository } from './repository/repository.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 
