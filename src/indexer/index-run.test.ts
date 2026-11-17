@@ -14,11 +14,11 @@ const GONE = 'arcp://name,gone';
 
 const testbed = ocflTestbed(crate(collection(FIRST)), crate(collection(SECOND)), crate(collection(UNLICENSED, { licence: null })));
 
-const indexAndSummarise = async (ask: () => Promise<string[]>) => {
+const indexAndSummarise = async (ask: () => Promise<string[]>, options?: { pollMilliseconds: number }) => {
   const { indexer, indexQueue } = testbed.started;
   // Imported once the testbed has read its configuration
   const { indexAndSummarise } = await import('./index-run.ts');
-  return indexAndSummarise(indexer, indexQueue, ask);
+  return indexAndSummarise(indexer, indexQueue, ask, options);
 };
 
 beforeEach(async () => {
@@ -57,18 +57,21 @@ describe('indexing from the command line', () => {
     const worker = workTheQueue({ ...indexer, search: held }, { until: 'aborted', signal: stop.signal });
     let finished = false;
 
-    const running = indexAndSummarise(async () => {
-      await indexQueue.index(FIRST);
-      await vi.waitFor(async () => expect(await indexQueue.crate(FIRST)).toMatchObject({ state: 'indexing' }), { timeout: 5000 });
-      await indexQueue.index(SECOND);
-      return [FIRST, SECOND];
-    }).then((summary) => {
+    const running = indexAndSummarise(
+      async () => {
+        await indexQueue.index(FIRST);
+        await vi.waitFor(async () => expect(await indexQueue.crate(FIRST)).toMatchObject({ state: 'indexing' }), { timeout: 5000 });
+        await indexQueue.index(SECOND);
+        return [FIRST, SECOND];
+      },
+      { pollMilliseconds: 20 },
+    ).then((summary) => {
       finished = true;
       return summary;
     });
 
     await vi.waitFor(async () => expect(await indexQueue.crate(SECOND)).toMatchObject({ state: 'indexed' }), { timeout: 5000 });
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await new Promise((resolve) => setTimeout(resolve, 200));
     expect(finished).toBe(false);
 
     letThrough();

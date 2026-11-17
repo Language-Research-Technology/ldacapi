@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { once } from 'node:events';
 import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
@@ -35,14 +34,17 @@ export type WorkOptions = (
       crateIds: string[];
     }
   | {
-      /** Waits for jobs until `signal` aborts, then stops at once, releasing the job it is running */
+      /** Waits for jobs until `signal` aborts, then stops, releasing the job it is running once its current step is done */
       until: 'aborted';
       signal: AbortSignal;
     }
-) & { heartbeatMilliseconds?: number };
-
-/** How long to wait before looking for a job again when none is waiting */
-const POLL_MILLISECONDS = 1000;
+) & {
+  heartbeatMilliseconds?: number;
+  /** How long to wait before looking for a job again when none is waiting */
+  pollMilliseconds?: number;
+  /** How long to wait between checks while the database or search is unavailable */
+  retryMilliseconds?: number;
+};
 
 type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter; parents: Parents };
 
@@ -122,6 +124,7 @@ async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, c
   return { logged: { version: opened.version, ...counts }, record: { crateId, data } };
 }
 
+/** Runs the job and records its result, unless it was stopped or met an outage, which the caller releases it for */
 async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: Job, progress: Progress) {
   const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
   const started = Date.now();
@@ -135,8 +138,7 @@ async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: J
       dropped();
     }
   } catch (error) {
-    /* v8 ignore next 3 -- an outage is checked by hand */
-    if (isOutage(error)) {
+    if (isOutage(error) || progress.signal.aborted) {
       throw error;
     }
     if (await fail(deps.prisma, workerId, job, error, progress)) {
@@ -147,21 +149,13 @@ async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: J
   }
 }
 
-/** Prepares the search index while holding a lock, as workers starting at once would each try to create it */
-const prepareSearchIndexAlone = ({ prisma, opensearch, search }: IndexerDeps) =>
-  prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('prepareSearchIndex'))`;
-      await prepareSearchIndex(opensearch, search);
-    },
-    { timeout: 60_000 },
-  );
+const INTERVALS = { heartbeatMilliseconds: 30_000, pollMilliseconds: 1000, retryMilliseconds: 5000 };
 
 /** Runs index jobs one at a time, until none is waiting or until stopped, as the worker and the CLI do */
 export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   const { prisma, search } = deps;
-  const signal = options.until === 'aborted' ? options.signal : undefined;
-  const stopped = (signal ? once(signal, 'abort') : new Promise<never>(() => {})).then(() => true);
+  const signal = options.until === 'aborted' ? options.signal : new AbortController().signal;
+  const intervals = { ...INTERVALS, ...options };
   const writers = {
     rows: new RowsWriter(prisma),
     documents: new DocumentsWriter(prisma, search),
@@ -174,21 +168,19 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
     try {
       await heartbeat(prisma, workerId, running);
       await returnDeadWorkersJobs(prisma);
-      /* v8 ignore start -- an outage is checked by hand */
     } catch (error) {
       log.warn({ err: error }, 'Heartbeat failed');
     }
-    /* v8 ignore stop */
   };
-  const beating = setInterval(beat, options.heartbeatMilliseconds ?? 30_000);
+  const beating = setInterval(beat, intervals.heartbeatMilliseconds);
   let ready = false;
   let swept = false;
   try {
-    while (!signal?.aborted) {
+    while (!signal.aborted) {
       let job: Job | undefined;
       try {
         if (!ready) {
-          await prepareSearchIndexAlone(deps);
+          await prepareSearchIndex(deps.opensearch, search);
           ready = true;
         }
         job = await claim(prisma, workerId);
@@ -199,29 +191,26 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
         }
         swept = !job;
         if (job) {
-          running = { job, progress: new Progress() };
-          const finished = run(deps, writers, workerId, job, running.progress).then(() => false);
-          if (await Promise.race([finished, stopped])) {
-            // The job carries on unowned until the process ends, its result refused
-            await release(prisma, workerId, job);
-          }
-          running = undefined;
-        } else if (signal || (options.until === 'finished' && (await unfinished(prisma, options.crateIds)))) {
-          await sleep(POLL_MILLISECONDS, undefined, { signal }).catch(() => {});
+          running = { job, progress: new Progress(signal) };
+          await run(deps, writers, workerId, job, running.progress);
+        } else if (options.until === 'aborted' || (options.until === 'finished' && (await unfinished(prisma, options.crateIds)))) {
+          await sleep(intervals.pollMilliseconds, undefined, { signal }).catch(() => {});
         } else {
           return;
         }
-        /* v8 ignore start -- an outage is checked by hand */
       } catch (error) {
-        if (!isOutage(error)) {
+        if (isOutage(error)) {
+          log.warn({ err: error }, 'Paused: the database or search is unavailable');
+          await waitForServices(deps, intervals.retryMilliseconds, signal);
+        } else if (!signal.aborted) {
           throw error;
         }
-        await waitForServices(deps, error, signal);
         if (job) {
           await release(prisma, workerId, job);
         }
+      } finally {
+        running = undefined;
       }
-      /* v8 ignore stop */
     }
   } finally {
     clearInterval(beating);

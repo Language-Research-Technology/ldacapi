@@ -5,9 +5,6 @@ import { logger } from '../logger.ts';
 
 const log = logger.child({ module: 'indexer' });
 
-/** How long to wait between checks while the database or search is unavailable */
-const RETRY_MILLISECONDS = 5000;
-
 /** Kinds of Prisma driver adapter error that mean the database can't be reached */
 const DATABASE_OUTAGES = new Set(['DatabaseNotReachable', 'ConnectionClosed', 'SocketTimeout', 'TooManyConnections']);
 
@@ -31,12 +28,10 @@ export function isOutage(error: unknown) {
   );
 }
 
-/* v8 ignore start -- an outage is checked by hand */
 /** Waits until both the database and search answer, or `signal` aborts */
-export async function waitForServices({ prisma, opensearch }: { prisma: PrismaClient; opensearch: Client }, error: unknown, signal?: AbortSignal) {
-  log.warn({ err: error }, 'Paused: the database or search is unavailable');
-  while (!signal?.aborted) {
-    await sleep(RETRY_MILLISECONDS, undefined, { signal }).catch(() => {});
+export async function waitForServices({ prisma, opensearch }: { prisma: PrismaClient; opensearch: Client }, retryMilliseconds: number, signal: AbortSignal) {
+  while (!signal.aborted) {
+    await sleep(retryMilliseconds, undefined, { signal }).catch(() => {});
     try {
       await prisma.$queryRaw`SELECT 1`;
       await opensearch.ping();
@@ -50,4 +45,3 @@ export async function waitForServices({ prisma, opensearch }: { prisma: PrismaCl
     }
   }
 }
-/* v8 ignore stop */
