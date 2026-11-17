@@ -33,7 +33,7 @@ The search documents in arocapi's search backend, one per entity that has a row.
 _Avoid_: OpenSearch index (one backend's storage)
 
 **Virtual crate**:
-The Metadata served for one entity: an RO-Crate with that entity as its root and everything it links to, with LDaC and PCDM properties in their prefixed spelling (ADR 0004). Never the crate as deposited.
+The Metadata served for one entity: an RO-Crate with that entity as its root and everything it links to (ADR 0004). Never the crate as deposited.
 _Avoid_: Entity crate, exploded crate
 
 **Metadata-only crate**:
