@@ -12,7 +12,7 @@ import { aggregatesOf } from '../oni.ts';
 import { openOrCreateRepository } from '../repository/repository.ts';
 import { createScratchIndexes, prismaFor } from '../scratch-indexes.ts';
 import { refreshSearchIndex } from '../search-backend.ts';
-import { type GenerateOptions, generateCollection } from './generate.ts';
+import { type GenerateOptions, generateCollection, type Shape } from './generate.ts';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -32,7 +32,7 @@ export type BenchmarkRepository = { root: string; workDir: string; crates: numbe
 const sourceOf = (workDir: string) => join(workDir, 'crates');
 
 /** Removes the generated crates and the repository, keeping the indexing log */
-export async function discardRepository({ workDir, root }: Pick<BenchmarkRepository, 'workDir' | 'root'>) {
+async function discardRepository({ workDir, root }: Pick<BenchmarkRepository, 'workDir' | 'root'>) {
   await rm(sourceOf(workDir), { recursive: true, force: true });
   await rm(root, { recursive: true, force: true });
 }
@@ -151,7 +151,7 @@ export type BenchmarkResult = Awaited<ReturnType<typeof runBenchmark>>;
 const TARGET = { seconds: 600, peakMemoryBytes: 1024 ** 3, aggregatesReadMilliseconds: 50 };
 
 /** One line on a shape's run, and whether it met the target */
-export function report(shape: string, repository: BenchmarkRepository, result: BenchmarkResult) {
+function report(shape: string, repository: BenchmarkRepository, result: BenchmarkResult) {
   const n = (value: number) => value.toLocaleString('en-AU');
   const met = result.seconds < TARGET.seconds && result.peakMemoryBytes < TARGET.peakMemoryBytes;
   const read = result.aggregatesRead;
@@ -165,4 +165,25 @@ export function report(shape: string, repository: BenchmarkRepository, result: B
     `a page of 100 entities read in ${ms(read.without)} without aggregates and ${ms(read.with)} with, ${ms(slower)} slower`,
     `(target at most 50 ms slower: ${slower <= TARGET.aggregatesReadMilliseconds ? 'met' : 'missed'})`,
   ].join('; ');
+}
+
+/**
+ * Generates, imports and indexes the collection in each of `shapes` under `workDir`/<shape>, printing each step and its
+ * report. Discards the crates and repository unless asked to `keep` them
+ */
+export async function benchmarkShapes(
+  workDir: string,
+  shapes: readonly Shape[],
+  size: Omit<GenerateOptions, 'shape'>,
+  { keep, print }: { keep: boolean; print: (line: string) => void },
+) {
+  for (const shape of shapes) {
+    print(`${shape}: generating and importing`);
+    const repository = await prepareRepository(join(workDir, shape), { ...size, shape });
+    print(`${shape}: indexing`);
+    print(report(shape, repository, await runBenchmark(repository)));
+    if (!keep) {
+      await discardRepository(repository);
+    }
+  }
 }

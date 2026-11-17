@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateCollection } from './generate.ts';
+import { generateCollection, generateShapes } from './generate.ts';
 
 type Graph = { '@graph': { '@id': string; '@type': string | string[] }[] };
 
@@ -119,5 +119,17 @@ describe('generateCollection', () => {
     await generateCollection(second, { ...small, shape: 'split', seed: 2 });
 
     expect(await hashes(second)).not.toEqual(await hashes(first));
+  });
+});
+
+describe('generateShapes', () => {
+  it('writes each shape under its own directory, printing what it holds', async () => {
+    const dir = await tempDir();
+    const printed: string[] = [];
+
+    await generateShapes(dir, ['one-crate', 'split'], small, (line) => printed.push(line));
+
+    expect(await crateDirs(dir)).toEqual(['one-crate', 'split']);
+    expect(printed).toEqual([`one-crate: 1 crates, 27 entities in ${join(dir, 'one-crate')}`, `split: 9 crates, 27 entities in ${join(dir, 'split')}`]);
   });
 });

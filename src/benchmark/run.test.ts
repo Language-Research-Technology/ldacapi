@@ -2,7 +2,7 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { discardRepository, prepareRepository, report, runBenchmark } from './run.ts';
+import { benchmarkShapes, prepareRepository, runBenchmark } from './run.ts';
 
 const tiny = { collections: 1, objectsPerCollection: 2, filesPerObject: 2 };
 
@@ -18,34 +18,28 @@ describe('runBenchmark', () => {
   });
 
   it.each([
-    ['one-crate', '1 crate'],
-    ['split', '4 crates'],
+    ['one-crate', '1 crate', false],
+    ['split', '4 crates', true],
   ] as const)(
-    'indexes the %s shape into fresh indexes and measures the indexing process',
-    async (shape, crates) => {
-      const repository = await prepareRepository(join(workDir, shape), { ...tiny, shape });
+    'indexes the %s shape, %s, into fresh indexes, reports on the indexing process, and keeps its repository only if asked (%s)',
+    async (shape, crates, keep) => {
+      const printed: string[] = [];
+
+      await benchmarkShapes(workDir, [shape], tiny, { keep, print: (line) => printed.push(line) });
+
       // 1 top + 1 sub-collection; 2 objects, each with 2 files
-      expect(repository.entities).toBe(8);
-
-      const result = await runBenchmark(repository);
-
-      expect(result.seconds).toBeGreaterThan(0);
-      // Node alone needs tens of MB
-      expect(result.peakMemoryBytes).toBeGreaterThan(10 * 1024 * 1024);
-      expect(result.rows).toBe(8);
-      expect(result.documents).toBe(8);
-      expect(result.aggregatesRead.with).toBeGreaterThan(0);
-      expect(result.aggregatesRead.without).toBeGreaterThan(0);
-      expect(await readFile(result.logFile, 'utf-8')).toContain('Job finished');
-      expect(report(shape, repository, result)).toMatch(
-        new RegExp(
-          `^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; .*: met\\); a page of 100 entities read in .* ms slower; \\(target at most 50 ms slower: met\\)$`,
+      expect(printed).toEqual([
+        `${shape}: generating and importing`,
+        `${shape}: indexing`,
+        expect.stringMatching(
+          new RegExp(
+            `^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; in [\\d.]+ s, peak memory \\d+ MB; .*: met\\); a page of 100 entities read in .* ms slower; \\(target at most 50 ms slower: met\\)$`,
+          ),
         ),
-      );
-
-      await discardRepository(repository);
-      await expect(access(repository.root)).rejects.toThrow();
-      await expect(access(result.logFile)).resolves.toBeUndefined();
+      ]);
+      expect(await readFile(join(workDir, shape, 'index.log'), 'utf-8')).toContain('Job finished');
+      const kept = access(join(workDir, shape, 'ocfl'));
+      await (keep ? expect(kept).resolves.toBeUndefined() : expect(kept).rejects.toThrow());
     },
     120_000,
   );

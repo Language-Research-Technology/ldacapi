@@ -207,3 +207,12 @@ export async function generateCollection(dir: string, options: GenerateOptions) 
   }
   return { crates, entities };
 }
+
+/** Writes the collection in each of `shapes` under `dir`/<shape>, printing what each holds */
+export async function generateShapes(dir: string, shapes: readonly Shape[], size: Omit<GenerateOptions, 'shape'>, print: (line: string) => void) {
+  for (const shape of shapes) {
+    const out = join(dir, shape);
+    const { crates, entities } = await generateCollection(out, { ...size, shape });
+    print(`${shape}: ${crates} crates, ${entities} entities in ${out}`);
+  }
+}

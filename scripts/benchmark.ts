@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { FULL_SIZE, generateCollection, SHAPES, type Shape } from '../src/benchmark/generate.ts';
+import { benchmarkCommand } from '../src/benchmark/command.ts';
+import { FULL_SIZE, generateShapes } from '../src/benchmark/generate.ts';
 
 const HELP = `Benchmarks indexing over a generated collection, by default 30,031 entities.
 
@@ -39,16 +40,16 @@ const { values, positionals } = parseArgs({
   },
 });
 
-const [command = 'run', dir] = positionals;
-const shapes = (values.shape ?? SHAPES) as Shape[];
-const unknownShape = shapes.find((shape) => !SHAPES.includes(shape));
-
-if (values.help || !['run', 'generate'].includes(command) || (command === 'generate' && !dir) || unknownShape) {
-  if (unknownShape) {
-    console.error(`Unknown shape: ${unknownShape}\n`);
-  }
+if (values.help) {
   console.log(HELP);
-  process.exit(values.help ? 0 : 1);
+  process.exit(0);
+}
+
+const asked = benchmarkCommand(positionals, values.shape);
+if ('problem' in asked) {
+  console.error(`${asked.problem}\n`);
+  console.log(HELP);
+  process.exit(1);
 }
 
 const size = {
@@ -58,23 +59,10 @@ const size = {
   seed: Number(values.seed),
 };
 
-if (command === 'generate') {
-  for (const shape of shapes) {
-    const out = resolve(dir as string, shape);
-    const { crates, entities } = await generateCollection(out, { ...size, shape });
-    console.log(`${shape}: ${crates} crates, ${entities} entities in ${out}`);
-  }
+if (asked.command === 'generate') {
+  await generateShapes(resolve(asked.dir), asked.shapes, size, console.log);
 } else {
   // Loaded only to run, as it reads the configuration
-  const { discardRepository, prepareRepository, report, runBenchmark } = await import('../src/benchmark/run.ts');
-  for (const shape of shapes) {
-    console.log(`${shape}: generating and importing`);
-    const repository = await prepareRepository(resolve(values['work-dir'], shape), { ...size, shape });
-    console.log(`${shape}: indexing`);
-    const result = await runBenchmark(repository);
-    console.log(report(shape, repository, result));
-    if (!values.keep) {
-      await discardRepository(repository);
-    }
-  }
+  const { benchmarkShapes } = await import('../src/benchmark/run.ts');
+  await benchmarkShapes(resolve(values['work-dir']), asked.shapes, size, { keep: values.keep, print: console.log });
 }
