@@ -16,20 +16,25 @@ const touchWorker = (prisma: PrismaClient, workerId: string) => {
   return prisma.indexWorker.upsert({ where: { id: workerId }, create: { id: workerId, heartbeatAt }, update: { heartbeatAt } });
 };
 
-/** Records a worker as alive, now, with the progress of the job it is `running`: the only write of progress */
-export const heartbeat = async (prisma: PrismaClient, workerId: string, running?: { job: Job; progress: Progress }) => {
-  await prisma.$transaction([
+/**
+ * Records a worker as alive, now, with the progress of the job it is `running`: the only write of progress.
+ * Returns false if the worker no longer holds that job's claim
+ */
+export async function heartbeat(prisma: PrismaClient, workerId: string, running?: { job: Job; progress: Progress }) {
+  if (!running) {
+    await touchWorker(prisma, workerId);
+    return true;
+  }
+  const { job, progress } = running;
+  const [, { count }] = await prisma.$transaction([
     touchWorker(prisma, workerId),
-    ...(running
-      ? [
-          prisma.indexJob.updateMany({
-            where: { id: running.job.id, workerId, status: 'running' },
-            data: { stage: running.progress.stage, done: running.progress.done, total: running.progress.total },
-          }),
-        ]
-      : []),
+    prisma.indexJob.updateMany({
+      where: { id: job.id, workerId, status: 'running' },
+      data: { stage: progress.stage, done: progress.done, total: progress.total },
+    }),
   ]);
-};
+  return count > 0;
+}
 
 export const removeWorker = async (prisma: PrismaClient, workerId: string) => {
   await prisma.indexWorker.deleteMany({ where: { id: workerId } });

@@ -25,6 +25,7 @@ const LONG_TEXT = 'arcp://name,long-text';
 const ESCAPED = 'arcp://name,escaped';
 const ESCAPED_TEXTS = ['x.txt', 'y.txt'];
 const UNREADABLE = 'arcp://name,unreadable';
+const MISPLACED = 'arcp://name,misplaced';
 // 5 MB, its last words past the first 1 MB
 const FIVE_MB = `${'early '.repeat(100_000)}${'within '.repeat(60_000)}${'beyond '.repeat(600_000)}`.slice(0, 5_000_000);
 // More rows and documents than fit in one batch, and more text than fits in one bulk request,
@@ -305,6 +306,22 @@ describe('an index job', () => {
     await index(NO_METADATA);
 
     expect(await state(NO_METADATA)).toMatchObject({ state: 'failed', error: `Error: No ro-crate-metadata.json in ${NO_METADATA}` });
+  });
+
+  it('fails, writing nothing, for a crate whose root id isn’t its object’s id', async () => {
+    const elsewhere = 'arcp://name,elsewhere';
+    await testbed.started.repository.create(MISPLACED, details, (draft) =>
+      draft.write('ro-crate-metadata.json', JSON.stringify(crate(collection(elsewhere)).metadata)),
+    );
+
+    await index(MISPLACED);
+
+    expect(await state(MISPLACED)).toMatchObject({
+      state: 'failed',
+      stage: 'deriving',
+      error: `Error: The crate's root id, ${elsewhere}, isn't the id of the OCFL object holding it, ${MISPLACED}`,
+    });
+    expect(await rowIds()).toEqual([]);
   });
 
   it('is replaced, once failed, by the next job for the crate', async () => {

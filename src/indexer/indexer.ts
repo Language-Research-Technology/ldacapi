@@ -118,6 +118,9 @@ async function indexCrate(
   }
   const { crate, heldFiles, readText, parentCrates } = await opened.read(progress);
   progress.start('deriving');
+  if (crate.rootId !== crateId) {
+    throw new Error(`The crate's root id, ${crate.rootId}, isn't the id of the OCFL object holding it, ${crateId}`);
+  }
   const { defaultLicense, defaultMetadataLicense, openLicenses } = licences;
   const isOpenLicence = openLicenceCheck(openLicenses);
   const derivation = derive(crate, { parentCrates, heldFiles, defaultLicense, defaultMetadataLicense, isOpenLicence });
@@ -133,8 +136,11 @@ async function indexCrate(
   return { logged: { version: opened.version, ...counts }, record: { crateId, data } };
 }
 
+/** A job being run, and what stops it once another worker is found to hold its claim */
+type Running = { job: Job; progress: Progress; claimLost: AbortController };
+
 /** Runs the job and records its result, unless it was stopped or met an outage, which the caller releases it for */
-async function run(deps: IndexerDeps, writers: Writers, parents: Parents, workerId: string, job: Job, progress: Progress) {
+async function run(deps: IndexerDeps, writers: Writers, parents: Parents, workerId: string, { job, progress, claimLost }: Running) {
   const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
   const started = Date.now();
   log.info({ ...fields, attempt: job.attempts }, 'Job started');
@@ -147,6 +153,10 @@ async function run(deps: IndexerDeps, writers: Writers, parents: Parents, worker
       dropped();
     }
   } catch (error) {
+    if (claimLost.signal.aborted) {
+      dropped();
+      return;
+    }
     if (isOutage(error) || progress.signal.aborted) {
       throw error;
     }
@@ -172,10 +182,15 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   };
   const parents = new Parents(deps.repository);
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
-  let running: { job: Job; progress: Progress } | undefined;
+  let running: Running | undefined;
   const beat = async () => {
+    const current = running;
     try {
-      await heartbeat(prisma, workerId, running);
+      if (!(await heartbeat(prisma, workerId, current))) {
+        const { job, claimLost } = current as Running;
+        log.warn({ jobId: job.id, crateId: job.crateId, kind: job.kind }, 'Stopping the job: another worker holds it');
+        claimLost.abort();
+      }
       await returnDeadWorkersJobs(prisma);
     } catch (error) {
       log.warn({ err: error }, 'Heartbeat failed');
@@ -188,6 +203,8 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   }, intervals.heartbeatMilliseconds);
   let ready = false;
   let swept = false;
+  /** A job stopped or cut short by an outage, released once the database answers or the worker stops */
+  let unreleased: Job | undefined;
   try {
     while (!signal.aborted) {
       let job: Job | undefined;
@@ -195,6 +212,10 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
         if (!ready) {
           await prepareSearchIndex(deps.opensearch, search);
           ready = true;
+        }
+        if (unreleased) {
+          await release(prisma, workerId, unreleased);
+          unreleased = undefined;
         }
         job = await claim(prisma, workerId);
         // Idle polls leave dead workers' jobs to the heartbeat
@@ -204,30 +225,34 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
         }
         swept = !job;
         if (job) {
-          running = { job, progress: new Progress(signal) };
-          await run(deps, writers, parents, workerId, job, running.progress);
+          const claimLost = new AbortController();
+          running = { job, progress: new Progress(AbortSignal.any([signal, claimLost.signal])), claimLost };
+          await run(deps, writers, parents, workerId, running);
         } else if (options.until === 'aborted' || (options.until === 'finished' && (await unfinished(prisma, options.crateIds)))) {
           await sleep(intervals.pollMilliseconds, undefined, { signal }).catch(() => {});
         } else {
           return;
         }
       } catch (error) {
+        unreleased ??= job;
         if (isOutage(error)) {
           log.warn({ err: error }, 'Paused: the database or search is unavailable');
           await waitForServices(deps, intervals.retryMilliseconds, signal);
         } else if (!signal.aborted) {
           throw error;
         }
-        if (job) {
-          await release(prisma, workerId, job);
-        }
       } finally {
         running = undefined;
       }
     }
   } finally {
+    // Left to the dead-worker sweep when the database can't be reached
+    const job = unreleased;
+    if (job) {
+      await release(prisma, workerId, job).catch((error: unknown) => log.warn({ err: error, jobId: job.id, crateId: job.crateId }, 'Job not released'));
+    }
     clearInterval(beats);
     await beating;
-    await removeWorker(prisma, workerId);
+    await removeWorker(prisma, workerId).catch((error: unknown) => log.warn({ err: error }, 'Worker not removed'));
   }
 }

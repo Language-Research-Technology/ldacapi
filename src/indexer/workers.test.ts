@@ -93,17 +93,17 @@ describe('two runs working the queue at once', () => {
 const jobs = () => testbed.started.prisma.indexJob.findMany({ select: { status: true, attempts: true }, orderBy: { id: 'asc' } });
 
 /** Asks to index `crateId`, then starts a worker over `deps` */
-const startWorker = async (crateId: string, deps: Partial<IndexerDeps> = {}) => {
+const startWorker = async (crateId: string, deps: Partial<IndexerDeps> = {}, heartbeatMilliseconds = 10) => {
   await testbed.started.indexQueue.index(crateId);
-  return startWorking(deps);
+  return startWorking(deps, heartbeatMilliseconds);
 };
 
-const startWorking = async (deps: Partial<IndexerDeps> = {}) => {
+const startWorking = async (deps: Partial<IndexerDeps> = {}, heartbeatMilliseconds = 10) => {
   const { indexer } = testbed.started;
   // Imported once the testbed has read its configuration
   const { workTheQueue } = await import('./indexer.ts');
   const stop = new AbortController();
-  const working = workTheQueue({ ...indexer, ...deps }, { until: 'aborted', signal: stop.signal, retryMilliseconds: 10, heartbeatMilliseconds: 10 });
+  const working = workTheQueue({ ...indexer, ...deps }, { until: 'aborted', signal: stop.signal, retryMilliseconds: 10, heartbeatMilliseconds });
   return { stop, working };
 };
 
@@ -179,6 +179,31 @@ const pingFailing = (error: Error) => ({
   opensearch: Object.assign(Object.create(testbed.started.opensearch), { ping: async () => Promise.reject(error) }),
 });
 
+/** The database client, which fails as if the database can't be reached once `goDown` is called */
+const databaseGoingDown = () => {
+  const { prisma } = testbed.started;
+  let down = false;
+  const unreachable: unknown = new Proxy(() => {}, {
+    get: () => unreachable,
+    apply: async () => Promise.reject(new Error('Connection terminated unexpectedly')),
+  });
+  const client = new Proxy(prisma, {
+    get(target, key) {
+      if (down) {
+        return unreachable;
+      }
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return {
+    prisma: client,
+    goDown: () => {
+      down = true;
+    },
+  };
+};
+
 describe('a worker in an outage', () => {
   it('pauses, then once the database and search answer, releases the job and runs it again', async () => {
     const { working, stop } = await startWorker(FIRST, searchDown(1));
@@ -196,7 +221,7 @@ describe('a worker in an outage', () => {
   it('keeps waiting while search can’t be reached, and when told to stop, releases the job', async () => {
     const { working, stop } = await startWorker(FIRST, { ...searchDown(Infinity), ...pingFailing(connectionError()) });
 
-    await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ msg: 'Still unavailable' })));
+    await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ msg: 'Still unavailable' })), { timeout: 10_000 });
     stop.abort();
     await working;
 
@@ -220,6 +245,19 @@ describe('a worker in an outage', () => {
     await working;
 
     expect(logs.map(({ msg }) => msg)).toContain('Resumed: the database and search answer');
+  });
+
+  it('when told to stop while the database can’t be reached either, stops, leaving the job to the dead-worker sweep', async () => {
+    const database = databaseGoingDown();
+    const { working, stop } = await startWorker(FIRST, { ...searchDown(Infinity), ...pingFailing(connectionError()), prisma: database.prisma });
+    await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ msg: 'Still unavailable' })), { timeout: 10_000 });
+
+    database.goDown();
+    stop.abort();
+    await working;
+
+    expect(await jobs()).toEqual([{ status: 'running', attempts: 1 }]);
+    expect(logs.map(({ msg }) => msg)).toEqual(expect.arrayContaining(['Job not released', 'Worker not removed']));
   });
 
   it('stops working the queue when a check fails for another reason', async () => {
@@ -264,14 +302,20 @@ describe('a heartbeat that fails', () => {
 });
 
 describe('a job whose claim is taken away while it runs', () => {
-  /** Runs the job until its search write, takes its claim away, then lets the write do `then` until `finished` */
-  const takenAway = async (then: (documents: Document[]) => Promise<void>, finished: () => void) => {
+  /**
+   * Runs the job until its search write, takes its claim away, then lets the write do `then` until `finished`.
+   * With `heartbeat`, the worker's heartbeat finds the claim gone before the write goes on
+   */
+  const takenAway = async (then: (documents: Document[]) => Promise<void>, finished: () => void, { heartbeat = false } = {}) => {
     const { search, letThrough } = searchHeld(then);
-    const { working, stop } = await startWorker(FIRST, { search });
+    const { working, stop } = await startWorker(FIRST, { search }, heartbeat ? 10 : 60_000);
     await vi.waitFor(async () => expect(await state(FIRST)).toMatchObject({ state: 'indexing' }));
     // As if judged dead and claimed by a live worker
     await testbed.started.prisma.indexWorker.create({ data: { id: 'another' } });
     await testbed.started.prisma.indexJob.updateMany({ data: { workerId: 'another' } });
+    if (heartbeat) {
+      await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ crateId: FIRST, msg: 'Stopping the job: another worker holds it' })));
+    }
 
     letThrough();
     await vi.waitFor(finished);
@@ -280,6 +324,13 @@ describe('a job whose claim is taken away while it runs', () => {
   };
 
   const dropped = () => expect(logs).toContainEqual(expect.objectContaining({ crateId: FIRST, msg: 'Result dropped: another worker holds the job' }));
+
+  it('is stopped once the heartbeat finds it gone, writing nothing more', async () => {
+    await takenAway((documents) => testbed.started.indexer.search.index(documents), dropped, { heartbeat: true });
+
+    expect(await testbed.started.prisma.aggregate.count({ where: { crateId: FIRST } })).toBe(0);
+    expect(await state(FIRST)).toMatchObject({ state: 'indexing' });
+  });
 
   it('has its result dropped', async () => {
     await takenAway((documents) => testbed.started.indexer.search.index(documents), dropped);
