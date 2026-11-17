@@ -73,7 +73,7 @@ export type Derivation = {
   warnings: Warning[];
 };
 
-/** The LDaC profile each indexed type must conform to; a File needs none */
+/** The LDaC profile of each indexed type; a File has none */
 const PROFILES: Record<string, string> = {
   RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
   RepositoryObject: 'https://w3id.org/ldac/profile#Object',
@@ -106,13 +106,18 @@ function firstStringOrId(values: unknown): string | undefined {
   }
 }
 
-/** The entity's first type that we index, if it conforms to that type's profile */
+/** The entity's first type that we index */
 function recordType(entity: Entity): string | undefined {
   const type = entity['@type'].find((t: string) => t in PROFILES);
-  const profile = type && PROFILES[type];
-  if (profile && !entity.conformsTo?.some((c: unknown) => firstStringOrId(c) === profile)) {
-    return;
-  }
+
+  // TODO: Require the type's LDaC profile in conformsTo again once production crates carry it.
+  // Most production people, organisations, and some collections and objects lack it, so the check
+  // is off for now. See https://github.com/Language-Research-Technology/ldacapi/issues/97
+  // const profile = type && PROFILES[type];
+  // if (profile && !entity.conformsTo?.some((c: unknown) => firstStringOrId(c) === profile)) {
+  //   return;
+  // }
+
   return type;
 }
 

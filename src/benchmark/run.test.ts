@@ -27,13 +27,13 @@ describe('runBenchmark', () => {
 
       await benchmarkShapes(workDir, [shape], tiny, { keep, print: (line) => printed.push(line) });
 
-      // 1 top + 1 sub-collection; 2 objects, each with 2 files
+      // 1 top + 1 sub-collection; 2 objects, each with 2 files; rows and documents add the author, a shared person
       expect(printed).toEqual([
         `${shape}: generating and importing`,
         `${shape}: indexing`,
         expect.stringMatching(
           new RegExp(
-            `^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; in [\\d.]+ s, peak memory \\d+ MB; .*: met\\); a page of 100 entities read in .* ms slower; \\(target at most 50 ms slower: met\\)$`,
+            `^${shape}: ${crates}, 8 entities; indexed 9 rows and 9 search documents; in [\\d.]+ s, peak memory \\d+ MB; .*: met\\); a page of 100 entities read in .* ms slower; \\(target at most 50 ms slower: met\\)$`,
           ),
         ),
       ]);

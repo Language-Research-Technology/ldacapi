@@ -50,7 +50,7 @@ describe('derivation', () => {
     expect(loaded.status).toBe(0);
   });
 
-  it('rule 1, entities indexed by profile: profiled collections, objects, people, organisations and software, and every file', async () => {
+  it('rule 1, entities indexed by type: collections, objects, people, organisations, software and files, with or without their profile', async () => {
     const built = crate(collection(ROOT), [
       object(`${ROOT}/object`),
       person('#alice'),
@@ -62,7 +62,9 @@ describe('derivation', () => {
       thing('#place', 'Place'),
     ]);
 
-    expect(await ids(built)).toEqual([ROOT, `${ROOT}/object`, `${ROOT}/#alice`, `${ROOT}/#acme`, `${ROOT}/#tool`, `${ROOT}/a.txt`].sort());
+    expect(await ids(built)).toEqual(
+      [ROOT, `${ROOT}/object`, `${ROOT}/#alice`, `${ROOT}/#acme`, `${ROOT}/#tool`, `${ROOT}/a.txt`, `${ROOT}/#bob`, `${ROOT}/#unprofiled`].sort(),
+    );
   });
 
   describe('shared entities', () => {
