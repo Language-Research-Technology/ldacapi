@@ -27,6 +27,6 @@ Rejected: indexing the rest of a clashing crate and only logging the clash (the 
 - What a request reads of a shared entity is one crate's description under that crate's licence, so nothing from a restricted crate shows through an open copy. A restricted copy wins only when no open one exists.
 - The winner depends on the configured open licences, so changing them needs a reindex, as it already does for access control.
 - A shared entity counts in each crate that contains it, so per-crate counts sum to more than the number of rows.
-- A crate that mentions a person without the LDaC profile has no link to them.
+- Entities are indexed by `@type` alone, without the LDaC profile in `conformsTo`, until production crates carry it (#112). A crate links to every person it mentions, profiled or not.
 - Shared entities are in no bucket of the Collection facet, and Oni shows no collection breadcrumb or "Member of" card on organisation and software pages.
 - If the deposit API needs `roCrateIds`, it is read from the links.
