@@ -98,6 +98,7 @@ it in `.env`.
 | `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
 | `pnpm crates:import [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
 | `pnpm index`               | Rebuild both indexes from the OCFL repository                                    |
+| `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
 | `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
 | `pnpm db:deploy`           | Apply pending migrations                                                         |
@@ -511,6 +512,14 @@ pnpm db:migrate --name arocapi-<version>
 `pnpm test` needs Postgres and OpenSearch from `docker compose up`. Each run
 creates its own database and search index, and drops them afterwards, so runs
 never touch your dev data or each other.
+
+`pnpm benchmark` checks indexing against its target: a 30,000-entity collection
+indexed in under 10 minutes, with the indexing process under 1 GB. It generates
+the collection twice, once as one crate and once split across a top
+collection, sub-collection crates and object crates, with text files of 50 KB,
+1 MB and 5 MB. It indexes each into a new database and search index, prints the
+wall-clock time and peak memory, and drops them. It takes a while, so it is
+run by hand, not by `pnpm test` or CI; `pnpm benchmark --help` lists its options.
 
 ## Working on Oni
 

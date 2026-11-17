@@ -13,10 +13,10 @@ export default defineConfig({
       thresholds: {
         // Raised by vitest whenever a run beats them; commit the change
         autoUpdate: true,
-        lines: 93.69,
-        branches: 87.8,
-        functions: 95.76,
-        statements: 94,
+        lines: 94.34,
+        branches: 87.99,
+        functions: 96.2,
+        statements: 94.62,
       },
     },
   },
