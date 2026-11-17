@@ -120,8 +120,9 @@ describe('asking for crates to be indexed', () => {
   it.each([
     [{}, 'index', `Indexing ${BUNDLED} and the crates under it has been queued.`],
     [{ force: 'true' }, 'reindex', `Reindexing ${BUNDLED} and the crates under it has been queued.`],
-  ])('queues a crate and those under it, one job each, given %o', async (form, kind, message) => {
+  ])('queues a crate and those listed under it, one job each, given %o', async (form, kind, message) => {
     await started.indexQueue.index(BUNDLED);
+    await started.indexQueue.index(UNDER);
     await started.workTheQueue();
     const browser = await signIn();
 
@@ -203,8 +204,9 @@ describe('asking for a crate’s indexes to be deleted', () => {
     expect(await searchableIds()).not.toContain(BUNDLED);
   });
 
-  it('queues a delete of a crate and those under it', async () => {
-    await started.indexQueue.index(BUNDLED, { under: true });
+  it('queues a delete of a crate and those listed under it', async () => {
+    await started.indexQueue.index(BUNDLED);
+    await started.indexQueue.index(UNDER);
     await started.workTheQueue();
     const browser = await signIn();
 
