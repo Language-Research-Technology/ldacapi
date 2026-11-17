@@ -448,6 +448,22 @@ describe('a delete job', () => {
     expect(await rowIds()).toEqual([OTHER]);
     expect(await searchableIds()).toEqual([OTHER]);
   });
+
+  it('removes each document of what the crate holds once', async () => {
+    await index(ROOT);
+    await testbed.started.indexQueue.delete(ROOT);
+    const removed: string[] = [];
+    const { search } = testbed.started.indexer;
+
+    await workTheQueueWith({
+      remove: async (ids) => {
+        removed.push(...ids);
+        await search.remove(ids);
+      },
+    });
+
+    expect(removed.sort()).toEqual([ROOT, OBJECT, `${ROOT}/held.txt`, `${ROOT}/missing.txt`].sort());
+  });
 });
 
 describe('a delete job for a crate gone from the repository, asked for by indexing everything', () => {

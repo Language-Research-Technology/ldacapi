@@ -63,7 +63,8 @@ async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: st
   progress.start('database index');
   const { orphaned, rebuilt } = await writers.rows.delete(crateId);
   progress.start('search index');
-  await writers.documents.sync([...new Set([...removed, ...orphaned, ...rebuilt])]);
+  const held = new Set(removed.held);
+  await writers.documents.sync([...new Set([...removed.shared, ...orphaned, ...rebuilt])].filter((id) => !held.has(id)));
 }
 
 /** What a job logs when it finishes, and what it writes to its crate's record */

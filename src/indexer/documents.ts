@@ -23,17 +23,23 @@ export class DocumentsWriter {
     this.search = search;
   }
 
-  /** Removes the documents of the entities no other crate contains, returning their ids. Run before the crate's links go, as it finds them by them */
+  /**
+   * Removes the documents of the entities no other crate contains, returning their ids: those the crate holds, which no
+   * other crate can link to, and shared ones, which another crate may link to before the crate's links go. Run before
+   * then, as it finds them by them
+   */
   async delete(crateId: string) {
-    const ids = (
-      await this.prisma.$queryRaw<{ entityId: string }[]>`
-        SELECT "entityId" FROM crate_link link WHERE "crateId" = ${crateId}
-        AND NOT EXISTS (SELECT 1 FROM crate_link other WHERE other."entityId" = link."entityId" AND other."crateId" <> ${crateId})`
-    ).map(({ entityId }) => entityId);
+    const removed = await this.prisma.$queryRaw<{ entityId: string; shared: boolean }[]>`
+      SELECT "entityId", copy IS NOT NULL AS shared FROM crate_link link WHERE "crateId" = ${crateId}
+      AND NOT EXISTS (SELECT 1 FROM crate_link other WHERE other."entityId" = link."entityId" AND other."crateId" <> ${crateId})`;
+    const ids = removed.map(({ entityId }) => entityId);
     for (const batch of chunks(ids, MAX_DOCUMENTS)) {
       await this.search.remove(batch);
     }
-    return ids;
+    return {
+      held: removed.filter(({ shared }) => !shared).map(({ entityId }) => entityId),
+      shared: removed.filter(({ shared }) => shared).map(({ entityId }) => entityId),
+    };
   }
 
   /** Makes the documents of `ids` what their links say: none with no link left, or a shared entity's winning copy */
