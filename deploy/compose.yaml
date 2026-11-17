@@ -77,7 +77,7 @@ services:
   worker:
     <<: *hardening
     image: ghcr.io/language-research-technology/ldacapi:main
-    command: ["node", "src/worker.ts"]
+    command: ["node", "--max-old-space-size=768", "src/worker.ts"]
     env_file: ldacapi.env
     environment:
       DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi

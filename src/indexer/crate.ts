@@ -12,30 +12,58 @@ const TEXT_LIMIT = 1_000_000;
 
 type CrateJson = { '@graph': RawEntity[] };
 
+const METADATA = 'ro-crate-metadata.json';
+
 const readCrateJson = async (object: OcflObject): Promise<CrateJson> => {
-  const file = object.head.files.get('ro-crate-metadata.json');
+  const file = object.head.files.get(METADATA);
   if (!file) {
-    throw new Error(`No ro-crate-metadata.json in ${object.id}`);
+    throw new Error(`No ${METADATA} in ${object.id}`);
   }
   return JSON.parse(await file.text());
 };
 
-/** The collection the crate `crateId` is a member of, read from the repository */
-const parentOf = async (repository: StorageRoot, crateId: string) =>
-  parentCollection(await ROCrate.create(await readCrateJson(await repository.open(crateId))));
+/**
+ * Each crate's parent collection, by the digest of the metadata it was read from: ids only, so a worker keeps it while
+ * it runs, and parses a parent crate's metadata once rather than once per child
+ */
+export class Parents {
+  #known = new Map<string, { digest: string; parent: string | undefined }>();
+  repository: StorageRoot;
+
+  constructor(repository: StorageRoot) {
+    this.repository = repository;
+  }
+
+  /** The collection the crate `crateId` is a member of, its metadata read again only when it has changed */
+  async of(crateId: string) {
+    const object = await this.repository.open(crateId);
+    const known = this.#known.get(crateId);
+    if (known && known.digest === object.head.files.get(METADATA)?.digest) {
+      return known.parent;
+    }
+    return this.remember(object, await ROCrate.create(await readCrateJson(object)));
+  }
+
+  /** Remembers the parent collection of `crate`, read from `object`, and returns it */
+  remember(object: OcflObject, crate: ROCrate) {
+    const parent = parentCollection(crate);
+    this.#known.set(object.id, { digest: (object.head.files.get(METADATA) as OcflFile).digest, parent });
+    return parent;
+  }
+}
 
 /**
  * The collections above a crate's root, nearest first, found by following memberOf up through the parent crates in the
  * repository, so they don't depend on which crates are indexed yet. The last is the crate's top collection
  */
-async function parentCrates(repository: StorageRoot, crate: ROCrate) {
+async function parentCrates(parents: Parents, crate: ROCrate) {
   const chain: string[] = [];
   let parent = parentCollection(crate);
   const seen = new Set([crate.rootId]);
   while (parent && !seen.has(parent)) {
     seen.add(parent);
     try {
-      const next = await parentOf(repository, parent);
+      const next = await parents.of(parent);
       chain.push(parent);
       parent = next;
     } catch (error) {
@@ -80,15 +108,16 @@ const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => a
 export type ReadText = ReturnType<typeof textReader>;
 
 /** The crate `crateId` at its head version in the repository */
-export async function openCrate(repository: StorageRoot, crateId: string) {
-  const object = await repository.open(crateId);
+export async function openCrate(parents: Parents, crateId: string) {
+  const object = await parents.repository.open(crateId);
   return {
     version: object.head.number,
     /** Reads and parses the crate's metadata, and finds the files it holds */
     async read(progress: Progress) {
       const crate = await ROCrate.create(await readCrateJson(object));
+      parents.remember(object, crate);
       const sizes = await heldFiles(object, progress);
-      return { crate, heldFiles: sizes, readText: textReader(object, sizes), parentCrates: await parentCrates(repository, crate) };
+      return { crate, heldFiles: sizes, readText: textReader(object, sizes), parentCrates: await parentCrates(parents, crate) };
     },
   };
 }

@@ -1,5 +1,6 @@
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +16,11 @@ import { type GenerateOptions, generateCollection } from './generate.ts';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 
-/** The node arguments of the process the benchmark measures, which indexes the whole repository and exits */
-const INDEX_EVERYTHING = ['scripts/index.ts'];
+/** The node arguments of the process the benchmark measures, which indexes the whole repository and exits: `pnpm index`'s, less loading `.env` */
+const INDEX_EVERYTHING = (JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf-8')).scripts.index as string)
+  .split(' ')
+  .slice(1)
+  .filter((arg) => !arg.startsWith('--env-file'));
 
 /** Loaded into the indexing process to report its resource usage on fd 3 as it exits */
 const USAGE_REPORTER = `data:text/javascript,${encodeURIComponent(

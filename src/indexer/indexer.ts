@@ -9,7 +9,7 @@ import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { AggregatesWriter } from './aggregates.ts';
-import { openCrate } from './crate.ts';
+import { openCrate, Parents } from './crate.ts';
 import { derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
 import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, succeed, unfinished } from './jobs.ts';
@@ -44,7 +44,7 @@ export type WorkOptions = (
 /** How long to wait before looking for a job again when none is waiting */
 const POLL_MILLISECONDS = 1000;
 
-type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter };
+type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter; parents: Parents };
 
 const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
   prisma.crateRecord.update({ where: { id: crateId }, data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
@@ -111,8 +111,8 @@ async function runCrateJob(deps: IndexerDeps, writers: Writers, job: CrateJob, p
   return job.kind === 'delete' ? deleteCrate(deps.prisma, writers, job.crateId, progress) : indexCrate(deps, writers, job, progress);
 }
 
-async function indexCrate({ prisma, repository, licences }: IndexerDeps, writers: Writers, job: CrateJob, progress: Progress): Promise<Outcome> {
-  const opened = await openCrate(repository, job.crateId);
+async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, job: CrateJob, progress: Progress): Promise<Outcome> {
+  const opened = await openCrate(writers.parents, job.crateId);
   const { indexedVersion } = await prisma.crateRecord.findUniqueOrThrow({ where: { id: job.crateId } });
   if (job.kind === 'index' && indexedVersion === opened.version) {
     log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
@@ -173,7 +173,12 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   const { prisma, search } = deps;
   const signal = options.until === 'aborted' ? options.signal : undefined;
   const stopped = (signal ? once(signal, 'abort') : new Promise<never>(() => {})).then(() => true);
-  const writers = { rows: new RowsWriter(prisma), documents: new DocumentsWriter(prisma, search), aggregates: new AggregatesWriter(prisma) };
+  const writers = {
+    rows: new RowsWriter(prisma),
+    documents: new DocumentsWriter(prisma, search),
+    aggregates: new AggregatesWriter(prisma),
+    parents: new Parents(deps.repository),
+  };
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   let running: { job: Job; progress: Progress } | undefined;
   const beat = async () => {

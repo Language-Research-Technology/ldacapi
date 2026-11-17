@@ -234,7 +234,12 @@ worker holds, and two jobs for one crate never run at once. Deleting every
 index waits for the running jobs to finish and runs alone. To run more, start
 more workers against the same database, search index and repository, such as
 `docker compose up -d --scale worker=3` in [production](#production-with-docker-compose).
-Each worker holds one crate's metadata in memory at a time.
+Each worker holds one crate's metadata in memory at a time, and remembers
+each crate's parent collection (ids only), so a parent crate is read once
+rather than once per crate under it. Workers, `pnpm index` and
+`pnpm crates:import` cap node's heap at 768 MB (`--max-old-space-size`);
+uncapped, node lets garbage grow the heap with the machine's memory, past 1 GB
+for a large crate.
 
 ### Known limits
 
@@ -260,6 +265,9 @@ Each worker holds one crate's metadata in memory at a time.
 - A crate on the older bare spelling (`memberOf`, `communicationMode` rather
   than `pcdm:memberOf`, `ldac:communicationMode`) indexes without its parents
   or LDaC facets, with no warning.
+- A crate too large for the 768 MB heap stops the process running its job;
+  after three tries the job fails with "Its worker died on each of 3 attempts".
+  Raise `--max-old-space-size` where the worker is started to index it.
 
 ## Configuration
 
@@ -728,7 +736,9 @@ indexed in under 10 minutes, with the indexing process under 1 GB, and a page of
 the collection twice, once as one crate and once split across a top
 collection, sub-collection crates and object crates, with text files of 50 KB,
 1 MB and 5 MB. It indexes each into a new database and search index, prints the
-wall-clock time, peak memory and aggregates read time, and drops them. It takes a while, so it is
+wall-clock time, peak memory and aggregates read time, and drops them. On a
+16-core workstation it takes about 20 s (750 MB peak) as one crate and 90 s
+(260 MB) split. It takes a while, so it is
 run by hand, not by `pnpm test` or CI; `pnpm benchmark --help` lists its options.
 
 ## Working on Oni
