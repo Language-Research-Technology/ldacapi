@@ -12,7 +12,7 @@ import { AggregatesWriter } from './aggregates.ts';
 import { openCrate, Parents } from './crate.ts';
 import { derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
-import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, succeed, unfinished } from './jobs.ts';
+import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, returnDeadWorkersJobs, succeed, unfinished } from './jobs.ts';
 import { isOutage, waitForServices } from './outage.ts';
 import { Progress } from './progress.ts';
 import { countRows, RowsWriter } from './rows.ts';
@@ -173,6 +173,7 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   const beat = async () => {
     try {
       await heartbeat(prisma, workerId, running);
+      await returnDeadWorkersJobs(prisma);
       /* v8 ignore start -- an outage is checked by hand */
     } catch (error) {
       log.warn({ err: error }, 'Heartbeat failed');
@@ -181,6 +182,7 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   };
   const beating = setInterval(beat, options.heartbeatMilliseconds ?? 30_000);
   let ready = false;
+  let swept = false;
   try {
     while (!signal?.aborted) {
       let job: Job | undefined;
@@ -190,6 +192,12 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
           ready = true;
         }
         job = await claim(prisma, workerId);
+        // Idle polls leave dead workers' jobs to the heartbeat
+        if (!job && !swept) {
+          await returnDeadWorkersJobs(prisma);
+          job = await claim(prisma, workerId);
+        }
+        swept = !job;
         if (job) {
           running = { job, progress: new Progress() };
           const finished = run(deps, writers, workerId, job, running.progress).then(() => false);

@@ -14,10 +14,11 @@ beforeEach(async () => {
 it('refuses the result of a job whose claim was taken away, keeping the new claim', async () => {
   const { prisma, indexQueue } = testbed.started;
   // Imported once the testbed has read its configuration
-  const { claim, succeed } = await import('./jobs.ts');
+  const { claim, returnDeadWorkersJobs, succeed } = await import('./jobs.ts');
   await indexQueue.index(CRATE);
   const job = (await claim(prisma, 'judged-dead')) as Job;
   await prisma.indexWorker.update({ where: { id: 'judged-dead' }, data: { heartbeatAt: new Date(Date.now() - 10 * 60 * 1000) } });
+  await returnDeadWorkersJobs(prisma);
   expect(await claim(prisma, 'alive')).toMatchObject({ id: job.id, attempts: 2 });
 
   expect(await succeed(prisma, 'judged-dead', job, { crateId: CRATE, data: { indexedVersion: 1, indexedAt: new Date(), entities: 1, files: 0 } })).toBe(false);

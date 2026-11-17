@@ -14,7 +14,7 @@ enum IndexJobStatus {
   @@map("index_job_status")
 }
 
-/// A request to index, reindex or delete one crate's indexes, or with no crate to delete everything. The migration adds partial unique indexes allowing one waiting and one running job per crate, and one of each with no crate
+/// A request to index, reindex or delete one crate's indexes, or with no crate to delete everything. Migrations add partial unique indexes allowing one waiting, one running and one failed job per crate, and one of each with no crate
 model IndexJob {
   id        Int            @id @default(autoincrement())
   crateId   String?

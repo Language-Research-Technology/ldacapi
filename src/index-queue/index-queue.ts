@@ -73,11 +73,7 @@ const stateRows = (where: Prisma.Sql) => Prisma.sql`
     WHERE ("crateId" = crate.id OR "crateId" IS NULL) AND status IN ('running', 'waiting')
     ORDER BY status = 'running' DESC, id LIMIT 1
   ) active ON true
-  LEFT JOIN LATERAL (
-    SELECT id, error, stage, "failedOn", "failedAt", attempts FROM index_job
-    WHERE "crateId" = crate.id AND status = 'failed'
-    ORDER BY id DESC LIMIT 1
-  ) failed ON true
+  LEFT JOIN index_job failed ON failed."crateId" = crate.id AND failed.status = 'failed'
   ${where}`;
 
 const indexState = (row: StateRow): IndexState => {
