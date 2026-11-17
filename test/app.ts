@@ -41,16 +41,17 @@ export const buildTestApp = async (env: Record<string, string>, options: { stora
     const { prisma } = await import('../src/prisma.ts');
     const { buildApp } = await import('../src/app.ts');
     const { Client } = await import('@opensearch-project/opensearch');
-    const { createSearchBackend, refreshSearchIndex } = await import('../src/search-backend.ts');
+    const { refreshSearchIndex } = await import('../src/search-backend.ts');
+    const { indexerDeps } = await import('../src/indexer/deps.ts');
     const { createIndexQueue } = await import('../src/index-queue/index-queue.ts');
     const { contentStorage, openRepository } = await import('../src/repository/repository.ts');
     const { workTheQueue } = await import('../src/indexer/indexer.ts');
     const opensearch = new Client({ node: config.opensearchUrl });
-    const search = createSearchBackend(opensearch);
     const repository = options.ocfl ? await openRepository(config.ocfl.root) : emptyRepository;
+    const indexer = indexerDeps(repository, opensearch);
+    const { search } = indexer;
     const storage = options.storage ?? (options.ocfl ? await contentStorage(config.ocfl.root) : noContent);
     const indexQueue = createIndexQueue({ prisma, repository });
-    const indexer = { prisma, repository, opensearch, search, licences: config };
     /** Builds another app, as another server process would */
     const build = () => buildApp({ search, storage, indexQueue });
     return {

@@ -8,10 +8,10 @@ import { collection, crate, writeCrates } from '../test/crate-builder.ts';
 import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
 import { createIndexQueue } from './index-queue/index-queue.ts';
+import { indexerDeps } from './indexer/deps.ts';
 import { indexAndSummarise } from './indexer/index-run.ts';
 import { prisma } from './prisma.ts';
 import { openOrCreateRepository } from './repository/repository.ts';
-import { createSearchBackend } from './search-backend.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 
@@ -70,8 +70,7 @@ describe('crates:import', () => {
     const importAndIndex = async () => {
       const repository = await openOrCreateRepository(root());
       const indexQueue = createIndexQueue({ prisma, repository });
-      const deps = { prisma, repository, opensearch, search: createSearchBackend(opensearch), licences: config };
-      const run = (ask: () => Promise<string[]>) => indexAndSummarise(deps, indexQueue, ask);
+      const run = (ask: () => Promise<string[]>) => indexAndSummarise(indexerDeps(repository, opensearch), indexQueue, ask);
       return { imported: await importInto(repository, source, { indexQueue, run }), indexQueue };
     };
 
