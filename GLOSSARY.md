@@ -21,8 +21,20 @@ A crate sent through the deposit API, which writes it to the OCFL repository and
 _Avoid_: Import, upload
 
 **Index**:
-Building the database index and the search index from the repository, for one crate or all of them. Both can be deleted and rebuilt at any time.
+Building the database index and the search index from the repository, for one crate or all of them. A crate whose current version is already indexed is left alone. Both indexes can be deleted and rebuilt at any time.
 _Avoid_: Import
+
+**Reindex**:
+Deleting a crate's indexes and building them again, whether or not its current version is already indexed.
+_Avoid_: Force index, refresh
+
+**Index job**:
+A request, waiting or running, to index or reindex one crate or to delete its indexes. Indexing several crates is one index job for each.
+_Avoid_: Task, index run
+
+**Worker**:
+The process that runs index jobs, separate from the API (ADR 0005).
+_Avoid_: Indexer (the code that builds the indexes)
 
 **Database index**:
 The Entity and File rows that arocapi reads, written by the indexer (arocapi's Rows).
