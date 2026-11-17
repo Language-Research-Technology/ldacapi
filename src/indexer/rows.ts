@@ -1,13 +1,12 @@
 import { Prisma, type PrismaClient } from '../generated/prisma/client.ts';
 import { fileStorageMeta } from '../repository/file-storage-meta.ts';
+import { chunks } from './chunks.ts';
 import type { Derivation, DerivedEntity, EntityRow } from './derive.ts';
 import { beats, ClashError, type Contender, type Copy, linksById, lockEntities, TRANSACTION, winner } from './links.ts';
 import type { Progress } from './progress.ts';
 
 /** Rows per transaction */
 const BATCH_SIZE = 1000;
-
-const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / BATCH_SIZE) }, (_, i) => items.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE));
 
 const entityData = (row: EntityRow) => ({ ...row, meta: row.meta as Prisma.InputJsonValue });
 
@@ -34,7 +33,7 @@ export class RowsWriter {
   /** Fails on a clash, naming the entity */
   async write(derivation: Derivation, progress: Progress) {
     progress.start('database index', derivation.entities.length);
-    for (const batch of batches(derivation.entities)) {
+    for (const batch of chunks(derivation.entities, BATCH_SIZE)) {
       try {
         await this.writeBatch(derivation, batch);
       } catch {
@@ -100,7 +99,7 @@ export class RowsWriter {
   /** Removes the crate's links, then the rows left with none, and makes the rows of shared entities it won the next crate's copy */
   async delete(crateId: string): Promise<RowsDeleted> {
     const deleted: RowsDeleted = { orphaned: [], rebuilt: [] };
-    for (const ids of batches(await crateEntityIds(this.prisma, crateId))) {
+    for (const ids of chunks(await crateEntityIds(this.prisma, crateId), BATCH_SIZE)) {
       await this.prisma.$transaction(async (tx) => {
         await lockEntities(tx, ids);
         const links = linksById(

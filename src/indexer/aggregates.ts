@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../generated/prisma/client.ts';
+import { chunks } from './chunks.ts';
 import type { Derivation } from './derive.ts';
 import type { Progress } from './progress.ts';
 
@@ -15,8 +16,7 @@ export class AggregatesWriter {
 
   async write({ crateId, aggregates }: Derivation, progress: Progress) {
     progress.start('aggregates', aggregates.length);
-    for (let i = 0; i < aggregates.length; i += BATCH_SIZE) {
-      const batch = aggregates.slice(i, i + BATCH_SIZE);
+    for (const batch of chunks(aggregates, BATCH_SIZE)) {
       await this.prisma.aggregate.createMany({ data: batch.map((aggregate) => ({ ...aggregate, crateId })) });
       progress.advance(batch.length);
     }

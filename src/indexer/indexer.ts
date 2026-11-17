@@ -5,7 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
 import { isOpenLicence } from '../access/licences.ts';
-import type { PrismaClient } from '../generated/prisma/client.ts';
+import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { AggregatesWriter } from './aggregates.ts';
@@ -46,15 +46,14 @@ const POLL_MILLISECONDS = 1000;
 
 type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter; parents: Parents };
 
-const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
-  prisma.crateRecord.update({ where: { id: crateId }, data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
+const NOT_INDEXED = { indexedVersion: null, indexedAt: null, entities: null, files: null };
 
 /**
  * Documents first, found by the links, so a delete cut short can be asked again. Then, once the rows have changed, the
  * documents of what changed, as another crate may have linked to them since
  */
 async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: string, progress: Progress) {
-  await clearIndexedVersion(prisma, crateId);
+  await prisma.crateRecord.update({ where: { id: crateId }, data: NOT_INDEXED });
   progress.start('search index');
   const removed = await writers.documents.delete(crateId);
   progress.start('aggregates');
@@ -71,7 +70,7 @@ type Outcome = { logged?: Record<string, unknown>; record?: RecordWrite };
 /** Empties both indexes wholesale, keeping every crate's record as not indexed */
 async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, progress: Progress): Promise<Outcome> {
   progress.start('database index');
-  await prisma.crateRecord.updateMany({ data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
+  await prisma.crateRecord.updateMany({ data: NOT_INDEXED });
   progress.start('search index');
   await deleteSearchIndex(opensearch);
   await prepareSearchIndex(opensearch, search);
@@ -84,53 +83,43 @@ async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, pro
   return {};
 }
 
-/** Deletes the indexes of a crate gone from the repository, and then its record */
-async function removeCrate(prisma: PrismaClient, writers: Writers, crateId: string, progress: Progress): Promise<Outcome> {
-  await deleteIndexes(prisma, writers, crateId, progress);
-  return { logged: { removed: true }, record: { crateId, remove: true } };
-}
-
-async function deleteCrate(prisma: PrismaClient, writers: Writers, crateId: string, progress: Progress): Promise<Outcome> {
-  await deleteIndexes(prisma, writers, crateId, progress);
-  return {};
-}
-
-type CrateJob = Job & { crateId: string };
-
-function runJob(deps: IndexerDeps, writers: Writers, job: Job, progress: Progress): Promise<Outcome> {
-  if (job.crateId === null) {
+/** Deletes everything, or the crate's indexes (then its record, if it is gone from the repository), or indexes it */
+async function runJob(deps: IndexerDeps, writers: Writers, job: Job, progress: Progress): Promise<Outcome> {
+  const { crateId, kind } = job;
+  if (crateId === null) {
     return deleteEverything(deps, progress);
   }
-  return runCrateJob(deps, writers, { ...job, crateId: job.crateId }, progress);
-}
-
-async function runCrateJob(deps: IndexerDeps, writers: Writers, job: CrateJob, progress: Progress): Promise<Outcome> {
-  if (!(await deps.repository.has(job.crateId))) {
-    return removeCrate(deps.prisma, writers, job.crateId, progress);
+  if (!(await deps.repository.has(crateId))) {
+    await deleteIndexes(deps.prisma, writers, crateId, progress);
+    return { logged: { removed: true }, record: { crateId, remove: true } };
   }
-  return job.kind === 'delete' ? deleteCrate(deps.prisma, writers, job.crateId, progress) : indexCrate(deps, writers, job, progress);
+  if (kind === 'delete') {
+    await deleteIndexes(deps.prisma, writers, crateId, progress);
+    return {};
+  }
+  return indexCrate(deps, writers, crateId, kind, progress);
 }
 
-async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, job: CrateJob, progress: Progress): Promise<Outcome> {
-  const opened = await openCrate(writers.parents, job.crateId);
-  const { indexedVersion } = await prisma.crateRecord.findUniqueOrThrow({ where: { id: job.crateId } });
-  if (job.kind === 'index' && indexedVersion === opened.version) {
-    log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
+async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, crateId: string, kind: IndexJobKind, progress: Progress): Promise<Outcome> {
+  const opened = await openCrate(writers.parents, crateId);
+  const { indexedVersion } = await prisma.crateRecord.findUniqueOrThrow({ where: { id: crateId } });
+  if (kind === 'index' && indexedVersion === opened.version) {
+    log.debug({ crateId, version: opened.version }, 'Skipped: already indexed');
     return { logged: { skipped: true } };
   }
   const { crate, heldFiles, readText, parentCrates } = await opened.read(progress);
   progress.start('deriving');
   const derivation = derive(crate, { parentCrates, heldFiles, ...licences, isOpenLicence });
   for (const { msg, ...warning } of derivation.warnings) {
-    log.warn({ crateId: job.crateId, ...warning }, msg);
+    log.warn({ crateId, ...warning }, msg);
   }
-  await deleteIndexes(prisma, writers, job.crateId, progress);
+  await deleteIndexes(prisma, writers, crateId, progress);
   await writers.rows.write(derivation, progress);
   await writers.documents.write(derivation, readText, progress);
   await writers.aggregates.write(derivation, progress);
-  const counts = await countRows(prisma, job.crateId);
+  const counts = await countRows(prisma, crateId);
   const data = { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts };
-  return { logged: { version: opened.version, ...counts }, record: { crateId: job.crateId, data } };
+  return { logged: { version: opened.version, ...counts }, record: { crateId, data } };
 }
 
 async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: Job, progress: Progress) {

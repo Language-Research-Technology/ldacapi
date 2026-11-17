@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import type { Document, SearchBackend } from '../search-backend.ts';
+import { chunks } from './chunks.ts';
 import type { ReadText } from './crate.ts';
 import type { Derivation } from './derive.ts';
 import { type Copy, linksById, lockEntities, TRANSACTION, winner } from './links.ts';
@@ -11,9 +12,6 @@ const log = logger.child({ module: 'indexer/documents' });
 /** Caps on one bulk request */
 const MAX_DOCUMENTS = 1000;
 const MAX_BYTES = 5 * 1024 * 1024;
-
-const batches = (ids: string[]) =>
-  Array.from({ length: Math.ceil(ids.length / MAX_DOCUMENTS) }, (_, i) => ids.slice(i * MAX_DOCUMENTS, (i + 1) * MAX_DOCUMENTS));
 
 /** Writes a crate's search documents */
 export class DocumentsWriter {
@@ -32,7 +30,7 @@ export class DocumentsWriter {
         SELECT "entityId" FROM crate_link link WHERE "crateId" = ${crateId}
         AND NOT EXISTS (SELECT 1 FROM crate_link other WHERE other."entityId" = link."entityId" AND other."crateId" <> ${crateId})`
     ).map(({ entityId }) => entityId);
-    for (const batch of batches(ids)) {
+    for (const batch of chunks(ids, MAX_DOCUMENTS)) {
       await this.search.remove(batch);
     }
     return ids;
@@ -40,7 +38,7 @@ export class DocumentsWriter {
 
   /** Makes the documents of `ids` what their links say: none with no link left, or a shared entity's winning copy */
   async sync(ids: string[], progress?: Progress) {
-    for (const batch of batches(ids)) {
+    for (const batch of chunks(ids, MAX_DOCUMENTS)) {
       await this.prisma.$transaction(async (tx) => {
         await lockEntities(tx, batch);
         const links = linksById(
