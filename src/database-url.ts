@@ -1,6 +1,6 @@
 import * as z from 'zod';
 
-type Env = Record<string, string | undefined>;
+export type Env = Record<string, string | undefined>;
 
 type NodeEnv = 'development' | 'test' | 'production';
 

@@ -3,13 +3,12 @@ import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
-import { openLicenceCheck } from '../access/licences.ts';
 import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
 import { AggregatesWriter } from './aggregates.ts';
 import { openCrate, Parents } from './crate.ts';
-import { derive } from './derive.ts';
+import { type DeriveFacts, derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
 import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, returnDeadWorkersJobs, succeed, unfinished } from './jobs.ts';
 import { isOutage, waitForServices } from './outage.ts';
@@ -23,7 +22,7 @@ export type IndexerDeps = {
   repository: StorageRoot;
   opensearch: Client;
   search: SearchBackend;
-  licences: { defaultLicense: string; defaultMetadataLicense: string; openLicenses: string[] };
+  licences: Pick<DeriveFacts, 'defaultLicense' | 'defaultMetadataLicense' | 'isOpenLicence'>;
 };
 
 export type WorkOptions = (
@@ -122,9 +121,7 @@ async function indexCrate(
   if (crate.rootId !== crateId) {
     throw new Error(`The crate's root id, ${crate.rootId}, isn't the id of the OCFL object holding it, ${crateId}`);
   }
-  const { defaultLicense, defaultMetadataLicense, openLicenses } = licences;
-  const isOpenLicence = openLicenceCheck(openLicenses);
-  const derivation = derive(crate, { parentCrates, heldFiles, defaultLicense, defaultMetadataLicense, isOpenLicence });
+  const derivation = derive(crate, { parentCrates, heldFiles, ...licences });
   for (const { msg, ...warning } of derivation.warnings) {
     log.warn({ crateId, ...warning }, msg);
   }

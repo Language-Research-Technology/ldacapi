@@ -1,10 +1,8 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { resolve } from 'node:path';
 import * as z from 'zod';
-import { databaseUrlSetting, parseNodeEnv } from './database-url.ts';
+import { databaseUrlSetting, type Env, parseNodeEnv } from './database-url.ts';
 import { generateCookieKey, generateSigningKey, type Jwk, SIGNING_ALG } from './oidc/keys.ts';
-
-type Env = Record<string, string | undefined>;
 
 const oidcClient = z.strictObject({
   client_id: z.string().min(1),

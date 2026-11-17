@@ -1,10 +1,6 @@
 import { config } from '../configuration.ts';
 
-/** Whether everyone may read what a licence covers, signed in or not, when `openLicenses` are open */
-export const openLicenceCheck = (openLicenses: string[]) => {
-  const open = new Set(openLicenses);
-  return (licenseId: string) => open.has(licenseId);
-};
+const open = new Set(config.openLicenses);
 
-/** Whether everyone may read what `licenseId` covers, by the configured open licences */
-export const isOpenLicence = openLicenceCheck(config.openLicenses);
+/** Whether everyone may read what `licenseId` covers, signed in or not, by the configured open licences */
+export const isOpenLicence = (licenseId: string) => open.has(licenseId);
