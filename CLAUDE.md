@@ -14,6 +14,12 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+## Tests and coverage
+
+`pnpm test` fails when coverage of `src/` drops below the thresholds in `vitest.config.ts`. Vitest raises them when a run beats them: commit that change. The aim is 100%.
+
+Entry points (`scripts/*.ts`, `src/index.ts`) only parse arguments and call code in `src/`. They run as their own process, which coverage can't see, so they are left out of it; logic put there is unmeasured.
+
 ## Database migrations
 
 A migration that creates or changes arocapi's models (`prisma/arocapi`, symlinked from the arocapi package) is named after the arocapi version: after an arocapi upgrade that changes the models, run `pnpm db:migrate --name arocapi-<version>`. Name migrations for our own models (`prisma/models`) after what they change.

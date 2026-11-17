@@ -16,13 +16,13 @@ export async function openRepository(): Promise<StorageRoot> {
 }
 
 /** The OCFL repository, created empty if it doesn't exist yet */
-export async function openOrCreateRepository(): Promise<StorageRoot> {
+export async function openOrCreateRepository(root = config.ocfl.root): Promise<StorageRoot> {
   try {
-    return await openStorageRoot(config.ocfl.root);
+    return await openStorageRoot(root);
   } catch (error) {
     if (!isMissing(error)) {
       throw error;
     }
-    return createStorageRoot(config.ocfl.root, { layout: { extensionName: '000N-path-direct-storage-layout' } });
+    return createStorageRoot(root, { layout: { extensionName: '000N-path-direct-storage-layout' } });
   }
 }
