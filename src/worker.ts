@@ -11,7 +11,7 @@ const repository = await openRepository(config.ocfl.root);
 const stop = new AbortController();
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.once(signal, () => {
-    logger.info({ signal }, 'Stopping after the current job');
+    logger.info({ signal }, 'Stopping, releasing the current job');
     stop.abort();
   });
 }
@@ -19,3 +19,5 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 logger.info('Worker started');
 await workTheQueue({ prisma, repository, opensearch, search: createSearchBackend(opensearch), licences: config }, { until: 'aborted', signal: stop.signal });
 await Promise.all([prisma.$disconnect(), opensearch.close()]);
+// A released job may still be running, unowned
+process.exit(0);

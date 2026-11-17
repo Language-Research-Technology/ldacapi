@@ -151,13 +151,15 @@ crate.
   OpenSearch's next periodic refresh, within a second by default.
 - It writes a heartbeat to Postgres every 30 seconds. The admin pages show "No
   worker running" when no worker has written one for 5 minutes.
-- On SIGTERM or SIGINT it finishes the job it is running, then exits.
-  `docker compose stop` kills it after 10 seconds, so stop it when nothing is
-  indexing, or allow longer with `docker compose stop -t 600 worker`.
-- A worker killed mid-job leaves that job running, and the crate's later jobs
-  wait behind it. To clear it, stop every worker (and any `pnpm index` or
-  `pnpm crates:import`), run `DELETE FROM index_job WHERE status = 'running';`
-  in Postgres, start the workers and ask again.
+- On SIGTERM or SIGINT it puts the job it is running back in the queue, as if
+  never tried, and exits at once.
+- A worker silent for 5 minutes is dead. The next worker or `pnpm index` run
+  to look for work puts its job back in the queue, to run again; a job whose
+  worker dies on three attempts fails. A worker wrongly judged dead drops its
+  result rather than write over the job's new run.
+- If Postgres or OpenSearch can't be reached, it logs that it has paused, puts
+  its job back in the queue, and tries again every 5 seconds, carrying on once
+  both answer.
 - `pnpm index` and `pnpm crates:import` work the queue as a worker does, until
   no job is waiting, then exit non-zero if any crate they asked for failed.
 

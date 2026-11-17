@@ -354,6 +354,7 @@ describe('deleting everything', () => {
 
   it('waits for jobs running elsewhere, and so do the crates asked for after it', async () => {
     const { prisma } = testbed.started;
+    await prisma.indexWorker.create({ data: { id: 'elsewhere' } });
     await prisma.crateRecord.createMany({ data: [{ id: ROOT }, { id: OTHER }] });
     await prisma.indexJob.create({ data: { crateId: ROOT, kind: 'index', status: 'running', workerId: 'elsewhere' } });
     await testbed.started.indexQueue.deleteEverything();
@@ -380,6 +381,7 @@ describe('deleting everything', () => {
 
 describe('working the queue', () => {
   it('leaves a waiting job whose crate has one running elsewhere', async () => {
+    await testbed.started.prisma.indexWorker.create({ data: { id: 'elsewhere' } });
     await testbed.started.prisma.crateRecord.createMany({ data: [{ id: ROOT }, { id: OTHER }] });
     await testbed.started.prisma.indexJob.createMany({
       data: [
