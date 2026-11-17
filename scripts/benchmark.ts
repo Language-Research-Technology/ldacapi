@@ -5,7 +5,8 @@ import { FULL_SIZE, generateCollection, SHAPES, type Shape } from '../src/benchm
 const HELP = `Benchmarks indexing over a generated collection, by default 30,031 entities.
 
 Usage:
-  pnpm benchmark [options]                  Generate, import and index each shape; print time and peak memory
+  pnpm benchmark [options]                  Generate, import and index each shape; print time, peak memory
+                                            and how much slower aggregates make a page of 100 entities
   pnpm benchmark generate <dir> [options]   Only write the crates of each shape, to <dir>/<shape>
 
 Each run indexes into a new database and search index (named after DATABASE_URL and ENTITY_INDEX, with a

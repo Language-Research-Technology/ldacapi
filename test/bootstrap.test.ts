@@ -15,7 +15,7 @@ const crateIds = [
   'arcp://name,distributed_metadata_restricted',
 ];
 
-const emptyEverything = () => prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+const emptyEverything = () => prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
 
 /**
  * A new OCFL repository, imported by `pnpm crates:import` from `source` (test-data by default) with `args`, and how to run

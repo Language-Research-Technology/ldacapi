@@ -34,8 +34,14 @@ describe('runBenchmark', () => {
       expect(result.peakMemoryBytes).toBeGreaterThan(10 * 1024 * 1024);
       expect(result.rows).toBe(8);
       expect(result.documents).toBe(8);
+      expect(result.aggregatesRead.with).toBeGreaterThan(0);
+      expect(result.aggregatesRead.without).toBeGreaterThan(0);
       expect(await readFile(result.logFile, 'utf-8')).toContain('Job finished');
-      expect(report(shape, repository, result)).toMatch(new RegExp(`^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; .*: met\\)$`));
+      expect(report(shape, repository, result)).toMatch(
+        new RegExp(
+          `^${shape}: ${crates}, 8 entities; indexed 8 rows and 8 search documents; .*: met\\); a page of 100 entities read in .* ms slower; \\(target at most 50 ms slower: met\\)$`,
+        ),
+      );
 
       await discardRepository(repository);
       await expect(access(repository.root)).rejects.toThrow();

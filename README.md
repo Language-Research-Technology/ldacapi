@@ -53,6 +53,12 @@ ldacapi adds what LDaCA needs on top (terms as in [GLOSSARY.md](GLOSSARY.md)):
   distributed collection's root whatever order the crates are indexed in. If
   a parent collection moves, reindex the crates under it: they keep the old
   `rootCollection` until then.
+- **Aggregates**: Oni shows each entity's counts of the collections, objects
+  and files below it, and the languages, communication modes and media types
+  at or below it. Each index job stores what its crate adds to every entity
+  above its own, including collections in parent crates, and the API sums
+  those per page (`src/oni.ts`), so a collection split across crates reads as
+  one.
 - **Sign-in**: the API is its own OIDC provider, signing users in at an
   upstream provider such as CILogon (`src/oidc/`,
   [ADR 0001](docs/adr/0001-own-oidc-provider.md)).
@@ -199,7 +205,8 @@ Each worker holds one crate's metadata in memory at a time.
 - Only the first 1,000,000 bytes of a `text/*` file are searchable; a file cut
   short is logged.
 - A changed parent crate leaves the crates under it stale (their
-  `rootCollection`) until they are reindexed.
+  `rootCollection`, and what they add to the aggregates of the collections
+  above them) until they are reindexed.
 - Entities' `Public` and `AuthorizationByApplication` labels lag a change to
   `OPEN_LICENSES` until their crate is reindexed.
 - A crate put in the repository by another tool isn't listed on the admin pages
@@ -669,12 +676,13 @@ pnpm db:migrate --name arocapi-<version>
 creates its own database and search index, and drops them afterwards, so runs
 never touch your dev data or each other.
 
-`pnpm benchmark` checks indexing against its target: a 30,000-entity collection
-indexed in under 10 minutes, with the indexing process under 1 GB. It generates
+`pnpm benchmark` checks indexing against its targets: a 30,000-entity collection
+indexed in under 10 minutes, with the indexing process under 1 GB, and a page of
+100 entities read at most 50 ms slower with their aggregates than without. It generates
 the collection twice, once as one crate and once split across a top
 collection, sub-collection crates and object crates, with text files of 50 KB,
 1 MB and 5 MB. It indexes each into a new database and search index, prints the
-wall-clock time and peak memory, and drops them. It takes a while, so it is
+wall-clock time, peak memory and aggregates read time, and drops them. It takes a while, so it is
 run by hand, not by `pnpm test` or CI; `pnpm benchmark --help` lists its options.
 
 ## Working on Oni

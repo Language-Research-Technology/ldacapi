@@ -70,9 +70,9 @@ export const buildTestApp = async (env: Record<string, string>, options: { stora
         await refreshSearchIndex(opensearch);
       },
 
-      /** Deletes every index job, crate record, worker, row and search document */
+      /** Deletes every index job, crate record, worker, aggregate, row and search document */
       async emptyEverything() {
-        await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+        await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
         await opensearch.indices.delete({ index: config.search.entityIndex, ignore_unavailable: true });
       },
     };

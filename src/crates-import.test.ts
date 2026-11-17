@@ -75,11 +75,11 @@ describe('crates:import', () => {
     };
 
     beforeEach(async () => {
-      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
     });
 
     afterAll(async () => {
-      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, file, entity CASCADE`;
+      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
       await Promise.all([prisma.$disconnect(), opensearch.close()]);
     });
 

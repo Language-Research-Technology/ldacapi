@@ -8,6 +8,7 @@ import { isOpenLicence } from '../access/licences.ts';
 import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
+import { AggregatesWriter } from './aggregates.ts';
 import { openCrate } from './crate.ts';
 import { derive } from './derive.ts';
 import { DocumentsWriter } from './documents.ts';
@@ -37,7 +38,7 @@ export type WorkOptions = (
 /** How long to wait before looking for a job again when none is waiting */
 const POLL_MILLISECONDS = 1000;
 
-type Writers = { rows: RowsWriter; documents: DocumentsWriter };
+type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter };
 
 const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
   prisma.crateRecord.update({ where: { id: crateId }, data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
@@ -46,6 +47,7 @@ const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
 async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: string) {
   await clearIndexedVersion(prisma, crateId);
   await writers.documents.delete(crateId);
+  await writers.aggregates.delete(crateId);
   await writers.rows.delete(crateId);
 }
 
@@ -57,6 +59,7 @@ async function deleteEverything({ prisma, opensearch, search }: IndexerDeps): Pr
   await prisma.crateRecord.updateMany({ data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
   await deleteSearchIndex(opensearch);
   await prepareSearchIndex(opensearch, search);
+  await prisma.aggregate.deleteMany();
   await prisma.file.deleteMany();
   await prisma.entity.deleteMany();
   return {};
@@ -96,14 +99,15 @@ async function indexCrate({ prisma, repository, licences }: IndexerDeps, writers
     log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
     return { logged: { skipped: true } };
   }
-  const { crate, heldFiles, readText, topCollection } = await opened.read();
-  const derivation = derive(crate, { topCollection, heldFiles, ...licences, isOpenLicence });
+  const { crate, heldFiles, readText, parentCrates } = await opened.read();
+  const derivation = derive(crate, { parentCrates, heldFiles, ...licences, isOpenLicence });
   for (const { msg, ...warning } of derivation.warnings) {
     log.warn({ crateId: job.crateId, ...warning }, msg);
   }
   await deleteIndexes(prisma, writers, job.crateId);
   const written = await writers.rows.write(derivation);
   await writers.documents.write(derivation, readText, written);
+  await writers.aggregates.write(derivation);
   const counts = await countRows(prisma, job.crateId);
   const data = { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts };
   return { logged: { version: opened.version, ...counts }, record: { crateId: job.crateId, data } };
@@ -149,7 +153,7 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   const { prisma, search } = deps;
   const signal = options.until === 'aborted' ? options.signal : undefined;
   const stopped = (signal ? once(signal, 'abort') : new Promise<never>(() => {})).then(() => true);
-  const writers = { rows: new RowsWriter(prisma), documents: new DocumentsWriter(prisma, search) };
+  const writers = { rows: new RowsWriter(prisma), documents: new DocumentsWriter(prisma, search), aggregates: new AggregatesWriter(prisma) };
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   const beat = async () => {
     try {

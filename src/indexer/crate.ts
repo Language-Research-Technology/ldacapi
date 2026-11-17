@@ -24,28 +24,34 @@ const parentOf = async (repository: StorageRoot, crateId: string) =>
   parentCollection(await ROCrate.create(await readCrateJson(await repository.open(crateId))));
 
 /**
- * The top-level collection a crate sits under, found by following memberOf up through the parent crates in the repository,
- * so it doesn't depend on which crates are indexed yet
+ * The collections above a crate's root, nearest first, found by following memberOf up through the parent crates in the
+ * repository, so they don't depend on which crates are indexed yet. The last is the crate's top collection
  */
-async function topCollection(repository: StorageRoot, crate: ROCrate) {
-  let top = crate.rootId;
+async function parentCrates(repository: StorageRoot, crate: ROCrate) {
+  const chain: string[] = [];
   let parent = parentCollection(crate);
-  const seen = new Set([top]);
+  const seen = new Set([crate.rootId]);
   while (parent && !seen.has(parent)) {
     seen.add(parent);
     try {
       const next = await parentOf(repository, parent);
-      top = parent;
+      chain.push(parent);
       parent = next;
     } catch (error) {
-      log.warn({ err: error, crateId: crate.rootId, parent, topCollection: top }, 'Cannot read parent collection; using the highest found');
-      return top;
+      log.warn(
+        { err: error, crateId: crate.rootId, parent, topCollection: chain.at(-1) ?? crate.rootId },
+        'Cannot read parent collection; using the highest found',
+      );
+      return chain;
     }
   }
   if (parent) {
-    log.warn({ crateId: crate.rootId, cycle: [...seen, parent], topCollection: top }, 'Collections are members of each other; using the highest found');
+    log.warn(
+      { crateId: crate.rootId, cycle: [...seen, parent], topCollection: chain.at(-1) },
+      'Collections are members of each other; using the highest found',
+    );
   }
-  return top;
+  return chain;
 }
 
 /** The size of each file the object holds, by its path; a file that can't be read fails */
@@ -80,7 +86,7 @@ export async function openCrate(repository: StorageRoot, crateId: string) {
     async read() {
       const crate = await ROCrate.create(await readCrateJson(object));
       const sizes = await heldFiles(object);
-      return { crate, heldFiles: sizes, readText: textReader(object, sizes), topCollection: await topCollection(repository, crate) };
+      return { crate, heldFiles: sizes, readText: textReader(object, sizes), parentCrates: await parentCrates(repository, crate) };
     },
   };
 }

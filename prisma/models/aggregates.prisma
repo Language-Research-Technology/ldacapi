@@ -1,0 +1,16 @@
+/// What one crate adds to Oni's aggregates for one entity: counts below it, and values at or below it. The API sums an entity's rows across crates
+model Aggregate {
+  entityId          String
+  crateId           String
+  collections       Int
+  objects           Int
+  subCollections    Int
+  files             Int
+  language          String[]
+  communicationMode String[]
+  mediaType         String[]
+
+  @@id([entityId, crateId])
+  @@index([crateId])
+  @@map("aggregate")
+}

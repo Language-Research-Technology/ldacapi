@@ -9,6 +9,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { config } from '../configuration.ts';
 import { importCrates } from '../crates-import.ts';
 import { PrismaClient } from '../generated/prisma/client.ts';
+import { aggregatesOf } from '../oni.ts';
 import { openOrCreateRepository } from '../repository/repository.ts';
 import { type GenerateOptions, generateCollection } from './generate.ts';
 
@@ -89,7 +90,46 @@ async function freshIndexes() {
     }
   };
 
-  return { databaseUrl, entityIndex, count, drop };
+  const aggregatesRead = async () => {
+    const prisma = prismaFor(databaseUrl);
+    try {
+      return await timeAggregatesRead(prisma);
+    } finally {
+      await prisma.$disconnect();
+    }
+  };
+
+  return { databaseUrl, entityIndex, count, aggregatesRead, drop };
+}
+
+/** Reads of the page measured, after one to warm up */
+const READS = 21;
+
+const median = (values: number[]) => values.toSorted((a, b) => a - b)[Math.floor(values.length / 2)] as number;
+
+/**
+ * How long a page of 100 entity rows takes to read with and without their aggregates, as Oni's entity transformer reads
+ * them, in milliseconds (the median of `READS`). The page starts at the top collection, which has the most aggregate rows
+ */
+async function timeAggregatesRead(prisma: PrismaClient) {
+  const ids = (await prisma.entity.findMany({ select: { id: true }, orderBy: { id: 'asc' }, take: 100 })).map(({ id }) => id);
+  const page = () => prisma.entity.findMany({ where: { id: { in: ids } } });
+  const timed = async (read: () => Promise<unknown>) => {
+    await read();
+    const times: number[] = [];
+    for (let i = 0; i < READS; i++) {
+      const started = performance.now();
+      await read();
+      times.push(performance.now() - started);
+    }
+    return median(times);
+  };
+  const without = await timed(page);
+  const withAggregates = await timed(async () => {
+    await page();
+    await aggregatesOf(prisma, ids);
+  });
+  return { without, with: withAggregates };
 }
 
 /** Runs `args` under node, returning its wall-clock time and peak resident memory */
@@ -133,7 +173,7 @@ export async function runBenchmark(repository: BenchmarkRepository, args = INDEX
       LOG_LEVEL: 'info',
     };
     const measured = await measure(args, env, logFile);
-    return { ...measured, ...(await indexes.count()), logFile };
+    return { ...measured, ...(await indexes.count()), aggregatesRead: await indexes.aggregatesRead(), logFile };
   } finally {
     await indexes.drop();
   }
@@ -141,17 +181,25 @@ export async function runBenchmark(repository: BenchmarkRepository, args = INDEX
 
 export type BenchmarkResult = Awaited<ReturnType<typeof runBenchmark>>;
 
-/** The target: the largest collection indexed in under 10 minutes, with the indexing process under 1 GB */
-const TARGET = { seconds: 600, peakMemoryBytes: 1024 ** 3 };
+/**
+ * The targets: the largest collection indexed in under 10 minutes, with the indexing process under 1 GB; a page of
+ * entities at most 50 ms slower to read with aggregates
+ */
+const TARGET = { seconds: 600, peakMemoryBytes: 1024 ** 3, aggregatesReadMilliseconds: 50 };
 
 /** One line on a shape's run, and whether it met the target */
 export function report(shape: string, repository: BenchmarkRepository, result: BenchmarkResult) {
   const n = (value: number) => value.toLocaleString('en-AU');
   const met = result.seconds < TARGET.seconds && result.peakMemoryBytes < TARGET.peakMemoryBytes;
+  const read = result.aggregatesRead;
+  const slower = read.with - read.without;
+  const ms = (value: number) => `${value.toFixed(1)} ms`;
   return [
     `${shape}: ${n(repository.crates)} ${repository.crates === 1 ? 'crate' : 'crates'}, ${n(repository.entities)} entities`,
     `indexed ${n(result.rows)} rows and ${n(result.documents)} search documents`,
     `in ${result.seconds.toFixed(1)} s, peak memory ${n(Math.round(result.peakMemoryBytes / 1024 ** 2))} MB`,
     `(target under 10 minutes and 1 GB: ${met ? 'met' : 'missed'})`,
+    `a page of 100 entities read in ${ms(read.without)} without aggregates and ${ms(read.with)} with, ${ms(slower)} slower`,
+    `(target at most 50 ms slower: ${slower <= TARGET.aggregatesReadMilliseconds ? 'met' : 'missed'})`,
   ].join('; ');
 }

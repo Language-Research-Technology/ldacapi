@@ -10,7 +10,7 @@ const RESTRICTED = 'https://example.org/licenses/restricted';
 const SPOKEN = 'https://w3id.org/ldac/terms#SpokenLanguage';
 
 const facts: DeriveFacts = {
-  topCollection: ROOT,
+  parentCrates: [],
   defaultLicense: '',
   defaultMetadataLicense: '',
   isOpenLicence: (id) => id === CC_BY,
@@ -163,7 +163,7 @@ describe('derivation', () => {
     ]);
 
     it('is the top collection found from the parent crates, for collections, objects and files', async () => {
-      const derivation = await derived(built, { topCollection: TOP });
+      const derivation = await derived(built, { parentCrates: [TOP] });
 
       for (const id of [ROOT, `${ROOT}/object`, `${ROOT}/a.txt`]) {
         const { row, document } = derivation.entities.find((entity) => entity.row.id === id) ?? {};
@@ -172,14 +172,14 @@ describe('derivation', () => {
     });
 
     it('is null for the top collection itself', async () => {
-      const { row, document } = await entityOf(built, ROOT, { topCollection: ROOT });
+      const { row, document } = await entityOf(built, ROOT, { parentCrates: [] });
 
       expect(row.rootCollection).toBeNull();
       expect(document).not.toHaveProperty('rootCollection');
     });
 
     it('is null for people, organisations and software', async () => {
-      const derivation = await derived(built, { topCollection: TOP });
+      const derivation = await derived(built, { parentCrates: [TOP] });
 
       const unplaced = derivation.entities.filter(({ row }) => ['#alice', '#acme', '#tool'].some((id) => row.id === `${ROOT}/${id}`));
       expect(unplaced.map(({ row }) => row.rootCollection)).toEqual([null, null, null]);
@@ -381,6 +381,98 @@ describe('derivation', () => {
       const built = crate(collection(ROOT), [fileDescribedButNotHeld('held.wav')]);
 
       expect((await derived(built, { heldFiles: new Map([['held.wav', 10]]) })).warnings).toEqual([]);
+    });
+  });
+
+  describe('rule 13, aggregates contribution', () => {
+    const NOTHING = { collections: 0, objects: 0, subCollections: 0, files: 0, language: [], communicationMode: [], mediaType: [] };
+
+    /** The crate's aggregates by entity id */
+    const aggregates = async (built: Crate, given: Partial<DeriveFacts> = {}) =>
+      Object.fromEntries((await derived(built, given)).aggregates.map(({ entityId, ...aggregate }) => [entityId, aggregate]));
+
+    it('counts the collections, objects, direct sub-collections and files below each entity, not the entity itself', async () => {
+      const built = crate(collection(ROOT, { hasMember: [`${ROOT}/sub`, `${ROOT}/loose`] }), [
+        collection(`${ROOT}/sub`, { memberOf: ROOT }),
+        collection(`${ROOT}/sub/deeper`, { memberOf: `${ROOT}/sub` }),
+        object(`${ROOT}/sub/deeper/object`, { memberOf: `${ROOT}/sub/deeper`, hasPart: ['a.wav', 'b.wav'] }),
+        fileDescribedButNotHeld('a.wav', { isPartOf: `${ROOT}/sub/deeper/object` }),
+        fileDescribedButNotHeld('b.wav', { isPartOf: `${ROOT}/sub/deeper/object` }),
+        object(`${ROOT}/loose`, { memberOf: ROOT }),
+        fileDescribedButNotHeld('c.wav'),
+      ]);
+
+      const found = await aggregates(built, { heldFiles: new Map([['a.wav', 10]]) });
+
+      expect(found).toEqual({
+        [ROOT]: { ...NOTHING, collections: 2, objects: 2, subCollections: 1, files: 2 },
+        [`${ROOT}/sub`]: { ...NOTHING, collections: 1, objects: 1, subCollections: 1, files: 2 },
+        [`${ROOT}/sub/deeper`]: { ...NOTHING, objects: 1, files: 2 },
+        [`${ROOT}/sub/deeper/object`]: { ...NOTHING, files: 2 },
+        [`${ROOT}/a.wav`]: NOTHING,
+        [`${ROOT}/b.wav`]: NOTHING,
+        [`${ROOT}/loose`]: NOTHING,
+        [`${ROOT}/c.wav`]: NOTHING,
+      });
+    });
+
+    it('lists the languages, communication modes and media types at or below each entity, by their search facet labels', async () => {
+      const built = crate(collection(ROOT, { inLanguage: { '@id': '#greek' } }), [
+        thing('#english', 'Language', undefined, { name: 'English' }),
+        thing('#greek', 'Language', undefined, { name: 'Greek' }),
+        thing('#spoken', 'DefinedTerm', undefined, { name: 'Spoken' }),
+        object(`${ROOT}/object`, { memberOf: ROOT, inLanguage: { '@id': '#english' }, 'ldac:communicationMode': { '@id': '#spoken' } }),
+        fileDescribedButNotHeld('a.wav', { isPartOf: `${ROOT}/object`, encodingFormat: 'audio/wav', inLanguage: { '@id': '#english' } }),
+        fileDescribedButNotHeld('a.txt', { isPartOf: `${ROOT}/object`, encodingFormat: 'text/plain' }),
+      ]);
+
+      const found = await aggregates(built);
+
+      expect(found[ROOT]).toMatchObject({ language: ['English', 'Greek'], communicationMode: ['Spoken'], mediaType: ['audio/wav', 'text/plain'] });
+      expect(found[`${ROOT}/object`]).toMatchObject({ language: ['English'], communicationMode: ['Spoken'], mediaType: ['audio/wav', 'text/plain'] });
+      expect(found[`${ROOT}/a.wav`]).toMatchObject({ language: ['English'], communicationMode: [], mediaType: ['audio/wav'] });
+    });
+
+    it('adds the crate to each ancestor in its parent crates', async () => {
+      const PARENT = 'arcp://name,parent';
+      const TOP = 'arcp://name,top';
+      const built = crate(collection(ROOT, { memberOf: PARENT, inLanguage: 'Greek' }), [
+        object(`${ROOT}/object`, { memberOf: ROOT, hasPart: ['a.wav'] }),
+        fileDescribedButNotHeld('a.wav', { isPartOf: `${ROOT}/object`, encodingFormat: 'audio/wav' }),
+      ]);
+
+      const found = await aggregates(built, { parentCrates: [PARENT, TOP] });
+
+      const below = { collections: 1, objects: 1, files: 1, language: ['Greek'], mediaType: ['audio/wav'] };
+      expect(found[PARENT]).toEqual({ ...NOTHING, ...below, subCollections: 1 });
+      expect(found[TOP]).toEqual({ ...NOTHING, ...below });
+    });
+
+    it('adds to the collection the crate’s root is a member of, even when its crate can’t be read', async () => {
+      const built = crate(collection(ROOT, { memberOf: 'arcp://name,unreadable' }));
+
+      expect(await aggregates(built)).toEqual({ [ROOT]: NOTHING, 'arcp://name,unreadable': { ...NOTHING, collections: 1, subCollections: 1 } });
+    });
+
+    it('gives people, organisations and software nothing, which reads as zero counts and empty lists', async () => {
+      const built = crate(collection(ROOT, { author: { '@id': '#alice' } }), [
+        person('#alice', { inLanguage: 'English' }),
+        thing('#acme', 'Organization', 'Organization'),
+        thing('#tool', 'SoftwareApplication', 'SoftwareApplication'),
+      ]);
+
+      expect(await aggregates(built)).toEqual({ [ROOT]: NOTHING });
+    });
+
+    it('stops at a cycle of members', async () => {
+      const built = crate(collection(ROOT), [collection(`${ROOT}/a`, { memberOf: `${ROOT}/b` }), collection(`${ROOT}/b`, { memberOf: `${ROOT}/a` })]);
+
+      const found = await aggregates(built);
+
+      expect([found[`${ROOT}/a`], found[`${ROOT}/b`]]).toEqual([
+        { ...NOTHING, collections: 1, subCollections: 1 },
+        { ...NOTHING, collections: 1, subCollections: 1 },
+      ]);
     });
   });
 

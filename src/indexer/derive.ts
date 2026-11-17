@@ -7,8 +7,8 @@ import type { Document } from '../search-backend.ts';
 
 /** What derivation needs besides the crate, looked up beforehand */
 export type DeriveFacts = {
-  /** The top-level collection the crate sits under, found from its parent crates; the crate's own root if it has none */
-  topCollection: string;
+  /** The collections above the crate's root, each a parent crate's root, nearest first: the last is its top collection */
+  parentCrates: readonly string[];
   defaultLicense: string;
   defaultMetadataLicense: string;
   isOpenLicence: (licenseId: string) => boolean;
@@ -49,10 +49,23 @@ export type DerivedEntity = {
 /** Something odd in the crate that doesn't stop it being indexed */
 type Warning = { msg: string } & Record<string, unknown>;
 
+/** What the crate adds to Oni's aggregates for one entity: what is below it, and the values at or below it */
+type Aggregate = {
+  entityId: string;
+  collections: number;
+  objects: number;
+  subCollections: number;
+  files: number;
+  language: string[];
+  communicationMode: string[];
+  mediaType: string[];
+};
+
 export type Derivation = {
   crateId: string;
   name: string | null;
   entities: DerivedEntity[];
+  aggregates: Aggregate[];
   warnings: Warning[];
 };
 
@@ -261,9 +274,11 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
     return crateLicense;
   };
 
+  const topCollection = facts.parentCrates.at(-1) ?? crateId;
   const warnings: Warning[] = [];
   const entities: DerivedEntity[] = [];
   const prefix = `${crateId}/`;
+  const placed: Placed[] = [];
   let notHeld = 0;
   for (const [id, entity] of byId) {
     const type = recordType(entity);
@@ -275,13 +290,19 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
       warnings.push({ msg: 'Several candidate parents; using the first', entityId: id, parents });
     }
     const memberOf = parents[0] ?? null;
-    const rootCollection = UNPLACED.has(type) || id === facts.topCollection ? null : facts.topCollection;
+    const rootCollection = UNPLACED.has(type) || id === topCollection ? null : topCollection;
     const contentLicenseId = contentLicense(entity);
     const accessControl: AccessControl = facts.isOpenLicence(contentLicenseId) ? 'Public' : 'AuthorizationByApplication';
     const entityType: string = crate.getContextDefinition(type) || PROFILES[type];
     const name = entity.name?.join('; ') || id;
     const [datePublished] = dates(entity, 'datePublished');
     const point = location(entity);
+    const language = labels(entity, 'inLanguage');
+    const communicationMode = labels(entity, 'ldac:communicationMode');
+    const mediaType = labels(entity, 'encodingFormat');
+    if (!UNPLACED.has(type)) {
+      placed.push({ id, counted: COUNTED[type] as Counted, memberOf, values: { language, communicationMode, mediaType } });
+    }
     const cratePath = (id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length))) || undefined;
     const heldSize = cratePath === undefined ? undefined : facts.heldFiles.get(cratePath);
     const path = heldSize === undefined ? undefined : cratePath;
@@ -316,11 +337,11 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
         description: labels(entity, 'description'),
         entityType,
         recordType: classLabel(entityType),
-        inLanguage: labels(entity, 'inLanguage'),
-        communicationMode: labels(entity, 'ldac:communicationMode'),
+        inLanguage: language,
+        communicationMode,
         linguisticGenre: labels(entity, 'ldac:linguisticGenre'),
         annotationType: labels(entity, 'ldac:annotationType'),
-        encodingFormat: labels(entity, 'encodingFormat'),
+        encodingFormat: mediaType,
         ...(rootCollection && { rootCollection }),
         ...(memberOf && { memberOf }),
         license: contentLicenseId,
@@ -335,5 +356,65 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   if (notHeld > 0) {
     warnings.push({ msg: 'Files described but not held', count: notHeld });
   }
-  return { crateId, name: firstStringOrId(crate.root.name) ?? null, entities, warnings };
+  return { crateId, name: firstStringOrId(crate.root.name) ?? null, entities, aggregates: aggregates(placed, facts.parentCrates), warnings };
+}
+
+type Counted = 'collections' | 'objects' | 'files';
+
+type Listed = 'language' | 'communicationMode' | 'mediaType';
+
+const COUNTED: Record<string, Counted> = { RepositoryCollection: 'collections', RepositoryObject: 'objects', File: 'files' };
+
+/** A collection, object or file, as aggregates need it */
+type Placed = { id: string; counted: Counted; memberOf: string | null; values: Record<Listed, string[]> };
+
+type Totals = { counts: Record<Counted | 'subCollections', number>; lists: Record<Listed, Set<string>> };
+
+/**
+ * What the crate adds below each of its collections, objects and files, and below the ancestors it names outside
+ * itself, following each entity's parent up through the parent crates
+ */
+function aggregates(placed: Placed[], parentCrates: readonly string[]): Aggregate[] {
+  const parents = new Map<string, string | null>(parentCrates.map((id, i) => [id, parentCrates[i + 1] ?? null]));
+  for (const { id, memberOf } of placed) {
+    parents.set(id, memberOf);
+  }
+  const totals = new Map<string, Totals>();
+  const totalsOf = (id: string) => {
+    let found = totals.get(id);
+    if (!found) {
+      found = {
+        counts: { collections: 0, objects: 0, subCollections: 0, files: 0 },
+        lists: { language: new Set(), communicationMode: new Set(), mediaType: new Set() },
+      };
+      totals.set(id, found);
+    }
+    return found;
+  };
+  for (const { id, counted, memberOf, values } of placed) {
+    const seen = new Set<string>();
+    for (let at: string | null | undefined = id; at && !seen.has(at); at = parents.get(at)) {
+      seen.add(at);
+      const { counts, lists } = totalsOf(at);
+      if (at !== id) {
+        counts[counted]++;
+        if (counted === 'collections' && at === memberOf) {
+          counts.subCollections++;
+        }
+      }
+      for (const listed of ['language', 'communicationMode', 'mediaType'] as const) {
+        for (const value of values[listed]) {
+          lists[listed].add(value);
+        }
+      }
+    }
+  }
+  const sorted = (values: Set<string>) => [...values].sort();
+  return [...totals].map(([entityId, { counts, lists }]) => ({
+    entityId,
+    ...counts,
+    language: sorted(lists.language),
+    communicationMode: sorted(lists.communicationMode),
+    mediaType: sorted(lists.mediaType),
+  }));
 }

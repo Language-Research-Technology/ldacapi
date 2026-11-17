@@ -2,51 +2,55 @@ import type { AuthorisedEntity, EntityTransformer } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
 import type { AccessControl } from './access/access-control.ts';
 import { accessControlOf } from './entity-meta.ts';
+import type { PrismaClient } from './generated/prisma/client.ts';
 import { prisma } from './prisma.ts';
-
-export const COLLECTION = 'http://pcdm.org/models#Collection';
-export const OBJECT = 'http://pcdm.org/models#Object';
 
 type Counts = { collections: number; objects: number; subCollections: number; files: number };
 
-type OniEntity = AuthorisedEntity & { counts: Counts; accessControl?: AccessControl };
+/** Oni's aggregates of an entity: what is below it, and the values at or below it */
+type Aggregates = { counts: Counts; language: string[]; communicationMode: string[]; mediaType: string[] };
 
-const NONE: Counts = { collections: 0, objects: 0, subCollections: 0, files: 0 };
+type OniEntity = AuthorisedEntity & Aggregates & { accessControl?: AccessControl };
 
-/** What is under each of `ids` by `memberOf`, which crosses into the crates of distributed collections */
-const countsUnder = async (ids: string[]) => {
-  const rows = await prisma.$queryRaw<(Counts & { anchor: string })[]>`
-    WITH RECURSIVE under AS (
-      SELECT "memberOf" AS anchor, id, "entityType", "memberOf" FROM entity WHERE "memberOf" = ANY(${ids})
-      UNION
-      SELECT u.anchor, e.id, e."entityType", e."memberOf" FROM entity e JOIN under u ON e."memberOf" = u.id
-    )
-    SELECT
-      anchor,
-      (count(*) FILTER (WHERE u."entityType" = ${COLLECTION}))::int AS collections,
-      (count(*) FILTER (WHERE u."entityType" = ${OBJECT}))::int AS objects,
-      (count(*) FILTER (WHERE u."entityType" = ${COLLECTION} AND u."memberOf" = u.anchor))::int AS "subCollections",
-      count(f.id)::int AS files
-    FROM under u LEFT JOIN file f ON f.id = u.id
-    GROUP BY anchor`;
-  return new Map(rows.map(({ anchor, ...counts }) => [anchor, counts]));
-};
+const none = (): Aggregates => ({ counts: { collections: 0, objects: 0, subCollections: 0, files: 0 }, language: [], communicationMode: [], mediaType: [] });
 
-const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Counts>>>();
+const union = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort();
 
-/** Counts for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
-const countsOf = (request: FastifyRequest, id: string) => {
+/** The aggregates of each of `ids`, summing what each crate adds, in one query */
+export async function aggregatesOf(db: Pick<PrismaClient, 'aggregate'>, ids: string[]) {
+  const found = new Map<string, Aggregates>();
+  for (const row of await db.aggregate.findMany({ where: { entityId: { in: ids } } })) {
+    const sum = found.get(row.entityId) ?? none();
+    found.set(row.entityId, {
+      counts: {
+        collections: sum.counts.collections + row.collections,
+        objects: sum.counts.objects + row.objects,
+        subCollections: sum.counts.subCollections + row.subCollections,
+        files: sum.counts.files + row.files,
+      },
+      language: union(sum.language, row.language),
+      communicationMode: union(sum.communicationMode, row.communicationMode),
+      mediaType: union(sum.mediaType, row.mediaType),
+    });
+  }
+  return found;
+}
+
+const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Aggregates>>>();
+
+/** Aggregates for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
+const aggregatesFor = (request: FastifyRequest, id: string) => {
   let batch = batches.get(request);
   if (!batch) {
-    const current = new Map<string, PromiseWithResolvers<Counts>>();
+    const current = new Map<string, PromiseWithResolvers<Aggregates>>();
     batch = current;
     batches.set(request, current);
     queueMicrotask(() => {
       batches.delete(request);
-      countsUnder([...current.keys()]).then(
-        (counts) => {
+      aggregatesOf(prisma, [...current.keys()]).then(
+        (found) => {
           for (const [id, { resolve }] of current) {
-            resolve(counts.get(id) ?? NONE);
+            resolve(found.get(id) ?? none());
           }
         },
         (error: unknown) => {
@@ -57,16 +61,16 @@ const countsOf = (request: FastifyRequest, id: string) => {
       );
     });
   }
-  let counts = batch.get(id);
-  if (!counts) {
-    counts = Promise.withResolvers<Counts>();
-    batch.set(id, counts);
+  let aggregates = batch.get(id);
+  if (!aggregates) {
+    aggregates = Promise.withResolvers<Aggregates>();
+    batch.set(id, aggregates);
   }
-  return counts.promise;
+  return aggregates.promise;
 };
 
 /** The fields Oni expects on every entity beyond the spec's: https://github.com/crate-works/oni/blob/main/docs/api-extensions.md */
 export const oniEntityTransformer: EntityTransformer<AuthorisedEntity, OniEntity> = async (entity, { request }, { meta }) => {
   const accessControl = accessControlOf(meta);
-  return { ...entity, ...(accessControl && { accessControl }), counts: await countsOf(request, entity.id) };
+  return { ...entity, ...(accessControl && { accessControl }), ...(await aggregatesFor(request, entity.id)) };
 };
