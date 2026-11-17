@@ -75,6 +75,7 @@ jobs:
           DATABASE_URL=postgresql://ldacapi:ldacapi@localhost:5432/ldacapi
           OPENSEARCH_URL=http://localhost:9200
           OCFL_ROOT=/storage/ocfl
+          OPEN_LICENSES=https://creativecommons.org/licenses/by/4.0/
           ENV
           run=(--network host --env-file "$env_file" -v "$storage:/storage")
           docker run --rm "${run[@]}" -v "$PWD/test-data:/app/test-data:ro" "$IMAGE" pnpm bootstrap

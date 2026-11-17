@@ -1,6 +1,7 @@
 import type { OcflStorageMeta } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
-import { accessControlFor, type EntityMeta } from '../entity-meta.ts';
+import { accessControlFor } from '../access/access-control.ts';
+import type { EntityMeta } from '../entity-meta.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { prisma } from '../prisma.ts';

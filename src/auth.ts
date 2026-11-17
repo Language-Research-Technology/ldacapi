@@ -1,8 +1,8 @@
 import { type IsAuthenticated, LicenceAccess, type RequestContext } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
 import { createLocalJWKSet, errors, jwtVerify } from 'jose';
+import { isOpenLicence } from './access/licences.ts';
 import { config } from './configuration.ts';
-import { isOpenLicence } from './licences.ts';
 import { publicJwks, SIGNING_ALG } from './oidc/keys.ts';
 
 type RemsUserEntitlement = {

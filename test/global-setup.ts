@@ -3,7 +3,6 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { Client } from '@opensearch-project/opensearch';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { loadConfig } from '../src/configuration.ts';
 import { PrismaClient } from '../src/generated/prisma/client.ts';
 
 // Each run gets its own database and index so runs never share or destroy each other's data
@@ -13,6 +12,9 @@ export default async function setup() {
     execFileSync('pnpm', ['build'], { stdio: 'ignore' });
   }
 
+  process.env.OPEN_LICENSES = 'https://creativecommons.org/licenses/by/4.0/';
+  // Configuration is read on import, so only once the environment is complete
+  const { loadConfig } = await import('../src/configuration.ts');
   const config = loadConfig({ ...process.env, NODE_ENV: 'test' });
   const suffix = `${process.pid}_${randomBytes(3).toString('hex')}`;
 

@@ -1,4 +1,4 @@
-import { config } from './configuration.ts';
+import { config } from '../configuration.ts';
 
 const openLicenses = new Set(config.openLicenses);
 

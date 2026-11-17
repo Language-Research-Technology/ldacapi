@@ -1,6 +1,7 @@
 import type { AuthorisedEntity, EntityTransformer } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
-import { type AccessControl, accessControlOf } from './entity-meta.ts';
+import type { AccessControl } from './access/access-control.ts';
+import { accessControlOf } from './entity-meta.ts';
 import { prisma } from './prisma.ts';
 
 export const COLLECTION = 'http://pcdm.org/models#Collection';

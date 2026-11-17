@@ -81,9 +81,10 @@ pnpm dev
 | Upstream   | <http://localhost:8090/default>                       |
 | Postgres   | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 
-No configuration is needed for development, but sign-in is off until you
-copy `.env.example` to `.env` (see [Local sign-in](#local-sign-in)). To
-override a default, set it in `.env`.
+Copy `.env.example` to `.env` before starting the API: it sets
+`OPEN_LICENSES`, which is required (see [Licences](#licences)), and turns
+sign-in on (see [Local sign-in](#local-sign-in)). To override a default, set
+it in `.env`.
 
 ## Scripts
 
@@ -131,6 +132,7 @@ set.
 | `LDACAPI_MAX_PARAM_LENGTH`                                 | `500`                                                 |
 | `LOG_LEVEL`                                                | `debug` in development, otherwise `info`              |
 | `ENTITY_INDEX`                                             | `entities`                                            |
+| `OPEN_LICENSES`                                            | none; always required                                 |
 | `DEFAULT_LICENSE`, `DEFAULT_METADATA_LICENSE`              | none                                                  |
 | `REMS_USER`, `REMS_KEY`, `REMS_ENDPOINT`, `ENROLLMENT_URL` | none                                                  |
 | `OIDC_UPSTREAM_ISSUER`                                     | none (sign-in is off)                                 |
@@ -141,7 +143,8 @@ set.
 | `ADMIN_ORIGIN`                                             | `http://admin.localhost:8080` outside production      |
 | `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
-With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
+`OPEN_LICENSES` must always be set (see [Licences](#licences)). With
+`NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT` also
 have no defaults and must be set.
 
 ### Licences
@@ -154,8 +157,19 @@ The indexer takes the metadata licence from the `license` of
 `ro-crate-metadata.json`, and the content licence from the entity's own
 `license` or else the root dataset's.
 
-A licence that isn't one of the open licences in `src/configuration.ts` needs
-an entitlement to it in REMS, looked up at `REMS_ENDPOINT` with `REMS_USER`
+`OPEN_LICENSES` lists the open licences, comma-separated: anyone may read
+what they cover, signed in or not, and the indexer labels entities under them
+`Public` for Oni (`AuthorizationByApplication` otherwise). The API refuses to
+start without it. `.env.example` lists four Creative Commons licences:
+
+```dotenv
+OPEN_LICENSES=https://creativecommons.org/licenses/by/3.0/au/,https://creativecommons.org/licenses/by/4.0/,https://creativecommons.org/licenses/by-nc/4.0/,https://creativecommons.org/licenses/by-nd/3.0/au/
+```
+
+The request-time check follows a change to the list at once, but stored labels
+only catch up when the crate is reindexed.
+
+Any other licence needs an entitlement to it in REMS, looked up at `REMS_ENDPOINT` with `REMS_USER`
 and `REMS_KEY`, once per request. If REMS can't be reached or returns an
 error, the API logs it and treats the user as holding no licences, so
 restricted entities are refused until it recovers.
@@ -416,7 +430,7 @@ Copy `deploy/` to the host, then, in it:
 ```sh
 sudo install -d -o 1000 -g 1000 data/opensearch
 cp .env.example .env                  # DOMAIN, ADMIN_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, STORAGE_DIR
-cp ldacapi.env.example ldacapi.env    # sign-in, admins and the API's other settings
+cp ldacapi.env.example ldacapi.env    # sign-in, admins, open licences and the API's other settings
 chmod 600 .env ldacapi.env
 docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
 docker compose run --rm api pnpm db:deploy     # create the database's tables
