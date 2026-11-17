@@ -2,12 +2,13 @@ import { writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ocflTestbed } from '../test/app.ts';
+import { ocflTestbed } from './app.ts';
+import { collection, crate } from './crate-builder.ts';
 
 const PEOPLE = 'arcp://name,people';
 const BUNDLED = 'arcp://name,bundled';
 
-const testbed = ocflTestbed();
+const testbed = ocflTestbed(crate(collection(PEOPLE)), crate(collection(BUNDLED)));
 
 describe('a crate whose OCFL object is damaged', () => {
   beforeAll(async () => {

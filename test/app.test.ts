@@ -1,10 +1,10 @@
 import { Client } from '@opensearch-project/opensearch';
 import { describe, expect, it } from 'vitest';
 import pkg from '../package.json' with { type: 'json' };
-import { buildTestApp, repository, repositoryWithContent } from '../test/app.ts';
-import { buildApp } from './app.ts';
-import { config } from './configuration.ts';
-import { createSearchBackend } from './indexer/search.ts';
+import { buildApp } from '../src/app.ts';
+import { config } from '../src/configuration.ts';
+import { createSearchBackend } from '../src/indexer/search.ts';
+import { buildTestApp, repository, repositoryWithContent } from './app.ts';
 
 const search = createSearchBackend(new Client({ node: config.opensearchUrl }));
 

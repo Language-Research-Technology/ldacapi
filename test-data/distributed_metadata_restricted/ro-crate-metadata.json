@@ -99,7 +99,7 @@
       "spatialCoverage": {
         "@id": "#place_A-QLD"
       },
-      "indexableText": [
+      "ldac:indexableText": [
         {
           "@id": "data.txt"
         }

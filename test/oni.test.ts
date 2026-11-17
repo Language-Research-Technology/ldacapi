@@ -1,11 +1,11 @@
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { repository } from '../test/app.ts';
-import { buildApp } from './app.ts';
-import { config } from './configuration.ts';
-import { createSearchBackend } from './indexer/search.ts';
-import { COLLECTION, OBJECT } from './oni.ts';
-import { prisma } from './prisma.ts';
+import { buildApp } from '../src/app.ts';
+import { config } from '../src/configuration.ts';
+import { createSearchBackend } from '../src/indexer/search.ts';
+import { COLLECTION, OBJECT } from '../src/oni.ts';
+import { prisma } from '../src/prisma.ts';
+import { repository } from './app.ts';
 
 const MEDIA = 'http://schema.org/MediaObject';
 const PERSON = 'http://schema.org/Person';

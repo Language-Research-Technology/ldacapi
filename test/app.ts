@@ -7,6 +7,7 @@ import type { Client } from '@opensearch-project/opensearch';
 import { afterAll, beforeAll, expect, vi } from 'vitest';
 import type { createSearchBackend } from '../src/indexer/search.ts';
 import { initRepository, type Repository } from '../src/repository.ts';
+import { type Crate, writeCrates } from './crate-builder.ts';
 
 type RepositoryDeps = { opensearchClient: Client; search: ReturnType<typeof createSearchBackend> };
 
@@ -56,16 +57,19 @@ export const buildTestApp = async (env: Record<string, string>, options: { repos
 export type TestApp = Awaited<ReturnType<typeof buildTestApp>>['app'];
 
 /**
- * A new OCFL repository for a file's tests, imported from the directory `source` returns (test-data by default),
- * which it may create under the scratch directory it is given
+ * A new OCFL repository for a file's tests, holding `crates`, or else imported from the directory `source` returns
+ * (test-data by default), which it may create under the scratch directory it is given
  */
-export const ocflStorage = ({ source }: { source?: (scratch: string) => Promise<string> } = {}) => {
+export const ocflStorage = ({ crates, source }: { crates?: Crate[]; source?: (scratch: string) => Promise<string> } = {}) => {
   let storage: string;
   const ocflRoot = () => join(storage, 'ocfl');
 
   beforeAll(async () => {
     storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
-    const sources = source ? [await source(storage)] : [];
+    const sources = crates ? [join(storage, 'crates')] : source ? [await source(storage)] : [];
+    if (crates) {
+      await writeCrates(join(storage, 'crates'), crates);
+    }
     execFileSync('node', ['scripts/crates-import.ts', ...sources], { env: { ...process.env, OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' }, stdio: 'ignore' });
   });
 
@@ -77,8 +81,8 @@ export const ocflStorage = ({ source }: { source?: (scratch: string) => Promise<
 };
 
 /** The app over a new OCFL repository (see `ocflStorage`), its indexes deleted after the file's tests */
-export const ocflTestbed = (options: Parameters<typeof ocflStorage>[0] = {}) => {
-  const { ocflRoot } = ocflStorage(options);
+export const ocflTestbed = (...crates: Crate[]) => {
+  const { ocflRoot } = ocflStorage({ crates });
   let started: Awaited<ReturnType<typeof buildTestApp>>;
 
   beforeAll(async () => {

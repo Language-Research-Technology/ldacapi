@@ -62,7 +62,7 @@
       "spatialCoverage": {
         "@id": "#place_A-QLD"
       },
-      "indexableText": [
+      "ldac:indexableText": [
         {
           "@id": "data.txt"
         }
@@ -131,7 +131,7 @@
       "inLanguage": {
         "@id": "https://glottolog.org/resource/languoid/id/stan1293"
       },
-      "hasPart": [{ "@id": "sub_col_2.txt" }, { "@id": "arcp://name,bundled/ch2/facts" }]
+      "hasPart": [{ "@id": "arcp://name,bundled/ch2/facts" }]
     },
     {
       "@id": "https://creativecommons.org/licenses/by/4.0/",
@@ -222,7 +222,7 @@
         "@id": "https://orcid.org/0001"
       },
       "citation": "Journal of the Ancient, 2000",
-      "communicationMode": {
+      "ldac:communicationMode": {
         "@id": "https://w3id.org/ldac/terms#WrittenLanguage"
       },
       "conformsTo": {
@@ -240,7 +240,7 @@
           "@id": "non_existent_file.txt"
         }
       ],
-      "indexableText": {
+      "ldac:indexableText": {
         "@id": "intro.txt"
       },
       "inLanguage": {
@@ -257,7 +257,7 @@
       "author": {
         "@id": "https://orcid.org/0002"
       },
-      "communicationMode": {
+      "ldac:communicationMode": {
         "@id": "https://w3id.org/ldac/terms#WrittenLanguage"
       },
       "conformsTo": {
@@ -281,7 +281,7 @@
       "author": {
         "@id": "https://orcid.org/0002"
       },
-      "communicationMode": {
+      "ldac:communicationMode": {
         "@id": "https://w3id.org/ldac/terms#WrittenLanguage"
       },
       "conformsTo": {
@@ -322,15 +322,6 @@
       "@type": "File",
       "description": "Test if file does not exist",
       "name": "non_existent_file"
-    },
-    {
-      "@id": "sub_col_2.txt",
-      "@type": "File",
-      "description": "Test sub collection 1",
-      "name": "sub_col_2",
-      "license": {
-        "@id": "https://www.ldaca.edu.au/licenses/gcsae/transcripts/v1/"
-      }
     },
     {
       "@id": "media/intro.mpeg",

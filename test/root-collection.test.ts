@@ -1,12 +1,21 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ocflTestbed } from '../test/app.ts';
+import { ocflTestbed } from './app.ts';
+import { collection, crate, object } from './crate-builder.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 const ROOT = 'arcp://name,distributed_root';
 const CONTENT = 'arcp://name,distributed_content_restricted';
 const METADATA = 'arcp://name,distributed_metadata_restricted';
 
-const testbed = ocflTestbed();
+/** A collection crate that is a member of the distributed collection, holding one object */
+const memberCrate = (id: string) => crate(collection(id, { memberOf: ROOT, hasMember: [`${id}/main`] }), [object(`${id}/main`)]);
+
+const testbed = ocflTestbed(
+  crate(collection(ROOT)),
+  memberCrate(CONTENT),
+  memberCrate(METADATA),
+  crate(collection(BUNDLED, { hasMember: [`${BUNDLED}/ch1`] }), [collection(`${BUNDLED}/ch1`)]),
+);
 
 const rootCollectionOf = async (id: string) => {
   const { app, config } = testbed.started;

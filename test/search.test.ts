@@ -1,16 +1,22 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { ocflTestbed } from '../test/app.ts';
+import { ocflTestbed } from './app.ts';
+import { collection, crate, file, object } from './crate-builder.ts';
 
 const OBJECT = 'http://pcdm.org/models#Object';
 const MEDIA = 'http://schema.org/MediaObject';
-const BUNDLED = 'arcp://name,bundled';
+const ROOT = 'arcp://name,search';
 
-const testbed = ocflTestbed();
+const testbed = ocflTestbed(
+  crate(collection(ROOT), [
+    object(`${ROOT}/object`, { memberOf: ROOT, hasPart: ['data.txt'] }),
+    file('data.txt', { content: 'Some text', encodingFormat: 'text/plain', isPartOf: `${ROOT}/object` }),
+  ]),
+);
 const { search } = testbed;
 
 beforeAll(async () => {
   await testbed.started.repository.deleteIndex();
-  await testbed.started.repository.createIndex(BUNDLED);
+  await testbed.started.repository.createIndex(ROOT);
 });
 
 describe('search by recordType and entityType', () => {

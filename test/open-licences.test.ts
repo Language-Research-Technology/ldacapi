@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildTestApp, ocflRepository, ocflStorage } from './app.ts';
+import { collection, crate, file } from './crate-builder.ts';
 
 const ROOT = 'arcp://name,open-licences';
 const OPEN = 'https://example.org/licenses/open-here';
@@ -10,32 +9,17 @@ const CLOSED = 'https://creativecommons.org/licenses/by/4.0/';
 const OPEN_FILE = `${ROOT}/open.txt`;
 const CLOSED_FILE = `${ROOT}/closed.txt`;
 
-const crate = {
-  '@context': ['https://w3id.org/ro/crate/1.1/context', 'https://w3id.org/ldac/context', { '@vocab': 'http://schema.org/' }],
-  '@graph': [
-    { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', license: { '@id': OPEN }, about: { '@id': ROOT } },
-    {
-      '@id': ROOT,
-      '@type': ['Dataset', 'RepositoryCollection'],
-      conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' },
-      name: 'open licences',
-      license: { '@id': OPEN },
-      hasPart: [{ '@id': 'open.txt' }, { '@id': 'closed.txt' }],
-    },
-    { '@id': 'open.txt', '@type': 'File', encodingFormat: 'text/plain' },
-    { '@id': 'closed.txt', '@type': 'File', encodingFormat: 'text/plain', license: { '@id': CLOSED } },
-  ],
-};
-
 const { ocflRoot } = ocflStorage({
-  source: async (scratch) => {
-    const source = join(scratch, 'crates', 'open-licences');
-    await mkdir(source, { recursive: true });
-    await writeFile(join(source, 'ro-crate-metadata.json'), JSON.stringify(crate));
-    await writeFile(join(source, 'open.txt'), 'open');
-    await writeFile(join(source, 'closed.txt'), 'closed');
-    return join(scratch, 'crates');
-  },
+  crates: [
+    crate(
+      collection(ROOT, { name: 'open licences', licence: OPEN, hasPart: ['open.txt', 'closed.txt'] }),
+      [
+        file('open.txt', { content: 'open', encodingFormat: 'text/plain' }),
+        file('closed.txt', { content: 'closed', encodingFormat: 'text/plain', licence: CLOSED }),
+      ],
+      { metadataLicence: OPEN },
+    ),
+  ],
 });
 
 let started: Awaited<ReturnType<typeof buildTestApp>>;

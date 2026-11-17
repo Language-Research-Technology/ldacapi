@@ -1,43 +1,21 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { ocflTestbed } from '../test/app.ts';
+import { ocflTestbed } from './app.ts';
+import { collection, crate, object } from './crate-builder.ts';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
-vi.mock('./logger.ts', async () => (await import('../test/logs.ts')).capturingLogger(logs, 'info'));
+vi.mock('../src/logger.ts', async () => (await import('./logs.ts')).capturingLogger(logs, 'info'));
 
 const ROOT = 'arcp://name,unwritable';
 const WRITTEN = `${ROOT}/written`;
 // Postgres can't store a NUL character, so this entity's row fails to be written
 const UNWRITTEN = `${ROOT}/unwritten`;
-const LICENSE = { '@id': 'https://creativecommons.org/licenses/by/4.0/' };
-const OBJECT = { '@id': 'https://w3id.org/ldac/profile#Object' };
-
-const crate = {
-  '@context': ['https://w3id.org/ro/crate/1.1/context', 'https://w3id.org/ldac/context', { '@vocab': 'http://schema.org/' }],
-  '@graph': [
-    { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', license: LICENSE, about: { '@id': ROOT } },
-    {
-      '@id': ROOT,
-      '@type': ['Dataset', 'RepositoryCollection'],
-      conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' },
-      name: 'Unwritable',
-      license: LICENSE,
-    },
-    { '@id': WRITTEN, '@type': 'RepositoryObject', conformsTo: OBJECT, memberOf: { '@id': ROOT }, name: 'Written' },
-    { '@id': UNWRITTEN, '@type': 'RepositoryObject', conformsTo: OBJECT, memberOf: { '@id': ROOT }, name: 'Unwritten\u0000' },
-  ],
-};
-
-const testbed = ocflTestbed({
-  source: async (scratch) => {
-    const source = join(scratch, 'crates');
-    await mkdir(join(source, 'unwritable'), { recursive: true });
-    await writeFile(join(source, 'unwritable', 'ro-crate-metadata.json'), JSON.stringify(crate));
-    return source;
-  },
-});
+const testbed = ocflTestbed(
+  crate(collection(ROOT, { name: 'Unwritable' }), [
+    object(WRITTEN, { memberOf: ROOT, name: 'Written' }),
+    object(UNWRITTEN, { memberOf: ROOT, name: 'Unwritten\u0000' }),
+  ]),
+);
 const { search } = testbed;
 
 beforeAll(async () => {

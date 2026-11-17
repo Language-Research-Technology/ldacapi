@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { generateKeyPair, importJWK, type JWTPayload, SignJWT } from 'jose';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildTestApp, repositoryWithContent, type TestApp } from '../test/app.ts';
-import { generateSigningKey, type Jwk } from './oidc/keys.ts';
+import { generateSigningKey, type Jwk } from '../src/oidc/keys.ts';
+import { buildTestApp, repositoryWithContent, type TestApp } from './app.ts';
 
 const ISSUER = 'http://localhost:8080';
 const AUDIENCE = `${ISSUER}/api`;
@@ -21,7 +21,7 @@ const RESTRICTED_ENTITY = 'http://test/licence/restricted';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
-vi.mock('./logger.ts', async () => (await import('../test/logs.ts')).capturingLogger(logs, 'error'));
+vi.mock('../src/logger.ts', async () => (await import('./logs.ts')).capturingLogger(logs, 'error'));
 
 let app: TestApp;
 let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
