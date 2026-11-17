@@ -83,14 +83,14 @@ async function indexCrate({ prisma, repository, licences }: IndexerDeps, writers
     log.debug({ crateId: job.crateId, version: opened.version }, 'Skipped: already indexed');
     return { skipped: true };
   }
-  const { crate, files, topCollection } = await opened.read();
-  const derivation = derive(crate, { topCollection, ...licences, isOpenLicence });
+  const { crate, heldFiles, readText, topCollection } = await opened.read();
+  const derivation = derive(crate, { topCollection, heldFiles, ...licences, isOpenLicence });
   for (const { msg, ...warning } of derivation.warnings) {
     log.warn({ crateId: job.crateId, ...warning }, msg);
   }
   await deleteIndexes(prisma, writers, job.crateId);
-  const written = await writers.rows.write(derivation, files);
-  await writers.documents.write(derivation, files, written);
+  const written = await writers.rows.write(derivation);
+  await writers.documents.write(derivation, readText, written);
   const counts = await countRows(prisma, job.crateId);
   await prisma.crateRecord.update({
     where: { id: job.crateId },

@@ -1,8 +1,8 @@
 import type { PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import type { Document, SearchBackend } from '../search-backend.ts';
+import type { ReadText } from './crate.ts';
 import type { Derivation } from './derive.ts';
-import type { CrateFiles } from './files.ts';
 import { crateRowIds } from './rows.ts';
 
 const log = logger.child({ module: 'indexer/documents' });
@@ -30,7 +30,7 @@ export class DocumentsWriter {
   }
 
   /** Only for entities in `written`, as arocapi drops a hit without a row but still counts it */
-  async write(derivation: Derivation, files: CrateFiles, written: Set<string>) {
+  async write(derivation: Derivation, readText: ReadText, written: Set<string>) {
     let batch: Document[] = [];
     let bytes = 0;
     const flush = async () => {
@@ -45,7 +45,7 @@ export class DocumentsWriter {
         log.warn({ crateId: derivation.crateId, entityId: document.id }, 'Skipped: no database row');
         continue;
       }
-      const text = textPath && (await files.text(textPath));
+      const text = textPath && (await readText(textPath));
       const doc = text ? { ...document, text } : document;
       const size = Buffer.byteLength(JSON.stringify(doc));
       if (batch.length === MAX_DOCUMENTS || bytes + size > MAX_BYTES) {

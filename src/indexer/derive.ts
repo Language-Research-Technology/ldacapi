@@ -12,6 +12,8 @@ export type DeriveFacts = {
   defaultLicense: string;
   defaultMetadataLicense: string;
   isOpenLicence: (licenseId: string) => boolean;
+  /** The size of each file the repository holds for the crate, by its path in the crate */
+  heldFiles: ReadonlyMap<string, number>;
 };
 
 type EntityRow = {
@@ -30,9 +32,9 @@ type FileRow = {
   id: string;
   filename: string;
   mediaType: string;
-  /** The leading integer of the stated `contentSize`, or -1 */
-  statedSize: number;
-  /** Where the file is in the crate, when its id is under the crate root */
+  /** Held: its size in the repository; described but not held: the leading integer of the stated `contentSize`, or 0 */
+  size: number;
+  /** Where the file is in the crate, when the crate holds it */
   path?: string;
 };
 
@@ -169,10 +171,10 @@ function crateRelativePath(ref: string) {
   }
 }
 
-/** The leading integer of a schema.org contentSize, which is text such as "14384 bytes", or -1 */
+/** The leading integer of a schema.org contentSize, which is text such as "14384 bytes", or 0 */
 function statedSize(contentSize: unknown) {
   const size = Number.parseInt(String(contentSize), 10);
-  return Number.isNaN(size) ? -1 : size;
+  return Number.isNaN(size) ? 0 : size;
 }
 
 const typed = (entity: Entity, type: string) => (entity['@type'] as string[]).includes(type);
@@ -206,7 +208,7 @@ export function parentCollection(crate: ROCrate): string | undefined {
 }
 
 /** The virtual crate: a new crate with the entity, under its indexed id, as its root */
-function virtualCrate(crate: ROCrate, entity: Entity, id: string, license: string) {
+function virtualCrate(crate: ROCrate, entity: Entity, id: string, license: string, hidden: boolean) {
   const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
   for (const key in entity) {
     if (key !== '@id') {
@@ -220,6 +222,9 @@ function virtualCrate(crate: ROCrate, entity: Entity, id: string, license: strin
   }
   if (!entity.license) {
     newCrate.root.license = license;
+  }
+  if (hidden) {
+    newCrate.root.display = false;
   }
   return newCrate.toJSON();
 }
@@ -259,6 +264,7 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   const warnings: Warning[] = [];
   const entities: DerivedEntity[] = [];
   const prefix = `${crateId}/`;
+  let notHeld = 0;
   for (const [id, entity] of byId) {
     const type = recordType(entity);
     if (!type) {
@@ -276,7 +282,13 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
     const name = entity.name?.join('; ') || id;
     const [datePublished] = dates(entity, 'datePublished');
     const point = location(entity);
-    const path = (id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length))) || undefined;
+    const cratePath = (id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length))) || undefined;
+    const heldSize = cratePath === undefined ? undefined : facts.heldFiles.get(cratePath);
+    const path = heldSize === undefined ? undefined : cratePath;
+    const unheldFile = type === 'File' && path === undefined;
+    if (unheldFile) {
+      notHeld++;
+    }
     entities.push({
       row: {
         id,
@@ -287,14 +299,14 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
         rootCollection,
         metadataLicenseId: metadataLicense,
         contentLicenseId,
-        meta: { crateId, rocrate: virtualCrate(crate, entity, id, crateLicense), accessControl },
+        meta: { crateId, rocrate: virtualCrate(crate, entity, id, crateLicense, unheldFile), accessControl },
       },
       ...(type === 'File' && {
         file: {
           id,
-          filename: (path ?? id).split('/').pop() as string,
+          filename: (cratePath ?? id).split('/').pop() as string,
           mediaType: entity.encodingFormat?.find((v: unknown) => typeof v === 'string') || 'application/octet-stream',
-          statedSize: statedSize(entity.contentSize?.[0]),
+          size: heldSize ?? statedSize(entity.contentSize?.[0]),
           ...(path && { path }),
         },
       }),
@@ -319,6 +331,9 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
       },
       ...(path && isText(entity) && { textPath: path }),
     });
+  }
+  if (notHeld > 0) {
+    warnings.push({ msg: 'Files described but not held', count: notHeld });
   }
   return { crateId, name: firstStringOrId(crate.root.name) ?? null, entities, warnings };
 }

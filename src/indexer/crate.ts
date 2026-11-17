@@ -1,10 +1,13 @@
-import type { OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
+import { buffer } from 'node:stream/consumers';
+import type { OcflFile, OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { logger } from '../logger.ts';
 import { parentCollection } from './derive.ts';
-import { crateFiles } from './files.ts';
 
 const log = logger.child({ module: 'indexer/crate' });
+
+/** The most of a file's text that is indexed: search can't highlight past 1,000,000 characters */
+const TEXT_LIMIT = 1_000_000;
 
 type CrateJson = { '@graph': RawEntity[] };
 
@@ -45,15 +48,39 @@ async function topCollection(repository: StorageRoot, crate: ROCrate) {
   return top;
 }
 
+/** The size of each file the object holds, by its path; a file that can't be read fails */
+async function heldFiles(object: OcflObject) {
+  const sizes = new Map<string, number>();
+  for (const [path, file] of object.head.files) {
+    sizes.set(path, await file.size());
+  }
+  return sizes;
+}
+
+/** Reads the text of a held file, up to `TEXT_LIMIT` bytes */
+const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => async (path: string) => {
+  const file = object.head.files.get(path) as OcflFile;
+  const bytes = await buffer(await file.stream({ end: TEXT_LIMIT - 1 }));
+  const size = sizes.get(path) as number;
+  if (size > TEXT_LIMIT) {
+    log.warn({ crateId: object.id, path, size }, 'File text cut short');
+  }
+  // Streaming leaves out a character the cut splits
+  return new TextDecoder().decode(bytes, { stream: true });
+};
+
+export type ReadText = ReturnType<typeof textReader>;
+
 /** The crate `crateId` at its head version in the repository */
 export async function openCrate(repository: StorageRoot, crateId: string) {
   const object = await repository.open(crateId);
   return {
     version: object.head.number,
-    /** Reads and parses the crate's metadata */
+    /** Reads and parses the crate's metadata, and finds the files it holds */
     async read() {
       const crate = await ROCrate.create(await readCrateJson(object));
-      return { crate, files: crateFiles(object), topCollection: await topCollection(repository, crate) };
+      const sizes = await heldFiles(object);
+      return { crate, heldFiles: sizes, readText: textReader(object, sizes), topCollection: await topCollection(repository, crate) };
     },
   };
 }

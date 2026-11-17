@@ -1,3 +1,5 @@
+import { glob, rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { type Crate, collection, crate, file, fileDescribedButNotHeld, object } from '../../test/crate-builder.ts';
@@ -18,6 +20,10 @@ const GONE = 'arcp://name,gone';
 const LARGE = 'arcp://name,large';
 const SEVERAL_PARENTS = 'arcp://name,several-parents';
 const UNPROFILED = 'arcp://name,unprofiled';
+const LONG_TEXT = 'arcp://name,long-text';
+const UNREADABLE = 'arcp://name,unreadable';
+// 5 MB, its last words past the first 1 MB
+const FIVE_MB = `${'early '.repeat(100_000)}${'within '.repeat(60_000)}${'beyond '.repeat(600_000)}`.slice(0, 5_000_000);
 // More rows and documents than fit in one batch, and more text than fits in one bulk request,
 // each text short enough for search to highlight
 const LARGE_TEXTS = ['a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt', 'f.txt'];
@@ -49,6 +55,8 @@ const testbed = ocflTestbed(
     ...LARGE_AUDIO.map((path) => fileDescribedButNotHeld(path, { encodingFormat: 'audio/wav' })),
     fileDescribedButNotHeld('https://example.org/media/outside.wav'),
   ]),
+  crate(collection(LONG_TEXT, { hasPart: ['long.txt'] }), [file('long.txt', { content: FIVE_MB, encodingFormat: 'text/plain' })]),
+  crate(collection(UNREADABLE, { hasPart: ['unreadable.txt'] }), [file('unreadable.txt', { content: 'Gone', encodingFormat: 'text/plain' })]),
   crate({ entity: { '@id': UNNAMED, '@type': ['Dataset', 'RepositoryCollection'], conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' } } }),
 );
 
@@ -66,6 +74,8 @@ const run = async (ask: () => Promise<unknown>) => {
 const index = (crateId: string) => run(() => testbed.started.indexQueue.index(crateId));
 
 const state = (crateId: string) => testbed.started.indexQueue.crate(crateId);
+
+const found = async (query: string) => (await testbed.search({ query })).entities.map(({ id }: { id: string }) => id);
 
 const searchableIds = async () => (await testbed.search({ query: '', limit: 100 })).entities.map(({ id }: { id: string }) => id);
 
@@ -93,12 +103,39 @@ describe('an index job', () => {
     expect(logs).toContainEqual(expect.objectContaining({ level: 30, crateId: ROOT, kind: 'index', version: 1, entities: 4, files: 2, msg: 'Job finished' }));
   });
 
-  it('indexes a file the crate describes but doesn’t hold, logging that it can’t be read', async () => {
+  it('gives a file the crate holds its size and place in the repository', async () => {
+    await index(ROOT);
+
+    const held = await testbed.started.prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/held.txt` } });
+    expect([held.size, held.meta]).toEqual([9n, { ocflObject: ROOT, ocflPath: 'held.txt' }]);
+  });
+
+  it('indexes a file the crate describes but doesn’t hold with no place in the repository, warning once for the crate', async () => {
     await index(ROOT);
 
     const missing = await testbed.started.prisma.file.findUniqueOrThrow({ where: { id: `${ROOT}/missing.txt` } });
-    expect(missing.meta).toEqual({ ocflObject: ROOT, ocflPath: 'missing.txt' });
-    expect(logs.filter(({ msg }) => msg === 'Cannot read file').map(({ path }) => path)).toEqual(['missing.txt', 'missing.txt']);
+    expect([missing.size, missing.meta]).toEqual([0n, {}]);
+    expect(logs.filter(({ msg }) => msg === 'Files described but not held')).toEqual([expect.objectContaining({ level: 40, crateId: ROOT, count: 1 })]);
+  });
+
+  it('makes only the first 1 MB of a text file searchable, logging the cut', async () => {
+    await index(LONG_TEXT);
+
+    expect(await found('early')).toEqual([`${LONG_TEXT}/long.txt`]);
+    expect(await found('within')).toEqual([`${LONG_TEXT}/long.txt`]);
+    expect(await found('beyond')).toEqual([]);
+    expect(logs).toContainEqual(expect.objectContaining({ level: 40, crateId: LONG_TEXT, path: 'long.txt', size: 5_000_000, msg: 'File text cut short' }));
+  });
+
+  it('fails for a crate holding a file whose bytes can’t be read', async () => {
+    const root = testbed.started.config.ocfl.root;
+    for await (const path of glob('**/content/unreadable.txt', { cwd: root })) {
+      await rm(join(root, path));
+    }
+
+    await index(UNREADABLE);
+
+    expect(await state(UNREADABLE)).toMatchObject({ state: 'failed', error: expect.stringContaining('ENOENT') });
   });
 
   it('skips a crate whose head version is already indexed', async () => {

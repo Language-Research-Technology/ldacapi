@@ -144,6 +144,9 @@ crate.
   and succeeds.
 - Any error in a crate fails its job. Nothing retries it: fix the crate, then
   ask again. Indexing and deleting are both safe to repeat.
+- A file the crate describes but doesn't hold is indexed and searchable, with
+  no content to preview or download (404), and one warning per crate counts
+  them. A held file that can't be read fails the job.
 - It never forces a search refresh, so new documents become searchable at
   OpenSearch's next periodic refresh, within a second by default.
 - It writes a heartbeat to Postgres every 30 seconds. The admin pages show "No
@@ -191,7 +194,8 @@ Each worker holds one crate's metadata in memory at a time.
   crate drops out of the API while its job runs.
 - A change to the search fields needs a maintenance window: delete the search
   index and index every crate again (see [Running it](#running-it)).
-- Text past the first 1 MB of a file isn't searchable.
+- Only the first 1,000,000 bytes of a `text/*` file are searchable; a file cut
+  short is logged.
 - A changed parent crate leaves the crates under it stale (their
   `rootCollection`) until they are reindexed.
 - Entities' `Public` and `AuthorizationByApplication` labels lag a change to

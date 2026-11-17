@@ -1,8 +1,7 @@
-import type { OcflStorageMeta } from 'arocapi';
 import type { Prisma, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
+import { fileStorageMeta } from '../repository/file-storage-meta.ts';
 import type { Derivation, DerivedEntity } from './derive.ts';
-import type { CrateFiles } from './files.ts';
 
 const log = logger.child({ module: 'indexer/rows' });
 
@@ -14,16 +13,13 @@ const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length /
 /** The entity rows indexed from `crateId` */
 const rowsOf = (crateId: string): Prisma.EntityWhereInput => ({ meta: { path: ['crateId'], equals: crateId } });
 
-async function fileRow(files: CrateFiles, { file }: DerivedEntity): Promise<Prisma.FileCreateManyInput | undefined> {
+/** The crate's root id is the id of the OCFL object holding it */
+function fileRow(crateId: string, { file }: DerivedEntity): Prisma.FileCreateManyInput | undefined {
   if (!file) {
     return;
   }
-  const { path, statedSize, ...row } = file;
-  return {
-    ...row,
-    size: (path === undefined ? undefined : await files.size(path)) ?? statedSize,
-    meta: path ? ({ ocflObject: files.id, ocflPath: path } satisfies OcflStorageMeta) : {},
-  };
+  const { path, ...row } = file;
+  return { ...row, meta: fileStorageMeta(crateId, path) };
 }
 
 /** Writes a crate's Entity and File rows */
@@ -35,10 +31,10 @@ export class RowsWriter {
   }
 
   /** The ids of the rows written: an entity another crate already has a row for keeps that row */
-  async write(derivation: Derivation, files: CrateFiles) {
+  async write(derivation: Derivation) {
     const written = new Set<string>();
     for (const batch of batches(derivation.entities)) {
-      const fileRows = await Promise.all(batch.map((entity) => fileRow(files, entity)));
+      const fileRows = batch.map((entity) => fileRow(derivation.crateId, entity));
       try {
         await this.writeBatch(batch, fileRows, written);
       } catch {

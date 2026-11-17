@@ -9,9 +9,21 @@ const CC_BY = 'https://creativecommons.org/licenses/by/4.0/';
 const RESTRICTED = 'https://example.org/licenses/restricted';
 const SPOKEN = 'https://w3id.org/ldac/terms#SpokenLanguage';
 
-const facts: DeriveFacts = { topCollection: ROOT, defaultLicense: '', defaultMetadataLicense: '', isOpenLicence: (id) => id === CC_BY };
+const facts: DeriveFacts = {
+  topCollection: ROOT,
+  defaultLicense: '',
+  defaultMetadataLicense: '',
+  isOpenLicence: (id) => id === CC_BY,
+  heldFiles: new Map(),
+};
 
 const derived = async (built: Crate, given: Partial<DeriveFacts> = {}) => derive(await ROCrate.create(built.metadata), { ...facts, ...given });
+
+const fileRows = async (built: Crate, given: Partial<DeriveFacts> = {}) => (await derived(built, given)).entities.flatMap(({ file }) => (file ? [file] : []));
+
+/** The root entity of an entity's virtual crate */
+const virtualRoot = (entity: { row: { id: string; meta: { rocrate: unknown } } }) =>
+  (entity.row.meta.rocrate as { '@graph': Record<string, unknown>[] })['@graph'].find(({ '@id': id }) => id === entity.row.id);
 
 const entityOf = async (built: Crate, id: string, given: Partial<DeriveFacts> = {}) => {
   const found = (await derived(built, given)).entities.find(({ row }) => row.id === id);
@@ -106,7 +118,7 @@ describe('derivation', () => {
         fileDescribedButNotHeld('a.txt', { isPartOf: `${ROOT}/object` }),
       ]);
 
-      const derivation = await derived(built);
+      const derivation = await derived(built, { heldFiles: new Map([['a.txt', 1]]) });
 
       expect(derivation.entities.find(({ row }) => row.id === `${ROOT}/a.txt`)?.row.memberOf).toBe(`${ROOT}/object`);
       expect(derivation.warnings).toEqual([]);
@@ -318,6 +330,60 @@ describe('derivation', () => {
     });
   });
 
+  describe('rule 11, files described but not held', () => {
+    it('gives the file a file row with no place in the crate, sized as stated or 0', async () => {
+      const built = crate(collection(ROOT), [
+        fileDescribedButNotHeld('data/a%20b.wav', { contentSize: '14384 bytes' }),
+        fileDescribedButNotHeld('https://example.org/media/c.wav', { contentSize: 163840 }),
+        fileDescribedButNotHeld('unknown.wav', { contentSize: 'unknown' }),
+        fileDescribedButNotHeld('unstated.wav'),
+      ]);
+
+      expect((await fileRows(built)).map(({ id, size, path }) => ({ id, size, path }))).toEqual([
+        { id: `${ROOT}/data/a%20b.wav`, size: 14384, path: undefined },
+        { id: 'https://example.org/media/c.wav', size: 163840, path: undefined },
+        { id: `${ROOT}/unknown.wav`, size: 0, path: undefined },
+        { id: `${ROOT}/unstated.wav`, size: 0, path: undefined },
+      ]);
+    });
+
+    it('gives it the media type application/octet-stream when none is stated', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('a.wav'), fileDescribedButNotHeld('b.wav', { encodingFormat: 'audio/wav' })]);
+
+      expect((await fileRows(built)).map(({ mediaType }) => mediaType)).toEqual(['application/octet-stream', 'audio/wav']);
+    });
+
+    it('still gives it a row and a document, but no text', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('a.txt', { name: 'Absent', encodingFormat: 'text/plain' })]);
+
+      const entity = await entityOf(built, `${ROOT}/a.txt`);
+
+      expect([entity.row.name, entity.document.name, entity.textPath]).toEqual(['Absent', 'Absent', undefined]);
+    });
+
+    it('hides it in its virtual crate with display: false, unlike a file the crate holds', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('absent.wav'), fileDescribedButNotHeld('held.wav')]);
+      const given = { heldFiles: new Map([['held.wav', 10]]) };
+
+      expect(virtualRoot(await entityOf(built, `${ROOT}/absent.wav`, given))).toMatchObject({ display: false });
+      expect(virtualRoot(await entityOf(built, `${ROOT}/held.wav`, given))).not.toHaveProperty('display');
+    });
+
+    it('warns once for the crate, with the count of such files', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('a.wav'), fileDescribedButNotHeld('b.wav'), fileDescribedButNotHeld('held.wav')]);
+
+      const { warnings } = await derived(built, { heldFiles: new Map([['held.wav', 10]]) });
+
+      expect(warnings).toEqual([{ msg: 'Files described but not held', count: 2 }]);
+    });
+
+    it('doesn’t warn for a crate that holds every file it describes', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('held.wav')]);
+
+      expect((await derived(built, { heldFiles: new Map([['held.wav', 10]]) })).warnings).toEqual([]);
+    });
+  });
+
   describe('rule 14, row and document contents', () => {
     /** `built` with `terms` added to its context */
     const withTerms = (built: Crate, terms: Record<string, string>): Crate => ({
@@ -383,39 +449,47 @@ describe('derivation', () => {
       expect((await derived(crate(thing(ROOT, ['Dataset', 'RepositoryCollection'], 'Collection', { name: 1984 })))).name).toBeNull();
     });
 
-    it('gives a file a file row named by the end of its path, with its media type and stated size', async () => {
+    it('gives a file the crate holds a file row named by the end of its path, with its media type, size and place in the crate', async () => {
       const built = crate(collection(ROOT), [
-        fileDescribedButNotHeld('data/a%20b.wav', { encodingFormat: [{ '@id': '#wav' }, 'audio/wav'], contentSize: '14384 bytes' }),
-        fileDescribedButNotHeld('https://example.org/media/c.wav', { contentSize: 163840 }),
-        fileDescribedButNotHeld('unknown.wav', { contentSize: 'unknown' }),
+        fileDescribedButNotHeld('data/a%20b.wav', { encodingFormat: [{ '@id': '#wav' }, 'audio/wav'], contentSize: '1 bytes' }),
         fileDescribedButNotHeld('100%.wav'),
+        fileDescribedButNotHeld('https://example.org/media/c.wav'),
       ]);
 
-      const files = (await derived(built)).entities.flatMap(({ file }) => (file ? [file] : []));
+      const files = await fileRows(built, {
+        heldFiles: new Map([
+          ['data/a b.wav', 14384],
+          ['100%.wav', 0],
+        ]),
+      });
 
       expect(files).toEqual([
-        { id: `${ROOT}/data/a%20b.wav`, filename: 'a b.wav', mediaType: 'audio/wav', statedSize: 14384, path: 'data/a b.wav' },
-        { id: 'https://example.org/media/c.wav', filename: 'c.wav', mediaType: 'application/octet-stream', statedSize: 163840 },
-        { id: `${ROOT}/unknown.wav`, filename: 'unknown.wav', mediaType: 'application/octet-stream', statedSize: -1, path: 'unknown.wav' },
-        { id: `${ROOT}/100%.wav`, filename: '100%.wav', mediaType: 'application/octet-stream', statedSize: -1, path: '100%.wav' },
+        { id: `${ROOT}/data/a%20b.wav`, filename: 'a b.wav', mediaType: 'audio/wav', size: 14384, path: 'data/a b.wav' },
+        { id: `${ROOT}/100%.wav`, filename: '100%.wav', mediaType: 'application/octet-stream', size: 0, path: '100%.wav' },
+        { id: 'https://example.org/media/c.wav', filename: 'c.wav', mediaType: 'application/octet-stream', size: 0 },
       ]);
     });
 
-    it('gives a file under the crate root its path, without query or fragment', async () => {
+    it('finds a file under the crate root by its path, without query or fragment', async () => {
       const built = crate(collection(ROOT), [fileDescribedButNotHeld(`${ROOT}/./data/a.txt?v=1`), fileDescribedButNotHeld(`${ROOT}/?v=1`)]);
 
-      const files = (await derived(built)).entities.flatMap(({ file }) => (file ? [file] : []));
+      const files = await fileRows(built, { heldFiles: new Map([['data/a.txt', 1]]) });
 
       expect(files.map(({ path }) => path)).toEqual(['data/a.txt', undefined]);
     });
 
-    it('marks the text of a text file in the crate for the document', async () => {
+    it('marks the text of a text file the crate holds for the document', async () => {
       const built = textFile({}, [
         fileDescribedButNotHeld('a.wav', { encodingFormat: 'audio/wav' }),
         fileDescribedButNotHeld('https://example.org/b.txt', { encodingFormat: 'text/plain' }),
       ]);
 
-      const derivation = await derived(built);
+      const derivation = await derived(built, {
+        heldFiles: new Map([
+          ['data.txt', 1],
+          ['a.wav', 1],
+        ]),
+      });
 
       expect(derivation.entities.flatMap(({ textPath }) => (textPath ? [textPath] : []))).toEqual(['data.txt']);
     });
