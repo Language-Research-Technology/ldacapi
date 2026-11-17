@@ -108,11 +108,12 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
    * Leaves one waiting job for the crate: asking again while one waits changes only its kind, to the one asked for,
    * except that a waiting reindex stays one
    */
-  const ask = async (crateId: string, kind: IndexJobKind) => {
+  const ask = async (crateIds: string[], kind: IndexJobKind) => {
     await prisma.$transaction([
-      prisma.$executeRaw`INSERT INTO crate (id) VALUES (${crateId}) ON CONFLICT DO NOTHING`,
+      prisma.$executeRaw`INSERT INTO crate (id) SELECT unnest(${crateIds}::text[]) ON CONFLICT DO NOTHING`,
       prisma.$executeRaw`
-        INSERT INTO index_job ("crateId", kind) VALUES (${crateId}, ${kind}::index_job_kind)
+        INSERT INTO index_job ("crateId", kind)
+        SELECT id, ${kind}::index_job_kind FROM unnest(${crateIds}::text[]) WITH ORDINALITY AS asked(id, n) ORDER BY n
         ON CONFLICT ("crateId") WHERE status = 'waiting'
         DO UPDATE SET kind = CASE WHEN index_job.kind = 'reindex' AND EXCLUDED.kind = 'index' THEN index_job.kind ELSE EXCLUDED.kind END`,
     ]);
@@ -131,9 +132,7 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
 
   const askFor = async (crateId: string, kind: IndexJobKind, scope: Scope = {}) => {
     const asked = await covered(crateId, scope);
-    for (const id of asked) {
-      await ask(id, kind);
-    }
+    await ask(asked, kind);
     return asked;
   };
 
@@ -158,19 +157,17 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
 
     /** Asks to index, or reindex, every crate in the repository, and delete each listed crate gone from it, returning their ids */
     async indexEverything({ reindex = false } = {}) {
-      const asked: string[] = [];
-      for await (const crateId of crateIds(repository)) {
-        await ask(crateId, reindex ? 'reindex' : 'index');
-        asked.push(crateId);
-      }
-      const listed = new Set(asked);
+      const listed = await Array.fromAsync(crateIds(repository));
+      await ask(listed, reindex ? 'reindex' : 'index');
+      const known = new Set(listed);
+      const gone: string[] = [];
       for (const crateId of await recordIds()) {
-        if (!listed.has(crateId) && !(await repository.has(crateId))) {
-          await ask(crateId, 'delete');
-          asked.push(crateId);
+        if (!known.has(crateId) && !(await repository.has(crateId))) {
+          gone.push(crateId);
         }
       }
-      return asked;
+      await ask(gone, 'delete');
+      return [...listed, ...gone];
     },
 
     /** Every crate known to be in the repository, by id */
