@@ -104,8 +104,8 @@ it in `.env`.
 | `pnpm lint`                | Biome, Knip and TypeScript                                                       |
 | `pnpm bootstrap`           | `db:deploy` and `crates:import` in one go                                        |
 | `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
-| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`) until the queue is empty; fails if any crate does |
-| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until it is empty; fails if any crate does |
+| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does |
+| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
 | `pnpm worker`              | Run index jobs as they are asked for                                             |
 | `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
@@ -148,15 +148,28 @@ crate.
   deletes and rebuilds it whatever its version.
 - Indexing a crate gone from the repository deletes its indexes and its record,
   and succeeds.
-- Any error in a crate fails its job. Nothing retries it: fix the crate, then
-  ask again. Indexing and deleting are both safe to repeat.
+- Any error in a crate fails its job at once, and nothing in it is skipped, so
+  an indexed version always means the whole crate is indexed: an entity whose
+  row can't be written fails it, as does a document search refuses. The failed
+  job records the error's message, its stage (reading the crate, deriving,
+  database index, search index or aggregates), the entity or file it was on,
+  when, and which attempt; the stack trace goes only to the log, with the job
+  id. Nothing retries it: fix the crate, then ask again. Indexing and deleting
+  are both safe to repeat.
 - A file the crate describes but doesn't hold is indexed and searchable, with
   no content to preview or download (404), and one warning per crate counts
   them. A held file that can't be read fails the job.
 - It never forces a search refresh, so new documents become searchable at
   OpenSearch's next periodic refresh, within a second by default.
-- It writes a heartbeat to Postgres every 30 seconds. The admin pages show "No
-  worker running" when no worker has written one for 5 minutes.
+- It writes a heartbeat to Postgres every 30 seconds, saving with it the
+  running job's stage and how much of it is done, of how much; that write is
+  the only one progress costs. The admin pages show "No worker running" when
+  no worker has written one for 5 minutes.
+- It logs a line when a job starts (job id, crate id, kind, attempt), when it
+  finishes (duration, version, entity and file counts) and when it fails
+  (crate id, job id, stage, stack trace). At `LOG_LEVEL=debug` it also logs
+  each entity it indexes, each file whose text it reads, and each crate
+  skipped as already indexed.
 - On SIGTERM or SIGINT it puts the job it is running back in the queue, as if
   never tried, and exits at once.
 - A worker silent for 5 minutes is dead. The next worker or `pnpm index` run
@@ -166,8 +179,12 @@ crate.
 - If Postgres or OpenSearch can't be reached, it logs that it has paused, puts
   its job back in the queue, and tries again every 5 seconds, carrying on once
   both answer.
-- `pnpm index` and `pnpm crates:import` work the queue as a worker does, until
-  no job is waiting, then exit non-zero if any crate they asked for failed.
+- `pnpm index` and `pnpm crates:import` work the queue as a worker does, and
+  write the same log lines, until no job is waiting and every job they asked
+  for has finished, whichever worker ran it. Then they log how many of the
+  crates they asked for were indexed, skipped, deleted and failed, and each
+  failure with its error, read from Postgres, and exit non-zero if any
+  failed.
 
 ### Index states
 
@@ -178,10 +195,10 @@ in each state at the top:
 | ----------- | ------------------------------------------------------ | ----------------------------------- |
 | not indexed | it has no indexes                                      |                                     |
 | queued      | an index or reindex job waits                          |                                     |
-| indexing    | an index or reindex job is running                     | when it started                     |
+| indexing    | an index or reindex job is running                     | its stage, how much of it is done as of the last heartbeat, and when it started: "search index, 12,000 of 30,000, since 2026-11-17 10:42 UTC" |
 | deleting    | a delete job waits or runs, or deleting every index    |                                     |
 | indexed     | its last job succeeded                                 | version, when, entities and files   |
-| failed      | its last job failed                                    | the error, when, and which attempt  |
+| failed      | its last job failed                                    | the error, its stage, the entity or file it was on, when, and which attempt |
 
 A waiting or running job comes first, then a failed one, then what the last
 successful job recorded. A crate is listed once a job has been asked for it,

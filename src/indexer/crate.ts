@@ -3,6 +3,7 @@ import type { OcflFile, OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { logger } from '../logger.ts';
 import { parentCollection } from './derive.ts';
+import type { Progress } from './progress.ts';
 
 const log = logger.child({ module: 'indexer/crate' });
 
@@ -55,10 +56,10 @@ async function parentCrates(repository: StorageRoot, crate: ROCrate) {
 }
 
 /** The size of each file the object holds, by its path; a file that can't be read fails */
-async function heldFiles(object: OcflObject) {
+async function heldFiles(object: OcflObject, progress: Progress) {
   const sizes = new Map<string, number>();
   for (const [path, file] of object.head.files) {
-    sizes.set(path, await file.size());
+    sizes.set(path, await progress.onItem(path, () => file.size()));
   }
   return sizes;
 }
@@ -71,6 +72,7 @@ const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => a
   if (size > TEXT_LIMIT) {
     log.warn({ crateId: object.id, path, size }, 'File text cut short');
   }
+  log.debug({ crateId: object.id, path }, 'File text read');
   // Streaming leaves out a character the cut splits
   return new TextDecoder().decode(bytes, { stream: true });
 };
@@ -83,9 +85,9 @@ export async function openCrate(repository: StorageRoot, crateId: string) {
   return {
     version: object.head.number,
     /** Reads and parses the crate's metadata, and finds the files it holds */
-    async read() {
+    async read(progress: Progress) {
       const crate = await ROCrate.create(await readCrateJson(object));
-      const sizes = await heldFiles(object);
+      const sizes = await heldFiles(object, progress);
       return { crate, heldFiles: sizes, readText: textReader(object, sizes), parentCrates: await parentCrates(repository, crate) };
     },
   };

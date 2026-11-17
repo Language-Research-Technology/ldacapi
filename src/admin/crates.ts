@@ -43,6 +43,8 @@ type CrateRow = { id: string; label: string; state: StateName; detail?: string |
 
 const counted = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
+const number = (count: number) => count.toLocaleString('en-AU');
+
 const time = (date: Date) => date.toISOString().replace('T', ' ').slice(0, 16);
 
 /** What the state shows beside its name */
@@ -50,10 +52,14 @@ const detail = (crate: CrateState) => {
   switch (crate.state) {
     case 'indexed':
       return `v${crate.version}, ${time(crate.indexedAt)} UTC, ${counted(crate.entities, 'entity', 'entities')}, ${counted(crate.files, 'file', 'files')}`;
-    case 'indexing':
-      return `since ${time(crate.startedAt)} UTC`;
-    case 'failed':
-      return `${crate.error} (${time(crate.failedAt)} UTC, attempt ${crate.attempts})`;
+    case 'indexing': {
+      const counter = crate.done === null || crate.total === null ? [] : [`${number(crate.done)} of ${number(crate.total)}`];
+      return [crate.stage ?? [], counter, `since ${time(crate.startedAt)} UTC`].flat().join(', ');
+    }
+    case 'failed': {
+      const where = [crate.stage ?? [], crate.failedOn ? `on ${crate.failedOn}` : []].flat();
+      return `${crate.error} (${[...where, `${time(crate.failedAt)} UTC`, `attempt ${crate.attempts}`].join(', ')})`;
+    }
     default:
       return undefined;
   }

@@ -22,7 +22,14 @@ model IndexJob {
   status    IndexJobStatus @default(waiting)
   attempts  Int            @default(0)
   workerId  String?
+  /// What the job is doing (reading the crate, deriving, database index, search index, aggregates), or was doing when it failed
+  stage     String?
+  /// How much of the stage is done, of `total`, as the worker last saved it
+  done      Int?
+  total     Int?
   error     String?
+  /// The entity or file the job was on when it failed
+  failedOn  String?
   createdAt DateTime       @default(now())
   startedAt DateTime?
   failedAt  DateTime?

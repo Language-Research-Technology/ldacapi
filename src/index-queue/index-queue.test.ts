@@ -242,12 +242,21 @@ describe('index state', () => {
     expect(await queue.crate(A)).toEqual({ id: A, name: 'A', state: 'indexed', version: 2, indexedAt: INDEXED.indexedAt, entities: 5, files: 3 });
   });
 
-  it('is failed, with the error, ahead of the record', async () => {
+  it('is failed, with the error, its stage, the entity or file it was on, its time and attempt, ahead of the record', async () => {
     const failedAt = new Date('2026-11-16T09:00:00Z');
     await record(A, INDEXED);
-    await job(A, { status: 'failed', error: 'Error: broken', failedAt, attempts: 1 });
+    await job(A, { status: 'failed', error: 'Error: broken', stage: 'database index', failedOn: `${A}/object`, failedAt, attempts: 2 });
 
-    expect(await queue.crate(A)).toEqual({ id: A, name: 'A', state: 'failed', error: 'Error: broken', failedAt, attempts: 1 });
+    expect(await queue.crate(A)).toEqual({
+      id: A,
+      name: 'A',
+      state: 'failed',
+      error: 'Error: broken',
+      stage: 'database index',
+      failedOn: `${A}/object`,
+      failedAt,
+      attempts: 2,
+    });
   });
 
   it('is queued while a job waits, ahead of a failed job', async () => {
@@ -258,13 +267,13 @@ describe('index state', () => {
     expect(await queue.crate(A)).toMatchObject({ state: 'queued' });
   });
 
-  it.each(['index', 'reindex'] as const)('is indexing, since the job started, while a %s job runs, ahead of one waiting', async (kind) => {
+  it.each(['index', 'reindex'] as const)('is indexing, with its stage, counter and start, while a %s job runs, ahead of one waiting', async (kind) => {
     const startedAt = new Date('2026-11-16T10:00:00Z');
     await record(A);
     await job(A, { kind: 'delete' });
-    await job(A, { kind, status: 'running', startedAt });
+    await job(A, { kind, status: 'running', startedAt, stage: 'search index', done: 12_000, total: 30_000 });
 
-    expect(await queue.crate(A)).toEqual({ id: A, name: null, state: 'indexing', startedAt });
+    expect(await queue.crate(A)).toEqual({ id: A, name: null, state: 'indexing', stage: 'search index', done: 12_000, total: 30_000, startedAt });
   });
 
   it.each(['waiting', 'running'] as const)('is deleting while a delete job is %s', async (status) => {
@@ -295,15 +304,6 @@ describe('index state', () => {
     await job('arcp://name,c', { status: 'failed' });
 
     expect(await queue.counts()).toEqual({ 'not indexed': 0, queued: 0, indexing: 0, deleting: 0, indexed: 2, failed: 1 });
-  });
-
-  it('lists the failures among the crates asked about', async () => {
-    await record(A);
-    await record(B);
-    await job(A, { status: 'failed', error: 'Error: A' });
-    await job(B, { status: 'failed', error: 'Error: B' });
-
-    expect(await queue.failures([B, 'arcp://name,c'])).toEqual([{ crateId: B, error: 'Error: B' }]);
   });
 });
 

@@ -13,10 +13,10 @@ export type StateName = (typeof STATES)[number];
 type IndexState =
   | { state: 'not indexed' }
   | { state: 'queued' }
-  | { state: 'indexing'; startedAt: Date }
+  | { state: 'indexing'; startedAt: Date; stage: string | null; done: number | null; total: number | null }
   | { state: 'deleting' }
   | { state: 'indexed'; version: number; indexedAt: Date; entities: number; files: number }
-  | { state: 'failed'; error: string; failedAt: Date; attempts: number };
+  | { state: 'failed'; error: string; stage: string | null; failedOn: string | null; failedAt: Date; attempts: number };
 
 /** The ids of the crates `id` is under, nearest first: a crate is under another when its id extends the other's by a path */
 export function* ancestorIds(id: string) {
@@ -44,7 +44,12 @@ type StateRow = {
   entities: number;
   files: number;
   startedAt: Date;
+  stage: string | null;
+  done: number | null;
+  total: number | null;
   error: string;
+  failedStage: string | null;
+  failedOn: string | null;
   failedAt: Date;
   attempts: number;
 };
@@ -52,7 +57,8 @@ type StateRow = {
 /** Each crate with its state, and the columns that state shows. A job with no crate, deleting everything, is every crate's */
 const stateRows = (where: Prisma.Sql) => Prisma.sql`
   SELECT crate.id, crate.name, crate."indexedVersion", crate."indexedAt", crate.entities, crate.files,
-    active."startedAt", failed.error, failed."failedAt", failed.attempts,
+    active."startedAt", active.stage, active.done, active.total,
+    failed.error, failed.stage AS "failedStage", failed."failedOn", failed."failedAt", failed.attempts,
     CASE
       WHEN active.kind = 'delete' THEN 'deleting'
       WHEN active.status = 'running' THEN 'indexing'
@@ -63,12 +69,12 @@ const stateRows = (where: Prisma.Sql) => Prisma.sql`
     END AS state
   FROM crate
   LEFT JOIN LATERAL (
-    SELECT kind, status, "startedAt" FROM index_job
+    SELECT kind, status, "startedAt", stage, done, total FROM index_job
     WHERE ("crateId" = crate.id OR "crateId" IS NULL) AND status IN ('running', 'waiting')
     ORDER BY status = 'running' DESC, id LIMIT 1
   ) active ON true
   LEFT JOIN LATERAL (
-    SELECT id, error, "failedAt", attempts FROM index_job
+    SELECT id, error, stage, "failedOn", "failedAt", attempts FROM index_job
     WHERE "crateId" = crate.id AND status = 'failed'
     ORDER BY id DESC LIMIT 1
   ) failed ON true
@@ -77,17 +83,24 @@ const stateRows = (where: Prisma.Sql) => Prisma.sql`
 const indexState = (row: StateRow): IndexState => {
   switch (row.state) {
     case 'indexing':
-      return { state: row.state, startedAt: row.startedAt };
+      return { state: row.state, startedAt: row.startedAt, stage: row.stage, done: row.done, total: row.total };
     case 'indexed':
       return { state: row.state, version: row.indexedVersion, indexedAt: row.indexedAt, entities: row.entities, files: row.files };
     case 'failed':
-      return { state: row.state, error: row.error, failedAt: row.failedAt, attempts: row.attempts };
+      return { state: row.state, error: row.error, stage: row.failedStage, failedOn: row.failedOn, failedAt: row.failedAt, attempts: row.attempts };
     default:
       return { state: row.state };
   }
 };
 
 const crateState = (row: StateRow): CrateState => ({ id: row.id, name: row.name, ...indexState(row) });
+
+type Failure = { crateId: string; error: string; stage: string | null; failedOn: string | null };
+
+/** What became of the crates a run asked for */
+export type Summary = { indexed: number; skipped: number; deleted: number; failed: Failure[] };
+
+type OutcomeRow = { id: string; listed: boolean; indexedVersion: number | null; indexedAt: Date | null } & Pick<Failure, 'error' | 'stage' | 'failedOn'>;
 
 /** Asks for index jobs, and reads each crate's index state. The only part of indexing the API uses */
 export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient; repository: StorageRoot }) {
@@ -173,9 +186,38 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
       return Object.fromEntries(STATES.map((state) => [state, rows.find((row) => row.state === state)?.count ?? 0])) as Record<StateName, number>;
     },
 
-    /** The failed jobs of the crates among `crateIds` */
-    failures: (crateIds: string[]) =>
-      prisma.indexJob.findMany({ where: { crateId: { in: crateIds }, status: 'failed' }, select: { crateId: true, error: true }, orderBy: { crateId: 'asc' } }),
+    /**
+     * Starts a run, noting when each crate was last indexed. Its `summary` says what became of the crates it asked for,
+     * once their jobs are finished: a crate indexed at the same time as before was skipped
+     */
+    async startRun() {
+      const before = new Map(
+        (await prisma.crateRecord.findMany({ select: { id: true, indexedAt: true } })).map(({ id, indexedAt }) => [id, indexedAt?.getTime()]),
+      );
+      return {
+        async summary(crateIds: string[]): Promise<Summary> {
+          const rows = await prisma.$queryRaw<OutcomeRow[]>`
+            SELECT asked.id, crate.id IS NOT NULL AS listed, crate."indexedVersion", crate."indexedAt", failed.error, failed.stage, failed."failedOn"
+            FROM unnest(${crateIds}::text[]) AS asked(id)
+            LEFT JOIN crate ON crate.id = asked.id
+            LEFT JOIN index_job failed ON failed."crateId" = asked.id AND failed.status = 'failed'
+            ORDER BY asked.id`;
+          const summary: Summary = { indexed: 0, skipped: 0, deleted: 0, failed: [] };
+          for (const { id, listed, indexedVersion, indexedAt, error, stage, failedOn } of rows) {
+            if (error !== null) {
+              summary.failed.push({ crateId: id, error, stage, failedOn });
+            } else if (!listed || indexedVersion === null) {
+              summary.deleted++;
+            } else if (indexedAt?.getTime() === before.get(id)) {
+              summary.skipped++;
+            } else {
+              summary.indexed++;
+            }
+          }
+          return summary;
+        },
+      };
+    },
 
     /** Whether any worker, or CLI run working the queue, has a fresh heartbeat */
     workerRunning: async () => (await prisma.indexWorker.count({ where: { heartbeatAt: { gt: new Date(Date.now() - WORKER_SILENT_MILLISECONDS) } } })) > 0,

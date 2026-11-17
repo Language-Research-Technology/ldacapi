@@ -8,7 +8,7 @@ import { collection, crate, writeCrates } from '../test/crate-builder.ts';
 import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
 import { createIndexQueue } from './index-queue/index-queue.ts';
-import { workTheQueue } from './indexer/indexer.ts';
+import { indexAndSummarise } from './indexer/index-run.ts';
 import { prisma } from './prisma.ts';
 import { openOrCreateRepository } from './repository/repository.ts';
 import { createSearchBackend } from './search-backend.ts';
@@ -66,12 +66,13 @@ describe('crates:import', () => {
   describe('indexing what it imports', () => {
     const opensearch = new Client({ node: config.opensearchUrl });
 
-    /** Imports `source` into the repository, asking for each crate it writes to be indexed, then works the queue */
+    /** Imports `source` into the repository, asking for each crate it writes to be indexed, then runs those jobs */
     const importAndIndex = async () => {
       const repository = await openOrCreateRepository(root());
       const indexQueue = createIndexQueue({ prisma, repository });
-      const drain = () => workTheQueue({ prisma, repository, opensearch, search: createSearchBackend(opensearch), licences: config }, { until: 'empty' });
-      return { imported: await importInto(repository, source, { indexQueue, workTheQueue: drain }), indexQueue };
+      const deps = { prisma, repository, opensearch, search: createSearchBackend(opensearch), licences: config };
+      const run = (ask: () => Promise<string[]>) => indexAndSummarise(deps, indexQueue, ask);
+      return { imported: await importInto(repository, source, { indexQueue, run }), indexQueue };
     };
 
     beforeEach(async () => {

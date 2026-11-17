@@ -1,8 +1,11 @@
 import type { IndexJobKind, Prisma, PrismaClient } from '../generated/prisma/client.ts';
 import { WORKER_SILENT_MILLISECONDS } from '../index-queue/index-queue.ts';
 import { logger } from '../logger.ts';
+import type { Progress } from './progress.ts';
 
 const log = logger.child({ module: 'indexer' });
+
+const NO_PROGRESS = { stage: null, done: null, total: null };
 
 /** A job whose worker dies on this many attempts fails */
 const MAXIMUM_ATTEMPTS = 3;
@@ -10,10 +13,21 @@ const MAXIMUM_ATTEMPTS = 3;
 /** A job with no crate deletes everything */
 export type Job = { id: number; crateId: string | null; kind: IndexJobKind; attempts: number };
 
-/** Records a worker as alive, now */
-export const heartbeat = async (prisma: PrismaClient, workerId: string) => {
+/** Records a worker as alive, now, with the progress of the job it is `running`: the only write of progress */
+export const heartbeat = async (prisma: PrismaClient, workerId: string, running?: { job: Job; progress: Progress }) => {
   const heartbeatAt = new Date();
-  await prisma.indexWorker.upsert({ where: { id: workerId }, create: { id: workerId, heartbeatAt }, update: { heartbeatAt } });
+  const { job, progress } = running ?? {};
+  await prisma.$transaction([
+    prisma.indexWorker.upsert({ where: { id: workerId }, create: { id: workerId, heartbeatAt }, update: { heartbeatAt } }),
+    ...(job && progress
+      ? [
+          prisma.indexJob.updateMany({
+            where: { id: job.id, workerId, status: 'running' },
+            data: { stage: progress.stage, done: progress.done, total: progress.total },
+          }),
+        ]
+      : []),
+  ]);
 };
 
 export const removeWorker = async (prisma: PrismaClient, workerId: string) => {
@@ -37,7 +51,7 @@ async function returnDeadWorkersJobs(prisma: PrismaClient) {
       } else if (await tx.indexJob.count({ where: { crateId: job.crateId, status: 'waiting' } })) {
         await tx.indexJob.delete({ where: { id: job.id } });
       } else {
-        await tx.indexJob.update({ where: { id: job.id }, data: { status: 'waiting', workerId: null, startedAt: null } });
+        await tx.indexJob.update({ where: { id: job.id }, data: { status: 'waiting', workerId: null, startedAt: null, ...NO_PROGRESS } });
       }
     }
     await tx.indexWorker.deleteMany({ where: { heartbeatAt: { lte: silentSince } } });
@@ -81,9 +95,13 @@ export const release = (prisma: PrismaClient, workerId: string, job: Job) =>
       AND EXISTS (SELECT 1 FROM index_job waiting WHERE waiting."crateId" IS NOT DISTINCT FROM ${job.crateId} AND waiting.status = 'waiting')`,
     prisma.indexJob.updateMany({
       where: { id: job.id, workerId, status: 'running' },
-      data: { status: 'waiting', workerId: null, startedAt: null, attempts: { decrement: 1 } },
+      data: { status: 'waiting', workerId: null, startedAt: null, attempts: { decrement: 1 }, ...NO_PROGRESS },
     }),
   ]);
+
+/** Whether any of the crates `crateIds` has a job waiting or running */
+export const unfinished = async (prisma: PrismaClient, crateIds: string[]) =>
+  (await prisma.$queryRaw<unknown[]>`SELECT 1 FROM index_job WHERE "crateId" = ANY(${crateIds}) AND status IN ('waiting', 'running') LIMIT 1`).length > 0;
 
 /** What a finished job writes to its crate's record: new values, or its removal */
 export type RecordWrite = { crateId: string } & ({ data: Prisma.CrateRecordUpdateInput } | { remove: true });
@@ -111,15 +129,26 @@ export const succeed = (prisma: PrismaClient, workerId: string, job: Job, record
   });
 
 /**
- * Marks a job failed with `error`, replacing any earlier failure of its crate.
+ * Marks a job failed with `error`'s message, and the stage and item of its `progress`, replacing any earlier failure of its crate.
  * Writes nothing and returns false if `workerId` no longer holds the claim
  */
-export const fail = (prisma: PrismaClient, workerId: string, job: Job, error: unknown) =>
+export const fail = (prisma: PrismaClient, workerId: string, job: Job, error: unknown, progress: Progress) =>
   prisma.$transaction(async (tx) => {
     if (!(await holdsClaim(tx, workerId, job))) {
       return false;
     }
     await tx.indexJob.deleteMany({ where: { crateId: job.crateId, status: 'failed' } });
-    await tx.indexJob.update({ where: { id: job.id }, data: { status: 'failed', error: String(error), failedAt: new Date() } });
+    await tx.indexJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'failed',
+        error: String(error),
+        failedAt: new Date(),
+        stage: progress.stage,
+        failedOn: progress.on,
+        done: null,
+        total: null,
+      },
+    });
     return true;
   });

@@ -127,7 +127,22 @@ describe('each crate’s index state', () => {
     ['indexed', [A, 'A', { indexedVersion: 3 }], 'indexed v3, 2026-11-15 08:00 UTC, 12 entities, 1 file'],
     ['queued', [A, 'A', { indexedVersion: 3 }, {}], 'queued'],
     ['indexing', [A, 'A', {}, { status: 'running', startedAt: new Date('2026-11-16T10:00:00Z') }], 'indexing since 2026-11-16 10:00 UTC'],
+    [
+      'indexing with its stage and counter',
+      [A, 'A', {}, { status: 'running', startedAt: new Date('2026-11-16T10:42:00Z'), stage: 'search index', done: 12_000, total: 30_000 }],
+      'indexing search index, 12,000 of 30,000, since 2026-11-16 10:42 UTC',
+    ],
+    [
+      'indexing at a stage with no counter',
+      [A, 'A', {}, { status: 'running', startedAt: new Date('2026-11-16T10:42:00Z'), stage: 'deriving' }],
+      'indexing deriving, since 2026-11-16 10:42 UTC',
+    ],
     ['deleting', [A, 'A', {}, { kind: 'delete', status: 'running' }], 'deleting'],
+    [
+      'failed with its stage and the entity it was on',
+      [A, 'A', {}, { status: 'failed', error: 'Error: bad row', stage: 'database index', failedOn: `${A}/object`, failedAt: FAILED_AT, attempts: 2 }],
+      `failed Error: bad row (database index, on ${A}/object, 2026-11-16 09:30 UTC, attempt 2)`,
+    ],
     [
       'failed',
       [A, 'A', { indexedVersion: 3 }, { status: 'failed', error: 'Error: no licence', failedAt: FAILED_AT, attempts: 1 }],

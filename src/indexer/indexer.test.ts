@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { type Crate, collection, crate, file, fileDescribedButNotHeld, object } from '../../test/crate-builder.ts';
+import type { SearchBackend } from '../search-backend.ts';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
@@ -99,8 +100,30 @@ describe('an index job', () => {
   it('logs when it starts and finishes', async () => {
     await index(ROOT);
 
-    expect(logs).toContainEqual(expect.objectContaining({ level: 30, crateId: ROOT, kind: 'index', attempt: 1, msg: 'Job started' }));
-    expect(logs).toContainEqual(expect.objectContaining({ level: 30, crateId: ROOT, kind: 'index', version: 1, entities: 4, files: 2, msg: 'Job finished' }));
+    const jobId = expect.any(Number);
+    expect(logs).toContainEqual(expect.objectContaining({ level: 30, jobId, crateId: ROOT, kind: 'index', attempt: 1, msg: 'Job started' }));
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        level: 30,
+        jobId,
+        crateId: ROOT,
+        milliseconds: expect.any(Number),
+        version: 1,
+        entities: 4,
+        files: 2,
+        msg: 'Job finished',
+      }),
+    );
+  });
+
+  it('logs each entity it indexes and each file whose text it reads, at debug', async () => {
+    await index(ROOT);
+
+    const debug = logs.filter(({ level }) => level === 20);
+    expect(debug.filter(({ msg }) => msg === 'Entity indexed').map(({ entityId }) => entityId)).toEqual(
+      expect.arrayContaining([ROOT, OBJECT, `${ROOT}/held.txt`, `${ROOT}/missing.txt`]),
+    );
+    expect(debug).toContainEqual(expect.objectContaining({ crateId: ROOT, path: 'held.txt', msg: 'File text read' }));
   });
 
   it('gives a file the crate holds its size and place in the repository', async () => {
@@ -135,7 +158,12 @@ describe('an index job', () => {
 
     await index(UNREADABLE);
 
-    expect(await state(UNREADABLE)).toMatchObject({ state: 'failed', error: expect.stringContaining('ENOENT') });
+    expect(await state(UNREADABLE)).toMatchObject({
+      state: 'failed',
+      error: expect.stringContaining('ENOENT'),
+      stage: 'reading the crate',
+      failedOn: 'unreadable.txt',
+    });
   });
 
   it('skips a crate whose head version is already indexed', async () => {
@@ -272,6 +300,72 @@ describe('an index job', () => {
         msg: 'Cannot read parent collection; using the highest found',
       }),
     );
+  });
+});
+
+/** Works the queue until it is empty with `search` in place of the search backend */
+const workTheQueueWith = async (search: Partial<SearchBackend>) => {
+  const { indexer } = testbed.started;
+  // Imported once the testbed has read its configuration
+  const { workTheQueue } = await import('./indexer.ts');
+  await workTheQueue({ ...indexer, search: { ...indexer.search, ...search } }, { until: 'empty' });
+};
+
+describe('a job that fails', () => {
+  it('fails at a search index that can’t be written, leaving no indexed version, and succeeds when asked again', async () => {
+    await index(ROOT);
+    await testbed.started.indexQueue.reindex(ROOT);
+
+    await workTheQueueWith({
+      index: async () => {
+        throw new Error('Search is refusing writes');
+      },
+    });
+
+    expect(await state(ROOT)).toMatchObject({ state: 'failed', error: 'Error: Search is refusing writes', stage: 'search index', attempts: 1 });
+    expect(await testbed.started.prisma.crateRecord.findUniqueOrThrow({ where: { id: ROOT } })).toMatchObject({ indexedVersion: null });
+
+    await run(() => testbed.started.indexQueue.reindex(ROOT));
+
+    expect(await state(ROOT)).toMatchObject({ state: 'indexed', version: 1 });
+    expect(await found('Held')).toEqual([`${ROOT}/held.txt`]);
+  });
+
+  it('fails at aggregates that can’t be written, leaving no indexed version', async () => {
+    const { prisma } = testbed.started;
+    await prisma.$executeRaw`ALTER TABLE aggregate ADD CONSTRAINT refuse_writes CHECK (false) NOT VALID`;
+    try {
+      await index(ROOT);
+    } finally {
+      await prisma.$executeRaw`ALTER TABLE aggregate DROP CONSTRAINT refuse_writes`;
+    }
+
+    expect(await state(ROOT)).toMatchObject({ state: 'failed', stage: 'aggregates', error: expect.stringContaining('refuse_writes') });
+    expect(await prisma.crateRecord.findUniqueOrThrow({ where: { id: ROOT } })).toMatchObject({ indexedVersion: null });
+  });
+
+  it('logs the failure with its crate, job, stage and stack trace', async () => {
+    await index(UNLICENSED);
+
+    const { id } = await testbed.started.prisma.indexJob.findFirstOrThrow();
+    expect(logs).toContainEqual(
+      expect.objectContaining({
+        level: 50,
+        crateId: UNLICENSED,
+        jobId: id,
+        stage: 'deriving',
+        err: expect.objectContaining({ stack: expect.stringContaining('derive.ts') }),
+        msg: 'Job failed',
+      }),
+    );
+  });
+
+  it('records the failure’s stage, and keeps its stack trace out of the error', async () => {
+    await index(UNLICENSED);
+
+    const failed = await state(UNLICENSED);
+    expect(failed).toMatchObject({ state: 'failed', stage: 'deriving', failedOn: null, failedAt: expect.any(Date) });
+    expect(failed).toMatchObject({ error: expect.not.stringContaining('derive.ts') });
   });
 });
 
@@ -426,5 +520,56 @@ describe('working the queue', () => {
       await working;
       expect(await indexQueue.workerRunning()).toBe(false);
     });
+  });
+});
+
+describe('a running job’s progress', () => {
+  let stop: AbortController;
+  let letThrough: () => void;
+  let working: Promise<void>;
+  let firstWrite: number;
+
+  /** Starts a worker beating every `heartbeatMilliseconds`, whose search lets one bulk write through then holds the rest until let through */
+  const startHeldInSearchIndex = async (heartbeatMilliseconds: number) => {
+    const { indexer } = testbed.started;
+    // Imported once the testbed has read its configuration
+    const { workTheQueue } = await import('./indexer.ts');
+    const { promise: through, resolve } = Promise.withResolvers<void>();
+    letThrough = resolve;
+    let writes = 0;
+    const search: SearchBackend = {
+      ...indexer.search,
+      index: async (documents) => {
+        if (writes++ > 0) {
+          await through;
+        } else {
+          firstWrite = documents.length;
+        }
+        await indexer.search.index(documents);
+      },
+    };
+    stop = new AbortController();
+    working = workTheQueue({ ...indexer, search }, { until: 'aborted', signal: stop.signal, heartbeatMilliseconds });
+    await testbed.started.indexQueue.index(LARGE);
+    await vi.waitFor(() => expect(writes).toBe(2), { timeout: 10_000 });
+  };
+
+  afterEach(async () => {
+    letThrough();
+    stop.abort();
+    await working;
+  });
+
+  it('shows its stage and how much of it is done, as the heartbeat saved them', async () => {
+    await startHeldInSearchIndex(10);
+
+    expect(firstWrite).toBeLessThan(2108);
+    await vi.waitFor(async () => expect(await state(LARGE)).toMatchObject({ state: 'indexing', stage: 'search index', done: firstWrite, total: 2108 }));
+  });
+
+  it('is written only by the heartbeat', async () => {
+    await startHeldInSearchIndex(60_000);
+
+    expect(await state(LARGE)).toMatchObject({ state: 'indexing', stage: null, done: null, total: null, startedAt: expect.any(Date) });
   });
 });

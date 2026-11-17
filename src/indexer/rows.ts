@@ -1,9 +1,7 @@
 import type { Prisma, PrismaClient } from '../generated/prisma/client.ts';
-import { logger } from '../logger.ts';
 import { fileStorageMeta } from '../repository/file-storage-meta.ts';
 import type { Derivation, DerivedEntity } from './derive.ts';
-
-const log = logger.child({ module: 'indexer/rows' });
+import type { Progress } from './progress.ts';
 
 /** Rows per transaction */
 const BATCH_SIZE = 1000;
@@ -31,20 +29,20 @@ export class RowsWriter {
   }
 
   /** The ids of the rows written: an entity another crate already has a row for keeps that row */
-  async write(derivation: Derivation) {
+  async write(derivation: Derivation, progress: Progress) {
+    progress.start('database index', derivation.entities.length);
     const written = new Set<string>();
     for (const batch of batches(derivation.entities)) {
       const fileRows = batch.map((entity) => fileRow(derivation.crateId, entity));
       try {
         await this.writeBatch(batch, fileRows, written);
       } catch {
-        // Row by row, to skip only the entity that can't be written
+        // Row by row, so the failure names the entity that can't be written
         for (const [i, entity] of batch.entries()) {
-          await this.writeBatch([entity], [fileRows[i]], written).catch((error) =>
-            log.error({ err: error, crateId: derivation.crateId, entityId: entity.row.id }, 'Error indexing entity'),
-          );
+          await progress.onItem(entity.row.id, () => this.writeBatch([entity], [fileRows[i]], written));
         }
       }
+      progress.advance(batch.length);
     }
     return written;
   }

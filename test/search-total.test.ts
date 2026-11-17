@@ -1,10 +1,6 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { ocflTestbed } from './app.ts';
 import { collection, crate, object } from './crate-builder.ts';
-
-const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
-
-vi.mock('../src/logger.ts', async () => (await import('./logs.ts')).capturingLogger(logs, 'info'));
 
 const ROOT = 'arcp://name,unwritable';
 const WRITTEN = `${ROOT}/written`;
@@ -23,29 +19,22 @@ beforeAll(async () => {
 });
 
 describe('an entity whose row fails to be written', () => {
-  it('is not counted by search', async () => {
-    const { total, entities, facets } = await search({ query: '', limit: 100 });
-
-    expect(entities.map(({ id }: { id: string }) => id).sort()).toEqual([ROOT, WRITTEN]);
-    expect(total).toBe(2);
-    expect(facets.recordType.reduce((sum: number, { count }: { count: number }) => sum + count, 0)).toBe(2);
+  it('fails the job, recording the entity, with no indexed version', async () => {
+    expect(await testbed.started.indexQueue.crate(ROOT)).toMatchObject({ state: 'failed', stage: 'database index', failedOn: UNWRITTEN, attempts: 1 });
   });
 
-  it('is not counted once the crate is reindexed', async () => {
+  it('leaves none of the crate counted by search', async () => {
+    const { total, entities } = await search({ query: '', limit: 100 });
+
+    expect(entities).toEqual([]);
+    expect(total).toBe(0);
+  });
+
+  it('fails the job again once the crate is reindexed', async () => {
     await testbed.started.indexQueue.reindex(ROOT);
     await testbed.started.workTheQueue();
 
-    const { total, entities } = await search({ query: '', limit: 100 });
-
-    expect(entities.map(({ id }: { id: string }) => id).sort()).toEqual([ROOT, WRITTEN]);
-    expect(total).toBe(2);
-  });
-
-  it('logs the skip with the crate and entity ids', () => {
-    expect(logs).toContainEqual(expect.objectContaining({ level: 40, crateId: ROOT, entityId: UNWRITTEN, msg: 'Skipped: no database row' }));
-  });
-
-  it('is not counted among the entities the job wrote', () => {
-    expect(logs).toContainEqual(expect.objectContaining({ module: 'indexer', crateId: ROOT, entities: 2, msg: 'Job finished' }));
+    expect(await testbed.started.indexQueue.crate(ROOT)).toMatchObject({ state: 'failed', failedOn: UNWRITTEN });
+    expect((await search({ query: '', limit: 100 })).total).toBe(0);
   });
 });

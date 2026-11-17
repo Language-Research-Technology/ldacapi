@@ -3,6 +3,7 @@ import { logger } from '../logger.ts';
 import type { Document, SearchBackend } from '../search-backend.ts';
 import type { ReadText } from './crate.ts';
 import type { Derivation } from './derive.ts';
+import type { Progress } from './progress.ts';
 import { crateRowIds } from './rows.ts';
 
 const log = logger.child({ module: 'indexer/documents' });
@@ -30,22 +31,27 @@ export class DocumentsWriter {
   }
 
   /** Only for entities in `written`, as arocapi drops a hit without a row but still counts it */
-  async write(derivation: Derivation, readText: ReadText, written: Set<string>) {
+  async write(derivation: Derivation, readText: ReadText, written: Set<string>, progress: Progress) {
+    progress.start('search index', derivation.entities.length);
     let batch: Document[] = [];
     let bytes = 0;
+    let skipped = 0;
     const flush = async () => {
       if (batch.length > 0) {
         await this.search.index(batch);
       }
+      progress.advance(batch.length + skipped);
+      skipped = 0;
       batch = [];
       bytes = 0;
     };
     for (const { document, textPath } of derivation.entities) {
       if (!written.has(document.id)) {
         log.warn({ crateId: derivation.crateId, entityId: document.id }, 'Skipped: no database row');
+        skipped++;
         continue;
       }
-      const text = textPath && (await readText(textPath));
+      const text = textPath && (await progress.onItem(document.id, () => readText(textPath)));
       const doc = text ? { ...document, text } : document;
       const size = Buffer.byteLength(JSON.stringify(doc));
       if (batch.length === MAX_DOCUMENTS || bytes + size > MAX_BYTES) {
@@ -53,6 +59,7 @@ export class DocumentsWriter {
       }
       batch.push(doc);
       bytes += size;
+      log.debug({ crateId: derivation.crateId, entityId: document.id }, 'Entity indexed');
     }
     await flush();
   }
