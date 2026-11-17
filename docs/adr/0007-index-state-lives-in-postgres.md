@@ -14,9 +14,9 @@ Index state is kept in our own Postgres tables, beside the database index.
 
 - The queue is a table of index jobs. A worker claims a job in a transaction that skips rows another worker has locked, and the database enforces one running and one waiting job per crate.
 - Each crate known to be in the repository has one record: its name, its indexed version, when that was indexed, and how many entities and files the job wrote. The indexed version is cleared before a job changes either index and set as the job's last step, so a crate is either indexed at a known version or needs a job.
-- Deleting a crate's indexes keeps its record, as not indexed. A record is removed only when a job finds its crate is gone from the repository.
-- A job that succeeds is removed; its result is the record. A failed job is kept with its error until another job for that crate is asked for.
-- Each worker, and each CLI run while it runs the queue, records a heartbeat. A job whose worker has gone silent is returned to the queue.
+- Deleting a crate's indexes keeps its record, as not indexed. A record is removed only when a job finds its crate is gone from the repository and no other job for it has been asked for.
+- A job that succeeds is removed; its result is the record. A failed job keeps its error until the next job for that crate finishes: success removes it, a new failure replaces it. Deleting everything removes every failed job.
+- Each worker, and each CLI command while it works the queue, records a heartbeat. A job whose worker has gone silent is returned to the queue.
 - The admin pages read these tables and never the repository. A crate's index state is derived from its jobs and its record.
 
 ## Consequences

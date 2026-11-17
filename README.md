@@ -143,11 +143,13 @@ crate.
 
 - It runs one job at a time. A job reads its crate from the repository, writes
   its database index (crate links, and Entity and File rows), then its search
-  index, then records the crate's indexed version.
+  index, then its share of Oni's aggregates, then records the crate's indexed
+  version.
 - Index skips a crate whose indexed version is its head version. Reindex
   deletes and rebuilds it whatever its version.
 - Indexing a crate gone from the repository deletes its indexes and its record,
-  and succeeds.
+  and succeeds; the record stays, not indexed, if another job for the crate
+  has been asked for meanwhile.
 - Any error in a crate fails its job at once, and nothing in it is skipped, so
   an indexed version always means the whole crate is indexed: an entity whose
   row can't be written fails it, as does a document search refuses. The failed
@@ -170,12 +172,17 @@ crate.
   (crate id, job id, stage, stack trace). At `LOG_LEVEL=debug` it also logs
   each entity it indexes, each file whose text it reads, and each crate
   skipped as already indexed.
-- On SIGTERM or SIGINT it puts the job it is running back in the queue, as if
-  never tried, and exits at once.
-- A worker silent for 5 minutes is dead. The next worker or `pnpm index` run
-  to look for work puts its job back in the queue, to run again; a job whose
-  worker dies on three attempts fails. A worker wrongly judged dead drops its
-  result rather than write over the job's new run.
+- On SIGTERM or SIGINT it stops once the step the running job is on ends, puts
+  that job back in the queue, as if never tried, and exits. If Postgres can't
+  be reached then, it exits anyway, leaving the job to be recovered as a dead
+  worker's.
+- A worker silent for 5 minutes is dead. The next worker or `pnpm index` to
+  look for work puts its job back in the queue, to run again; a job whose
+  worker dies on three attempts fails. A worker wrongly judged dead stops its
+  job when its next heartbeat finds another worker holds it, and writes
+  nothing more.
+- A crate whose root id isn't the id of the OCFL object holding it fails at
+  deriving.
 - If Postgres or OpenSearch can't be reached, it logs that it has paused, puts
   its job back in the queue, and tries again every 5 seconds, carrying on once
   both answer.
@@ -445,10 +452,12 @@ link to sign in again.
 
 The crates page shows each crate's index state. It can index, reindex or
 delete one crate's indexes, or a crate's and those of the crates under it (the
-"tree" actions): the crates whose id is the crate's id followed by `/`. It can
-also index or reindex every crate in the repository, which deletes the indexes
-of crates gone from it, or delete every index, which empties both indexes,
-discards the jobs waiting and leaves every crate listed as not indexed. An
+"tree" actions): the listed crates whose id is the crate's id followed by `/`.
+It can also index or reindex every crate in the repository, which deletes the
+indexes of crates gone from it and fails a crate it can't read, or delete every
+index, which empties both indexes, discards the jobs waiting, clears every
+failure and leaves every crate listed as not indexed. If deleting every index
+fails, the page says so, with the error, until it next succeeds. An
 action on a crate the page doesn't list is refused. The page reloads itself
 until the work finishes. Each action, accepted or refused, is logged at `info`
 with the admin's `sub`.
@@ -630,9 +639,8 @@ On a new host, in `deploy/`:
    docker compose run --rm api pnpm index
    ```
 
-   `pnpm index` works the queue beside the worker and exits once no job is
-   waiting, which can be before the worker finishes its last one, so check the
-   admin pages either way.
+   `pnpm index` works the queue beside the worker and exits once every job it
+   asked for has finished, whichever worker ran it, summarising them.
 
 5. Switch traffic once the admin pages show every crate as indexed and none
    failed: every count at the top but "indexed" is 0. Point `DOMAIN`'s DNS at
