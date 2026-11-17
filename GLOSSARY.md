@@ -32,6 +32,18 @@ _Avoid_: Structural index
 The search documents in arocapi's search backend, one per entity that has a row.
 _Avoid_: OpenSearch index (one backend's storage)
 
+**Virtual crate**:
+The Metadata served for one entity: an RO-Crate with that entity as its root and everything it links to (ADR 0004). Never the crate as deposited.
+_Avoid_: Entity crate, exploded crate
+
+**Metadata-only crate**:
+A crate that describes files the repository doesn't hold. Its File entities are indexed and visible, but have no Content.
+_Avoid_: Damaged crate (one that can't be read)
+
+**Shared entity**:
+An entity that more than one crate describes under the same absolute IRI, indexed as one entity.
+_Avoid_: Duplicate entity
+
 ### Authentication
 
 **Upstream provider**:
