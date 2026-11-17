@@ -6,6 +6,7 @@ import { Client } from '@opensearch-project/opensearch';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/configuration.ts';
 import { prisma } from '../src/prisma.ts';
+import { emptyEverything as emptyIndexes } from './app.ts';
 import { collection, crate, writeCrates } from './crate-builder.ts';
 
 const crateIds = [
@@ -15,7 +16,9 @@ const crateIds = [
   'arcp://name,distributed_metadata_restricted',
 ];
 
-const emptyEverything = () => prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
+const opensearch = new Client({ node: config.opensearchUrl });
+
+const emptyEverything = () => emptyIndexes(prisma, opensearch);
 
 /**
  * A new OCFL repository, imported by `pnpm crates:import` from `source` (test-data by default) with `args`, and how to run
@@ -38,7 +41,7 @@ const repository = () => {
 
 afterAll(async () => {
   await emptyEverything();
-  await prisma.$disconnect();
+  await Promise.all([prisma.$disconnect(), opensearch.close()]);
 });
 
 describe('import', () => {
@@ -63,7 +66,6 @@ describe('import', () => {
   });
 
   it('indexes every crate into OpenSearch', async () => {
-    const opensearch = new Client({ node: config.opensearchUrl });
     const rows = await prisma.entity.findMany({ select: { id: true } });
     const ids = rows.map(({ id }) => id);
     expect(ids).toEqual(expect.arrayContaining(crateIds));
@@ -73,7 +75,6 @@ describe('import', () => {
       const { body } = await opensearch.count({ index: config.search.entityIndex, body: { query: { ids: { values: ids } } } });
       expect(body.count).toBe(ids.length);
     });
-    await opensearch.close();
   });
 
   it('records each crate as indexed at its head version', async () => {

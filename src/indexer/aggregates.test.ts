@@ -30,10 +30,7 @@ const entity = async (id: string) => {
   return { counts, language, communicationMode, mediaType };
 };
 
-const run = async (ask: () => Promise<unknown>) => {
-  await ask();
-  await testbed.started.workTheQueue();
-};
+const { run } = testbed;
 
 beforeEach(async () => {
   await testbed.indexOnly(SYDNEY_SPEAKS, SEVENTIES, EIGHTIES);

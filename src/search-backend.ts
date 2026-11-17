@@ -51,7 +51,7 @@ export async function prepareSearchIndex(client: Client, search: SearchBackend) 
 }
 
 /** Makes changes searchable now, rather than at OpenSearch's next periodic refresh */
-export const refreshSearchIndex = (client: Client) => client.indices.refresh({ index: config.search.entityIndex, ignore_unavailable: true });
+export const refreshSearchIndex = (client: Client, index = config.search.entityIndex) => client.indices.refresh({ index, ignore_unavailable: true });
 
 /** Deletes the search index and every document in it */
-export const deleteSearchIndex = (client: Client) => client.indices.delete({ index: config.search.entityIndex, ignore_unavailable: true });
+export const deleteSearchIndex = (client: Client, index = config.search.entityIndex) => client.indices.delete({ index, ignore_unavailable: true });

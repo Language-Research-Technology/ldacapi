@@ -2,7 +2,7 @@ import { glob, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
-import { type Crate, collection, crate, file, fileDescribedButNotHeld, object } from '../../test/crate-builder.ts';
+import { collection, crate, file, fileDescribedButNotHeld, object } from '../../test/crate-builder.ts';
 import type { SearchBackend } from '../search-backend.ts';
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
@@ -32,15 +32,6 @@ const FIVE_MB = `${'early '.repeat(100_000)}${'within '.repeat(60_000)}${'beyond
 const LARGE_TEXTS = ['a.txt', 'b.txt', 'c.txt', 'd.txt', 'e.txt', 'f.txt'];
 const LARGE_AUDIO = Array.from({ length: 2100 }, (_, i) => `audio/${i}.wav`);
 
-/** `built` without the metadata descriptor's licence */
-const withoutMetadataLicence = (built: Crate): Crate => ({
-  ...built,
-  metadata: {
-    ...built.metadata,
-    '@graph': built.metadata['@graph'].map(({ license, ...entity }) => (entity['@id'] === 'ro-crate-metadata.json' ? entity : { ...entity, license })),
-  },
-});
-
 const testbed = ocflTestbed(
   crate(collection(ROOT, { name: 'Indexer', hasMember: [OBJECT] }), [
     object(OBJECT, { memberOf: ROOT, hasPart: ['held.txt', 'missing.txt'] }),
@@ -48,7 +39,7 @@ const testbed = ocflTestbed(
     fileDescribedButNotHeld('missing.txt', { encodingFormat: 'text/plain', isPartOf: OBJECT }),
   ]),
   crate(collection(UNLICENSED, { licence: null })),
-  withoutMetadataLicence(crate(collection(NO_METADATA_LICENCE))),
+  crate(collection(NO_METADATA_LICENCE), [], { metadataLicence: null }),
   crate(collection(ORPHAN, { memberOf: 'arcp://name,not-in-the-repository' })),
   crate(collection(OTHER)),
   crate({ entity: { '@id': UNPROFILED, '@type': 'Dataset', name: 'Unprofiled' } }),
@@ -73,14 +64,9 @@ const details = { message: 'Changed by a test', user: { name: 'Test' } };
 const addCrate = (crateId: string) =>
   testbed.started.repository.create(crateId, details, (draft) => draft.write('ro-crate-metadata.json', JSON.stringify(crate(collection(crateId)).metadata)));
 
-const run = async (ask: () => Promise<unknown>) => {
-  await ask();
-  await testbed.started.workTheQueue();
-};
+const { run, state } = testbed;
 
 const index = (crateId: string) => run(() => testbed.started.indexQueue.index(crateId));
-
-const state = (crateId: string) => testbed.started.indexQueue.crate(crateId);
 
 const found = async (query: string) => (await testbed.search({ query })).entities.map(({ id }: { id: string }) => id);
 

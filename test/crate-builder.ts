@@ -76,9 +76,15 @@ export const licence = (id: string, properties: Properties = {}): Part => ({ ent
 /**
  * A crate of `root` and `parts`. The root's licence and the metadata licence default to CC BY 4.0
  */
-export const crate = (root: Part, parts: Part[] = [], { metadataLicence = CC_BY }: { metadataLicence?: string } = {}): Crate => {
+/** A crate of `root` and `parts`, its metadata under `metadataLicence`, or none when null */
+export const crate = (root: Part, parts: Part[] = [], { metadataLicence = CC_BY }: { metadataLicence?: string | null } = {}): Crate => {
   const id = root.entity['@id'];
-  const descriptor = { '@id': 'ro-crate-metadata.json', '@type': 'CreativeWork', about: ref(id), license: ref(metadataLicence) };
+  const descriptor = {
+    '@id': 'ro-crate-metadata.json',
+    '@type': 'CreativeWork',
+    about: ref(id),
+    ...(metadataLicence !== null && { license: ref(metadataLicence) }),
+  };
   const rootEntity = licensed(root.entity, root.licence === undefined ? CC_BY : root.licence).entity;
   const entities = [descriptor, rootEntity, ...parts.map(({ entity }) => entity)];
   const stated = new Set(entities.map((entity) => entity['@id']));

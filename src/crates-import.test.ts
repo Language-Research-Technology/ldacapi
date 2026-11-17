@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { emptyEverything } from '../test/app.ts';
 import { collection, crate, writeCrates } from '../test/crate-builder.ts';
 import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
@@ -75,11 +76,11 @@ describe('crates:import', () => {
     };
 
     beforeEach(async () => {
-      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
+      await emptyEverything(prisma, opensearch);
     });
 
     afterAll(async () => {
-      await prisma.$executeRaw`TRUNCATE index_job, crate, index_worker, aggregate, file, entity CASCADE`;
+      await emptyEverything(prisma, opensearch);
       await Promise.all([prisma.$disconnect(), opensearch.close()]);
     });
 

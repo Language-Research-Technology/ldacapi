@@ -39,15 +39,6 @@ const thing = (id: string, type: string | string[], profile?: string, properties
   entity: { '@id': id, '@type': type, ...(profile && { conformsTo: { '@id': `https://w3id.org/ldac/profile#${profile}` } }), ...properties },
 });
 
-/** `built` without the metadata descriptor's licence */
-const withoutMetadataLicence = (built: Crate): Crate => ({
-  ...built,
-  metadata: {
-    ...built.metadata,
-    '@graph': built.metadata['@graph'].map(({ license, ...entity }) => (entity['@id'] === 'ro-crate-metadata.json' ? entity : { ...entity, license })),
-  },
-});
-
 describe('derivation', () => {
   it('loads with no configuration, so reads neither it nor the database', () => {
     const loaded = spawnSync('node', ['--input-type=module', '-e', "await import('./src/indexer/derive.ts')"], {
@@ -291,13 +282,13 @@ describe('derivation', () => {
     });
 
     it('is else the default', async () => {
-      const built = withoutMetadataLicence(crate(collection(ROOT)));
+      const built = crate(collection(ROOT), [], { metadataLicence: null });
 
       expect((await entityOf(built, ROOT, { defaultMetadataLicense: RESTRICTED })).row.metadataLicenseId).toBe(RESTRICTED);
     });
 
     it('can’t be resolved for a crate with none and no default, which fails', async () => {
-      await expect(derived(withoutMetadataLicence(crate(collection(ROOT))))).rejects.toThrow(
+      await expect(derived(crate(collection(ROOT), [], { metadataLicence: null }))).rejects.toThrow(
         'The crate has no metadata licence, and none is configured as the default',
       );
     });

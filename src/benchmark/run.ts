@@ -1,17 +1,17 @@
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { open, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
 import { Client } from '@opensearch-project/opensearch';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { config } from '../configuration.ts';
 import { importCrates } from '../crates-import.ts';
-import { PrismaClient } from '../generated/prisma/client.ts';
+import type { PrismaClient } from '../generated/prisma/client.ts';
 import { aggregatesOf } from '../oni.ts';
 import { openOrCreateRepository } from '../repository/repository.ts';
+import { createScratchIndexes, prismaFor } from '../scratch-indexes.ts';
+import { refreshSearchIndex } from '../search-backend.ts';
 import { type GenerateOptions, generateCollection } from './generate.ts';
 
 const PROJECT_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -49,61 +49,17 @@ export async function prepareRepository(workDir: string, options: GenerateOption
   return { root, workDir, crates, entities };
 }
 
-const prismaFor = (url: URL) => new PrismaClient({ adapter: new PrismaPg({ connectionString: url.toString() }) });
-
-/** A new database, migrated, and a search index name, each named apart from any other run's */
-async function freshIndexes() {
-  const suffix = `benchmark_${randomBytes(3).toString('hex')}`;
-  const databaseUrl = new URL(config.databaseUrl);
-  const database = `${databaseUrl.pathname.slice(1)}_${suffix}`;
-  databaseUrl.pathname = `/${database}`;
-  const entityIndex = `${config.search.entityIndex}_${suffix}`;
-
-  const maintenanceUrl = new URL(config.databaseUrl);
-  maintenanceUrl.pathname = '/postgres';
-  const admin = prismaFor(maintenanceUrl);
+/** How many rows and search documents the scratch indexes hold, and how long Oni's aggregates take to read */
+async function measureIndexes({ databaseUrl, entityIndex }: { databaseUrl: URL; entityIndex: string }) {
+  const prisma = prismaFor(databaseUrl);
   const opensearch = new Client({ node: config.opensearchUrl });
-  await admin.$executeRawUnsafe(`CREATE DATABASE "${database}"`);
-
-  const drop = async () => {
-    await admin.$executeRawUnsafe(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
-    await opensearch.indices.delete({ index: entityIndex, ignore_unavailable: true });
-    await opensearch.indices.deleteIndexTemplate({ name: entityIndex }).catch(() => {});
-    await Promise.all([admin.$disconnect(), opensearch.close()]);
-  };
-
   try {
-    await promisify(execFile)('pnpm', ['exec', 'prisma', 'migrate', 'deploy'], {
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, DATABASE_URL: databaseUrl.toString() },
-    });
-  } catch (error) {
-    await drop();
-    throw error;
+    await refreshSearchIndex(opensearch, entityIndex);
+    const { body } = await opensearch.count({ index: entityIndex });
+    return { rows: await prisma.entity.count(), documents: body.count, aggregatesRead: await timeAggregatesRead(prisma) };
+  } finally {
+    await Promise.all([prisma.$disconnect(), opensearch.close()]);
   }
-
-  /** How many rows and search documents the indexes hold */
-  const count = async () => {
-    const prisma = prismaFor(databaseUrl);
-    try {
-      await opensearch.indices.refresh({ index: entityIndex, ignore_unavailable: true });
-      const { body } = await opensearch.count({ index: entityIndex });
-      return { rows: await prisma.entity.count(), documents: body.count };
-    } finally {
-      await prisma.$disconnect();
-    }
-  };
-
-  const aggregatesRead = async () => {
-    const prisma = prismaFor(databaseUrl);
-    try {
-      return await timeAggregatesRead(prisma);
-    } finally {
-      await prisma.$disconnect();
-    }
-  };
-
-  return { databaseUrl, entityIndex, count, aggregatesRead, drop };
 }
 
 /** Reads of the page measured, after one to warm up */
@@ -166,7 +122,10 @@ async function measure(args: string[], env: NodeJS.ProcessEnv, logFile: string) 
  * process and taking its peak memory. Its log goes to `index.log` in the work directory.
  */
 export async function runBenchmark(repository: BenchmarkRepository, args = INDEX_EVERYTHING) {
-  const indexes = await freshIndexes();
+  const indexes = await createScratchIndexes(
+    { databaseUrl: config.databaseUrl, opensearchUrl: config.opensearchUrl, entityIndex: config.search.entityIndex },
+    `benchmark_${randomBytes(3).toString('hex')}`,
+  );
   const logFile = join(repository.workDir, 'index.log');
   try {
     const env = {
@@ -177,7 +136,7 @@ export async function runBenchmark(repository: BenchmarkRepository, args = INDEX
       LOG_LEVEL: 'info',
     };
     const measured = await measure(args, env, logFile);
-    return { ...measured, ...(await indexes.count()), aggregatesRead: await indexes.aggregatesRead(), logFile };
+    return { ...measured, ...(await measureIndexes(indexes)), logFile };
   } finally {
     await indexes.drop();
   }

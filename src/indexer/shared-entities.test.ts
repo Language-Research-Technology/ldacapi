@@ -34,16 +34,11 @@ const testbed = ocflTestbed(
 
 const details = { message: 'Changed by a test', user: { name: 'Test' } };
 
-const run = async (ask: () => Promise<unknown>) => {
-  await ask();
-  await testbed.started.workTheQueue();
-};
+const { run, state } = testbed;
 
 const index = (...crateIds: string[]) => testbed.indexOnly(...crateIds);
 
 const remove = (crateId: string) => run(() => testbed.started.indexQueue.delete(crateId));
-
-const state = (crateId: string) => testbed.started.indexQueue.crate(crateId);
 
 /** Puts `built` in the repository as a new crate, or a new version of it */
 const put = async (built: Crate) => {

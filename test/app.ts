@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
+import type { Client } from '@opensearch-project/opensearch';
 import type { StorageBackend } from 'arocapi';
 import { afterAll, beforeAll, expect, vi } from 'vitest';
+import type { PrismaClient } from '../src/generated/prisma/client.ts';
 import type { IndexQueue } from '../src/index-queue/index-queue.ts';
 import { type Crate, writeCrates } from './crate-builder.ts';
 
@@ -21,6 +23,14 @@ export const contentEverywhere: Storage = async (file) => ({
   contentLength: 7,
   contentType: file.mediaType ?? 'text/plain',
 });
+
+/** Deletes every index job, crate record, worker, aggregate, row and search document */
+export const emptyEverything = async (prisma: PrismaClient, opensearch: Client) => {
+  await prisma.$executeRaw`TRUNCATE index_job, crate_link, crate, index_worker, aggregate, file, entity CASCADE`;
+  // Imported once the caller has read its configuration
+  const { deleteSearchIndex } = await import('../src/search-backend.ts');
+  await deleteSearchIndex(opensearch);
+};
 
 /** What `buildApp` needs besides search, for an app that serves no content and is never asked to index */
 export const noRepository = { storage: noContent, indexQueue: {} as IndexQueue };
@@ -72,10 +82,7 @@ export const buildTestApp = async (env: Record<string, string>, options: { stora
       },
 
       /** Deletes every index job, crate record, worker, aggregate, row and search document */
-      async emptyEverything() {
-        await prisma.$executeRaw`TRUNCATE index_job, crate_link, crate, index_worker, aggregate, file, entity CASCADE`;
-        await opensearch.indices.delete({ index: config.search.entityIndex, ignore_unavailable: true });
-      },
+      emptyEverything: () => emptyEverything(prisma, opensearch),
     };
   } finally {
     vi.unstubAllEnvs();
@@ -130,6 +137,15 @@ export const ocflTestbed = (...crates: Crate[]) => {
     get started() {
       return started;
     },
+
+    /** Asks for jobs with `ask`, then works the queue until it is empty */
+    async run(ask: () => Promise<unknown>) {
+      await ask();
+      await started.workTheQueue();
+    },
+
+    /** The index state of `crateId` */
+    state: (crateId: string) => started.indexQueue.crate(crateId),
 
     /** Empties everything, then indexes `crateIds` in that order */
     async indexOnly(...crateIds: string[]) {

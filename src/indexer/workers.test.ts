@@ -17,7 +17,7 @@ const UNLICENSED = 'arcp://name,unlicensed';
 
 const testbed = ocflTestbed(crate(collection(FIRST)), crate(collection(UNLICENSED, { licence: null })), ...MANY.map((id) => crate(collection(id))));
 
-const state = (crateId: string) => testbed.started.indexQueue.crate(crateId);
+const { state } = testbed;
 
 const TEN_MINUTES_AGO = () => new Date(Date.now() - 10 * 60 * 1000);
 
