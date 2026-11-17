@@ -12,18 +12,18 @@ arocapi's queries can't join to our tables, and its models have no column for th
 
 **Crate links.** A link table in our own models records each (crate, entity) pair, indexed both ways. It is the only record of which crates contain an entity; `Entity.meta` has no `crateId`. Indexing a crate writes its links; deleting a crate removes its links, then removes the entities left with none.
 
-**Collections, objects and files have one crate.** When a crate describes one that another crate already holds, or describes an id as a different kind of entity than the row has, that entity is refused: the holder keeps the row, the rest of the crate is indexed, and the clash is reported once per crate as an error naming both crates.
+**Collections, objects and files have one crate.** When a crate describes one that another crate already holds, or describes an id as a different kind of entity than the row has, the holder keeps the row and the second crate's index job fails, with an error naming both crates and the entity. That crate has no indexed version until its data is fixed.
 
 **Shared entities have one winning copy.** For a person, organisation or software entity, each link keeps that crate's derived copy. The row and the search document are wholly the copy of one crate: a crate whose metadata licence is open before one whose licence isn't, then the lowest crate id. Copies are never merged. When the winning crate is deleted or stops containing the entity, the row and document are rebuilt from the next crate's stored copy, without reading the repository.
 
 **Shared entities have no root collection.** `rootCollection` is null on every person, organisation and software row, whether or not a second crate contains it.
 
-Rejected: a reference count (can't say which crates, drifts when a run dies, no lookup by crate); a `roCrateIds` array in `meta` (unindexed, so every lookup by crate scans); last indexed wins (the repository walk is unordered, so a rebuild could change a row's licences); merging copies (no sound merge of two licences, and a virtual crate matching no deposited crate); the winning crate's root collection (a person in four collections would be found under one).
+Rejected: indexing the rest of a clashing crate and only logging the clash (the crate would look indexed with an entity missing, and the admin pages would never show it); a reference count (can't say which crates, drifts when a run dies, no lookup by crate); a `roCrateIds` array in `meta` (unindexed, so every lookup by crate scans); last indexed wins (the repository walk is unordered, so a rebuild could change a row's licences); merging copies (no sound merge of two licences, and a virtual crate matching no deposited crate); the winning crate's root collection (a person in four collections would be found under one).
 
 ## Consequences
 
 - Deleting or reindexing one crate leaves entities that other crates contain, and is database work only.
-- A full rebuild gives the same shared rows whatever order crates are indexed in. Which crate holds a clashing collection, object or file does depend on order; the error is reported on every run until the data is fixed.
+- A full rebuild gives the same shared rows whatever order crates are indexed in. Which crate holds a clashing collection, object or file does depend on order; the other crate fails on every run until the data is fixed, and shows as failed on the admin pages.
 - What a request reads of a shared entity is one crate's description under that crate's licence, so nothing from a restricted crate shows through an open copy. A restricted copy wins only when no open one exists.
 - The winner depends on the configured open licences, so changing them needs a reindex, as it already does for access control.
 - A shared entity counts in each crate that contains it, so per-crate counts sum to more than the number of rows.
