@@ -36,7 +36,11 @@ export class RowsWriter {
     for (const batch of chunks(derivation.entities, BATCH_SIZE)) {
       try {
         await this.writeBatch(derivation, batch);
-      } catch {
+      } catch (error) {
+        if (error instanceof ClashError) {
+          progress.on = error.entityId;
+          throw error;
+        }
         // Row by row, so the failure names the entity that can't be written
         for (const entity of batch) {
           await progress.onItem(entity.row.id, () => this.writeBatch(derivation, [entity]));
@@ -136,10 +140,3 @@ export class RowsWriter {
 /** The id of each entity `crateId` contains */
 const crateEntityIds = async (prisma: PrismaClient, crateId: string) =>
   (await prisma.crateLink.findMany({ where: { crateId }, select: { entityId: true } })).map(({ entityId }) => entityId);
-
-/** How many entities and files `crateId` contains, shared ones included */
-export const countRows = async (prisma: PrismaClient, crateId: string) => {
-  const [{ files }] = await prisma.$queryRaw<[{ files: number }]>`
-    SELECT count(*)::int AS files FROM crate_link link JOIN file ON file.id = link."entityId" WHERE link."crateId" = ${crateId}`;
-  return { entities: await prisma.crateLink.count({ where: { crateId } }), files };
-};

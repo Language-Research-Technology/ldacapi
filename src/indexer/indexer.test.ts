@@ -22,6 +22,8 @@ const LARGE = 'arcp://name,large';
 const SEVERAL_PARENTS = 'arcp://name,several-parents';
 const UNPROFILED = 'arcp://name,unprofiled';
 const LONG_TEXT = 'arcp://name,long-text';
+const ESCAPED = 'arcp://name,escaped';
+const ESCAPED_TEXTS = ['x.txt', 'y.txt'];
 const UNREADABLE = 'arcp://name,unreadable';
 // 5 MB, its last words past the first 1 MB
 const FIVE_MB = `${'early '.repeat(100_000)}${'within '.repeat(60_000)}${'beyond '.repeat(600_000)}`.slice(0, 5_000_000);
@@ -57,6 +59,10 @@ const testbed = ocflTestbed(
     fileDescribedButNotHeld('https://example.org/media/outside.wav'),
   ]),
   crate(collection(LONG_TEXT, { hasPart: ['long.txt'] }), [file('long.txt', { content: FIVE_MB, encodingFormat: 'text/plain' })]),
+  crate(
+    collection(ESCAPED, { hasPart: ESCAPED_TEXTS }),
+    ESCAPED_TEXTS.map((path) => file(path, { content: '\u0001'.repeat(900_000), encodingFormat: 'text/plain' })),
+  ),
   crate(collection(UNREADABLE, { hasPart: ['unreadable.txt'] }), [file('unreadable.txt', { content: 'Gone', encodingFormat: 'text/plain' })]),
   crate({ entity: { '@id': UNNAMED, '@type': ['Dataset', 'RepositoryCollection'], conformsTo: { '@id': 'https://w3id.org/ldac/profile#Collection' } } }),
 );
@@ -195,6 +201,22 @@ describe('an index job', () => {
     expect(await state(LARGE)).toMatchObject({ state: 'indexed', entities: 2108, files: 2107 });
     expect((await testbed.search({ query: '', limit: 1 })).total).toBe(2108);
     expect((await testbed.search({ query: 'words', limit: 10 })).total).toBe(LARGE_TEXTS.length);
+  });
+
+  it('keeps each bulk write under 5 MB as sent, text escaped, unless it holds one document', async () => {
+    const sizes: number[] = [];
+    await testbed.started.indexQueue.index(ESCAPED);
+    const { search } = testbed.started.indexer;
+
+    await workTheQueueWith({
+      index: async (documents) => {
+        sizes.push(documents.length === 1 ? 0 : Buffer.byteLength(JSON.stringify(documents)));
+        await search.index(documents);
+      },
+    });
+
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(5 * 1024 * 1024);
   });
 
   it('logs a warning for each entity with several candidate parents', async () => {

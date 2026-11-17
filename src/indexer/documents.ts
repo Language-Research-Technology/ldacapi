@@ -1,4 +1,4 @@
-import type { PrismaClient } from '../generated/prisma/client.ts';
+import { Prisma, type PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import type { Document, SearchBackend } from '../search-backend.ts';
 import { chunks } from './chunks.ts';
@@ -43,22 +43,25 @@ export class DocumentsWriter {
         await lockEntities(tx, batch);
         const links = linksById(
           batch,
-          await tx.crateLink.findMany({ where: { entityId: { in: batch } }, select: { entityId: true, crateId: true, openMetadata: true, copy: true } }),
+          await tx.crateLink.findMany({ where: { entityId: { in: batch } }, select: { entityId: true, crateId: true, openMetadata: true } }),
         );
         const unlinked: string[] = [];
-        const copies: Document[] = [];
+        const winners: { entityId: string; crateId: string }[] = [];
         for (const [id, all] of links) {
           const best = winner(all);
-          if (!best) {
+          if (best) {
+            winners.push({ entityId: id, crateId: best.crateId });
+          } else {
             unlinked.push(id);
-            continue;
-          }
-          // A held entity has no copy only when another crate claims it while this one's crate is deleted
-          /* v8 ignore next 3 */
-          if (best.copy) {
-            copies.push((best.copy as Copy).document);
           }
         }
+        // A held entity's link has no copy: its crate writes its document
+        const copies =
+          winners.length > 0
+            ? (await tx.crateLink.findMany({ where: { OR: winners, copy: { not: Prisma.DbNull } }, select: { copy: true } })).map(
+                ({ copy }) => (copy as Copy).document,
+              )
+            : [];
         if (unlinked.length > 0) {
           await this.search.remove(unlinked);
         }

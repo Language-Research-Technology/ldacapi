@@ -14,7 +14,7 @@ import { DocumentsWriter } from './documents.ts';
 import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, returnDeadWorkersJobs, succeed, unfinished } from './jobs.ts';
 import { isOutage, waitForServices } from './outage.ts';
 import { Progress } from './progress.ts';
-import { countRows, RowsWriter } from './rows.ts';
+import { RowsWriter } from './rows.ts';
 
 const log = logger.child({ module: 'indexer' });
 
@@ -46,7 +46,7 @@ export type WorkOptions = (
   retryMilliseconds?: number;
 };
 
-type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter; parents: Parents };
+type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter };
 
 const NOT_INDEXED = { indexedVersion: null, indexedAt: null, entities: null, files: null };
 
@@ -86,7 +86,7 @@ async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, pro
 }
 
 /** Deletes everything, or the crate's indexes (then its record, if it is gone from the repository), or indexes it */
-async function runJob(deps: IndexerDeps, writers: Writers, job: Job, progress: Progress): Promise<Outcome> {
+async function runJob(deps: IndexerDeps, writers: Writers, parents: Parents, job: Job, progress: Progress): Promise<Outcome> {
   const { crateId, kind } = job;
   if (crateId === null) {
     return deleteEverything(deps, progress);
@@ -99,11 +99,18 @@ async function runJob(deps: IndexerDeps, writers: Writers, job: Job, progress: P
     await deleteIndexes(deps.prisma, writers, crateId, progress);
     return {};
   }
-  return indexCrate(deps, writers, crateId, kind, progress);
+  return indexCrate(deps, writers, parents, crateId, kind, progress);
 }
 
-async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, crateId: string, kind: IndexJobKind, progress: Progress): Promise<Outcome> {
-  const opened = await openCrate(writers.parents, crateId);
+async function indexCrate(
+  { prisma, repository, licences }: IndexerDeps,
+  writers: Writers,
+  parents: Parents,
+  crateId: string,
+  kind: IndexJobKind,
+  progress: Progress,
+): Promise<Outcome> {
+  const opened = await openCrate(repository, parents, crateId);
   const { indexedVersion } = await prisma.crateRecord.findUniqueOrThrow({ where: { id: crateId } });
   if (kind === 'index' && indexedVersion === opened.version) {
     log.debug({ crateId, version: opened.version }, 'Skipped: already indexed');
@@ -119,19 +126,19 @@ async function indexCrate({ prisma, licences }: IndexerDeps, writers: Writers, c
   await writers.rows.write(derivation, progress);
   await writers.documents.write(derivation, readText, progress);
   await writers.aggregates.write(derivation, progress);
-  const counts = await countRows(prisma, crateId);
+  const counts = { entities: derivation.entities.length, files: derivation.entities.filter(({ file }) => file).length };
   const data = { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts };
   return { logged: { version: opened.version, ...counts }, record: { crateId, data } };
 }
 
 /** Runs the job and records its result, unless it was stopped or met an outage, which the caller releases it for */
-async function run(deps: IndexerDeps, writers: Writers, workerId: string, job: Job, progress: Progress) {
+async function run(deps: IndexerDeps, writers: Writers, parents: Parents, workerId: string, job: Job, progress: Progress) {
   const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
   const started = Date.now();
   log.info({ ...fields, attempt: job.attempts }, 'Job started');
   const dropped = () => log.warn(fields, 'Result dropped: another worker holds the job');
   try {
-    const { logged, record } = await runJob(deps, writers, job, progress);
+    const { logged, record } = await runJob(deps, writers, parents, job, progress);
     if (await succeed(deps.prisma, workerId, job, record)) {
       log.info({ ...fields, ...logged, milliseconds: Date.now() - started }, 'Job finished');
     } else {
@@ -160,8 +167,8 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
     rows: new RowsWriter(prisma),
     documents: new DocumentsWriter(prisma, search),
     aggregates: new AggregatesWriter(prisma),
-    parents: new Parents(deps.repository),
   };
+  const parents = new Parents(deps.repository);
   const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
   let running: { job: Job; progress: Progress } | undefined;
   const beat = async () => {
@@ -172,7 +179,11 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
       log.warn({ err: error }, 'Heartbeat failed');
     }
   };
-  const beating = setInterval(beat, intervals.heartbeatMilliseconds);
+  // One beat at a time, the last awaited before the worker row is removed
+  let beating = Promise.resolve();
+  const beats = setInterval(() => {
+    beating = beating.then(beat);
+  }, intervals.heartbeatMilliseconds);
   let ready = false;
   let swept = false;
   try {
@@ -192,7 +203,7 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
         swept = !job;
         if (job) {
           running = { job, progress: new Progress(signal) };
-          await run(deps, writers, workerId, job, running.progress);
+          await run(deps, writers, parents, workerId, job, running.progress);
         } else if (options.until === 'aborted' || (options.until === 'finished' && (await unfinished(prisma, options.crateIds)))) {
           await sleep(intervals.pollMilliseconds, undefined, { signal }).catch(() => {});
         } else {
@@ -213,7 +224,8 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
       }
     }
   } finally {
-    clearInterval(beating);
+    clearInterval(beats);
+    await beating;
     await removeWorker(prisma, workerId);
   }
 }

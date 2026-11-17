@@ -83,12 +83,26 @@ async function parentCrates(parents: Parents, crate: ROCrate) {
   return chain;
 }
 
-/** The size of each file the object holds, by its path; a file that can't be read fails */
+/** Files whose size is read at once */
+const CONCURRENT_READS = 32;
+
+/** The size of each file the object holds, by its path; a file that can't be read fails, naming it */
 async function heldFiles(object: OcflObject, progress: Progress) {
   const sizes = new Map<string, number>();
-  for (const [path, file] of object.head.files) {
-    sizes.set(path, await progress.onItem(path, () => file.size()));
-  }
+  const files = object.head.files.entries();
+  const reader = async () => {
+    for (const [path, file] of files) {
+      progress.signal.throwIfAborted();
+      sizes.set(
+        path,
+        await file.size().catch((error: unknown) => {
+          progress.on = path;
+          throw error;
+        }),
+      );
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENT_READS }, reader));
   return sizes;
 }
 
@@ -107,9 +121,9 @@ const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => a
 
 export type ReadText = ReturnType<typeof textReader>;
 
-/** The crate `crateId` at its head version in the repository */
-export async function openCrate(parents: Parents, crateId: string) {
-  const object = await parents.repository.open(crateId);
+/** The crate `crateId` at its head version in `repository` */
+export async function openCrate(repository: StorageRoot, parents: Parents, crateId: string) {
+  const object = await repository.open(crateId);
   return {
     version: object.head.number,
     /** Reads and parses the crate's metadata, and finds the files it holds */

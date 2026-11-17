@@ -30,6 +30,8 @@ export function linksById<T extends { entityId: string }>(ids: string[], links: 
 
 /** A collection, object or file another crate holds, or an id two crates describe as different kinds of entity */
 export class ClashError extends Error {
+  entityId: string;
+
   constructor(entityId: string, holder: string, crateId: string, kinds?: { held: string; described: string }) {
     super(
       kinds
@@ -37,5 +39,6 @@ export class ClashError extends Error {
         : `${entityId} is already held by crate ${holder}, so crate ${crateId} can't describe it too`,
     );
     this.name = 'ClashError';
+    this.entityId = entityId;
   }
 }
