@@ -35,6 +35,10 @@ type Scope = { under?: boolean };
 
 export type CrateState = { id: string; name: string | null } & IndexState;
 
+/** How many of `crates` are in each state */
+export const countStates = (crates: CrateState[]) =>
+  Object.fromEntries(STATES.map((state) => [state, crates.filter((crate) => crate.state === state).length])) as Record<StateName, number>;
+
 type StateRow = {
   id: string;
   name: string | null;
@@ -174,13 +178,6 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
 
     /** The crate `crateId`, if it is known to be in the repository */
     crate: async (crateId: string) => (await states(Prisma.sql`WHERE crate.id = ${crateId}`)).map(crateState)[0],
-
-    /** How many crates are in each state */
-    async counts() {
-      const rows = await prisma.$queryRaw<{ state: StateName; count: number }[]>`
-        SELECT state, count(*)::int AS count FROM (${stateRows(Prisma.empty)}) states GROUP BY state`;
-      return Object.fromEntries(STATES.map((state) => [state, rows.find((row) => row.state === state)?.count ?? 0])) as Record<StateName, number>;
-    },
 
     /**
      * Starts a run, noting when each crate was last indexed. Its `summary` says what became of the crates it asked for,

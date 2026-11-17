@@ -1,5 +1,5 @@
 import type { CrateState, StateName } from '../index-queue/index-queue.ts';
-import { ancestorIds, STATES } from '../index-queue/index-queue.ts';
+import { ancestorIds, countStates, STATES } from '../index-queue/index-queue.ts';
 
 type Crate = CrateState & { label: string; children: Crate[] };
 
@@ -93,10 +93,13 @@ const ALL_ACTIONS: ActionForm[] = [
 ];
 
 /** The crates as a tree, how many are in each state, and a refresh while any is changing */
-export const cratesPage = (crates: CrateState[], counts: Record<StateName, number>, workerRunning: boolean) => ({
-  refresh: CHANGING.some((state) => counts[state] > 0) ? REFRESH_SECONDS : undefined,
-  workerRunning,
-  counts: STATES.map((state) => ({ state, count: counts[state] })),
-  actions: ALL_ACTIONS,
-  crates: buildTree(crates).map(crateRow),
-});
+export const cratesPage = (crates: CrateState[], workerRunning: boolean) => {
+  const counts = countStates(crates);
+  return {
+    refresh: CHANGING.some((state) => counts[state] > 0) ? REFRESH_SECONDS : undefined,
+    workerRunning,
+    counts: STATES.map((state) => ({ state, count: counts[state] })),
+    actions: ALL_ACTIONS,
+    crates: buildTree(crates).map(crateRow),
+  };
+};

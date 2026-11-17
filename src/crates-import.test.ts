@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { collection, crate, writeCrates } from '../test/crate-builder.ts';
 import { config } from './configuration.ts';
 import { importCrates as importInto } from './crates-import.ts';
-import { createIndexQueue } from './index-queue/index-queue.ts';
+import { countStates, createIndexQueue } from './index-queue/index-queue.ts';
 import { indexerDeps } from './indexer/deps.ts';
 import { indexAndSummarise } from './indexer/index-run.ts';
 import { prisma } from './prisma.ts';
@@ -88,7 +88,7 @@ describe('crates:import', () => {
 
       expect(imported).toBe(true);
       expect(await indexQueue.crate(BUNDLED)).toMatchObject({ state: 'indexed', version: 1 });
-      expect(await indexQueue.counts()).toMatchObject({ indexed: (await indexQueue.crates()).length });
+      expect(countStates(await indexQueue.crates())).toMatchObject({ indexed: (await indexQueue.crates()).length });
     });
 
     it('fails when a crate it imports fails to index, once the rest are indexed', async () => {

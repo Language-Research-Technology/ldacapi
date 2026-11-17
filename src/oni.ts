@@ -14,47 +14,42 @@ type OniEntity = AuthorisedEntity & Aggregates & { accessControl?: AccessControl
 
 const none = (): Aggregates => ({ counts: { collections: 0, objects: 0, subCollections: 0, files: 0 }, language: [], communicationMode: [], mediaType: [] });
 
-const union = (a: string[], b: string[]) => [...new Set([...a, ...b])].sort();
+type AggregateRow = Counts & Omit<Aggregates, 'counts'> & { entityId: string };
 
 /** The aggregates of each of `ids`, summing what each crate adds, in one query */
-export async function aggregatesOf(db: Pick<PrismaClient, 'aggregate'>, ids: string[]) {
-  const found = new Map<string, Aggregates>();
-  for (const row of await db.aggregate.findMany({ where: { entityId: { in: ids } } })) {
-    const sum = found.get(row.entityId) ?? none();
-    found.set(row.entityId, {
-      counts: {
-        collections: sum.counts.collections + row.collections,
-        objects: sum.counts.objects + row.objects,
-        subCollections: sum.counts.subCollections + row.subCollections,
-        files: sum.counts.files + row.files,
-      },
-      language: union(sum.language, row.language),
-      communicationMode: union(sum.communicationMode, row.communicationMode),
-      mediaType: union(sum.mediaType, row.mediaType),
-    });
-  }
-  return found;
+export async function aggregatesOf(db: Pick<PrismaClient, '$queryRaw'>, ids: string[]) {
+  const rows = await db.$queryRaw<AggregateRow[]>`
+    SELECT "entityId",
+      sum(collections)::int AS collections, sum(objects)::int AS objects, sum("subCollections")::int AS "subCollections", sum(files)::int AS files,
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other.language) v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS language,
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other."communicationMode") v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS "communicationMode",
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other."mediaType") v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS "mediaType"
+    FROM aggregate WHERE "entityId" = ANY(${ids}) GROUP BY "entityId"`;
+  return new Map<string, Aggregates>(
+    rows.map(({ entityId, collections, objects, subCollections, files, ...values }) => [
+      entityId,
+      { counts: { collections, objects, subCollections, files }, ...values },
+    ]),
+  );
 }
 
 const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Aggregates>>>();
 
 /** Aggregates for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
 const aggregatesFor = (request: FastifyRequest, id: string) => {
-  let batch = batches.get(request);
-  if (!batch) {
-    const current = new Map<string, PromiseWithResolvers<Aggregates>>();
-    batch = current;
-    batches.set(request, current);
+  const batch = batches.get(request) ?? new Map<string, PromiseWithResolvers<Aggregates>>();
+  if (!batches.has(request)) {
+    batches.set(request, batch);
     queueMicrotask(() => {
       batches.delete(request);
-      aggregatesOf(prisma, [...current.keys()]).then(
+      aggregatesOf(prisma, [...batch.keys()]).then(
         (found) => {
-          for (const [id, { resolve }] of current) {
+          for (const [id, { resolve }] of batch) {
             resolve(found.get(id) ?? none());
           }
         },
         (error: unknown) => {
-          for (const { reject } of current.values()) {
+          for (const { reject } of batch.values()) {
             reject(error);
           }
         },

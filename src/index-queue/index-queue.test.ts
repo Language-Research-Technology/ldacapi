@@ -6,7 +6,7 @@ import { collection, crate } from '../../test/crate-builder.ts';
 import type { Prisma } from '../generated/prisma/client.ts';
 import { prisma } from '../prisma.ts';
 import { openRepository } from '../repository/repository.ts';
-import { createIndexQueue, type IndexQueue, WORKER_SILENT_MILLISECONDS } from './index-queue.ts';
+import { countStates, createIndexQueue, type IndexQueue, WORKER_SILENT_MILLISECONDS } from './index-queue.ts';
 
 const A = 'arcp://name,a';
 const B = 'arcp://name,b';
@@ -210,7 +210,7 @@ describe('asking to delete everything', () => {
     await record(B);
     await prisma.indexJob.create({ data: { kind: 'delete', status } });
 
-    expect(await queue.counts()).toMatchObject({ deleting: 2, indexed: 0, 'not indexed': 0 });
+    expect(countStates(await queue.crates())).toMatchObject({ deleting: 2, indexed: 0, 'not indexed': 0 });
   });
 
   it('shows a crate with a running job as indexing', async () => {
@@ -303,7 +303,7 @@ describe('index state', () => {
     await record('arcp://name,c');
     await job('arcp://name,c', { status: 'failed' });
 
-    expect(await queue.counts()).toEqual({ 'not indexed': 0, queued: 0, indexing: 0, deleting: 0, indexed: 2, failed: 1 });
+    expect(countStates(await queue.crates())).toEqual({ 'not indexed': 0, queued: 0, indexing: 0, deleting: 0, indexed: 2, failed: 1 });
   });
 });
 

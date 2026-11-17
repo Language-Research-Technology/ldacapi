@@ -2,6 +2,7 @@ import type { OcflFile, OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { collection, crate, file, object } from '../../test/crate-builder.ts';
+import { countStates } from '../index-queue/index-queue.ts';
 
 vi.mock('../logger.ts', async () => (await import('../../test/logs.ts')).capturingLogger([], 'warn'));
 
@@ -95,7 +96,7 @@ describe('a worker indexing many child crates', () => {
 
     await workTheQueueOnce();
 
-    expect(await testbed.started.indexQueue.counts()).toMatchObject({ indexed: CHILDREN.length });
+    expect(countStates(await testbed.started.indexQueue.crates())).toMatchObject({ indexed: CHILDREN.length });
     expect(metadataReads.of(PARENT)).toBe(1);
     expect(metadataReads.of(TOP)).toBe(1);
   });

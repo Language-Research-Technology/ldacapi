@@ -76,11 +76,11 @@ describe('Oni entity fields', () => {
   });
 
   it('are read for a whole page of entities in one query', async () => {
-    const read = vi.spyOn(started.prisma.aggregate, 'findMany');
+    const read = vi.spyOn(started.prisma, '$queryRaw');
 
     const { entities } = await get(`/entities?memberOf=${encodeURIComponent(DISTRIBUTED)}`);
 
-    expect(read).toHaveBeenCalledTimes(1);
+    expect(read.mock.calls.filter(([sql]) => String(sql).includes('FROM aggregate'))).toHaveLength(1);
     read.mockRestore();
     expect(entities.find(({ id }: { id: string }) => id === CONTENT_RESTRICTED)).toMatchObject({
       counts: { collections: 0, objects: 1, subCollections: 0, files: 1 },

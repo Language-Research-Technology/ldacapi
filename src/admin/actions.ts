@@ -10,11 +10,12 @@ const refused = (asked: string, reason: string): Flash => ({ accepted: false, me
 /** What an action covers: a crate, with `under` the crates under it too, or with no crate every crate */
 export type Asked = { crateId: string | undefined; under: boolean };
 
-const covering = ({ crateId, under }: Asked, crates: string) => `${crateId ?? crates}${crateId && under ? ' and the crates under it' : ''}`;
+const covering = ({ crateId, under }: Asked) => (crateId === undefined ? 'every crate' : `${crateId}${under ? ' and the crates under it' : ''}`);
 
 /** Asks to index the crates asked for; `force` reindexes crates already indexed at their head version */
-export const indexCrates = async (indexQueue: IndexQueue, { crateId, under }: Asked, force: boolean): Promise<Flash> => {
-  const asked = `${force ? 'Reindexing' : 'Indexing'} ${covering({ crateId, under }, 'every crate')}`;
+export const indexCrates = async (indexQueue: IndexQueue, scope: Asked, force: boolean): Promise<Flash> => {
+  const { crateId, under } = scope;
+  const asked = `${force ? 'Reindexing' : 'Indexing'} ${covering(scope)}`;
   if (crateId === undefined) {
     await indexQueue.indexEverything({ reindex: force });
   } else if (await indexQueue.crate(crateId)) {
@@ -26,12 +27,13 @@ export const indexCrates = async (indexQueue: IndexQueue, { crateId, under }: As
 };
 
 /** Asks to delete the indexes of the crates asked for, or with no crate every index */
-export const deleteIndexes = async (indexQueue: IndexQueue, { crateId, under }: Asked): Promise<Flash> => {
+export const deleteIndexes = async (indexQueue: IndexQueue, scope: Asked): Promise<Flash> => {
+  const { crateId, under } = scope;
   if (crateId === undefined) {
     await indexQueue.deleteEverything();
     return queued('Deleting every index');
   }
-  const asked = `Deleting the indexes of ${covering({ crateId, under }, '')}`;
+  const asked = `Deleting the indexes of ${covering(scope)}`;
   if (!(await indexQueue.crate(crateId))) {
     return refused(asked, 'it was not found');
   }

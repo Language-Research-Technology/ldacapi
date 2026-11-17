@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { collection, crate } from '../../test/crate-builder.ts';
+import { countStates } from '../index-queue/index-queue.ts';
 import type { Document } from '../search-backend.ts';
 import type { IndexerDeps } from './indexer.ts';
 
@@ -84,7 +85,7 @@ describe('two runs working the queue at once', () => {
 
     const started = logs.filter(({ msg }) => msg === 'Job started').map(({ crateId }) => crateId);
     expect(started.sort()).toEqual([...MANY].sort());
-    expect((await indexQueue.counts()).indexed).toBe(MANY.length);
+    expect(countStates(await indexQueue.crates()).indexed).toBe(MANY.length);
   });
 });
 
