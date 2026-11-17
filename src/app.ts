@@ -50,7 +50,7 @@ export function buildApp({ search, storage, indexQueue }: AppDeps) {
         isAuthenticated,
         entityVisibilityFilter: AllVisibleEntityFilter,
         searchVisibilityFilter: AllVisibleSearchFilter,
-        entityTransformers: [oniEntityTransformer],
+        entityTransformers: [oniEntityTransformer(prisma)],
         storage: { metadata: EntityMetaMetadata(), content: storage },
       });
       api.register(ldacapi);

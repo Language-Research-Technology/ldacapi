@@ -3,7 +3,7 @@ import { hostname } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { StorageRoot } from '@ocfl/ocfl-fs';
 import type { Client } from '@opensearch-project/opensearch';
-import { isOpenLicence } from '../access/licences.ts';
+import { openLicenceCheck } from '../access/licences.ts';
 import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
 import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
@@ -23,7 +23,7 @@ export type IndexerDeps = {
   repository: StorageRoot;
   opensearch: Client;
   search: SearchBackend;
-  licences: { defaultLicense: string; defaultMetadataLicense: string };
+  licences: { defaultLicense: string; defaultMetadataLicense: string; openLicenses: string[] };
 };
 
 export type WorkOptions = (
@@ -118,7 +118,9 @@ async function indexCrate(
   }
   const { crate, heldFiles, readText, parentCrates } = await opened.read(progress);
   progress.start('deriving');
-  const derivation = derive(crate, { parentCrates, heldFiles, ...licences, isOpenLicence });
+  const { defaultLicense, defaultMetadataLicense, openLicenses } = licences;
+  const isOpenLicence = openLicenceCheck(openLicenses);
+  const derivation = derive(crate, { parentCrates, heldFiles, defaultLicense, defaultMetadataLicense, isOpenLicence });
   for (const { msg, ...warning } of derivation.warnings) {
     log.warn({ crateId, ...warning }, msg);
   }

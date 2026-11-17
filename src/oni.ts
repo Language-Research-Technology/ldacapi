@@ -3,7 +3,6 @@ import type { FastifyRequest } from 'fastify';
 import type { AccessControl } from './access/access-control.ts';
 import { accessControlOf } from './entity-meta.ts';
 import type { PrismaClient } from './generated/prisma/client.ts';
-import { prisma } from './prisma.ts';
 
 type Counts = { collections: number; objects: number; subCollections: number; files: number };
 
@@ -36,13 +35,13 @@ export async function aggregatesOf(db: Pick<PrismaClient, '$queryRaw'>, ids: str
 const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Aggregates>>>();
 
 /** Aggregates for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
-const aggregatesFor = (request: FastifyRequest, id: string) => {
+const aggregatesFor = (db: Pick<PrismaClient, '$queryRaw'>, request: FastifyRequest, id: string) => {
   const batch = batches.get(request) ?? new Map<string, PromiseWithResolvers<Aggregates>>();
   if (!batches.has(request)) {
     batches.set(request, batch);
     queueMicrotask(() => {
       batches.delete(request);
-      aggregatesOf(prisma, [...batch.keys()]).then(
+      aggregatesOf(db, [...batch.keys()]).then(
         (found) => {
           for (const [id, { resolve }] of batch) {
             resolve(found.get(id) ?? none());
@@ -65,7 +64,9 @@ const aggregatesFor = (request: FastifyRequest, id: string) => {
 };
 
 /** The fields Oni expects on every entity beyond the spec's: https://github.com/crate-works/oni/blob/main/docs/api-extensions.md */
-export const oniEntityTransformer: EntityTransformer<AuthorisedEntity, OniEntity> = async (entity, { request }, { meta }) => {
-  const accessControl = accessControlOf(meta);
-  return { ...entity, ...(accessControl && { accessControl }), ...(await aggregatesFor(request, entity.id)) };
-};
+export const oniEntityTransformer =
+  (db: Pick<PrismaClient, '$queryRaw'>): EntityTransformer<AuthorisedEntity, OniEntity> =>
+  async (entity, { request }, { meta }) => {
+    const accessControl = accessControlOf(meta);
+    return { ...entity, ...(accessControl && { accessControl }), ...(await aggregatesFor(db, request, entity.id)) };
+  };
