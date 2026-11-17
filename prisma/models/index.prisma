@@ -49,7 +49,8 @@ model CrateRecord {
   entities       Int?
   files          Int?
 
-  jobs IndexJob[]
+  jobs  IndexJob[]
+  links CrateLink[]
 
   @@map("crate")
 }

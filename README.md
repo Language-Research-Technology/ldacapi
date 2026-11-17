@@ -142,8 +142,8 @@ crate.
 ### The worker
 
 - It runs one job at a time. A job reads its crate from the repository, writes
-  its database index (Entity and File rows), then its search index, then
-  records the crate's indexed version.
+  its database index (crate links, and Entity and File rows), then its search
+  index, then records the crate's indexed version.
 - Index skips a crate whose indexed version is its head version. Reindex
   deletes and rebuilds it whatever its version.
 - Indexing a crate gone from the repository deletes its indexes and its record,
@@ -204,6 +204,29 @@ A waiting or running job comes first, then a failed one, then what the last
 successful job recorded. A crate is listed once a job has been asked for it,
 so "Index all" lists every crate in the repository.
 
+### Shared entities and clashes
+
+A crate link records each entity a crate contains; it is the only record of an
+entity's crates. A crate's entity and file counts are its links, so an entity
+two crates contain counts in both.
+
+- **People, organisations and software** are shared entities: any number of
+  crates may describe the same one (one absolute IRI, such as an ORCID). Each
+  crate's link keeps its own copy, and the row and search document are wholly
+  one crate's copy: a crate whose metadata licence is open first, then the
+  lowest crate id. Copies are never merged, and indexing the crates in any
+  order gives the same rows. A person a crate mentions without the LDaC
+  profile has no link to it.
+- **Deleting a crate**, or reindexing it once it no longer contains an entity,
+  removes its links, then the entities no crate links to. A shared entity whose
+  winning crate goes becomes the next crate's copy, from the copy kept on its
+  link, without reading the repository.
+- **A clash** fails the job: a crate describing a collection, object or file
+  another crate already holds, or an id another crate describes as a different
+  kind of entity. The error names the entity and both crates, and the crate
+  holding it keeps its row. The failed crate shows as failed until its data is
+  fixed.
+
 ### More than one worker
 
 Workers share the queue: each claims the oldest waiting job that no other
@@ -224,8 +247,14 @@ Each worker holds one crate's metadata in memory at a time.
 - A changed parent crate leaves the crates under it stale (their
   `rootCollection`, and what they add to the aggregates of the collections
   above them) until they are reindexed.
-- Entities' `Public` and `AuthorizationByApplication` labels lag a change to
-  `OPEN_LICENSES` until their crate is reindexed.
+- Entities' `Public` and `AuthorizationByApplication` labels, and which crate's
+  copy of a shared entity wins, lag a change to `OPEN_LICENSES` until their
+  crates are reindexed.
+- Which of two clashing crates holds a collection, object or file depends on
+  which was indexed first; the other fails on every run until the data is
+  fixed.
+- Reindexing the crate whose copy of a shared entity wins briefly shows the
+  next crate's copy while its job runs.
 - A crate put in the repository by another tool isn't listed on the admin pages
   until "Index all" runs.
 - A crate on the older bare spelling (`memberOf`, `communicationMode` rather

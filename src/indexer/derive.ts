@@ -16,7 +16,7 @@ export type DeriveFacts = {
   heldFiles: ReadonlyMap<string, number>;
 };
 
-type EntityRow = {
+export type EntityRow = {
   id: string;
   name: string;
   description: string;
@@ -40,6 +40,8 @@ type FileRow = {
 
 export type DerivedEntity = {
   row: EntityRow;
+  /** A person, organisation or software entity, which other crates may contain too; anything else this crate alone holds */
+  shared: boolean;
   file?: FileRow;
   document: Document;
   /** The file whose text belongs in the document */
@@ -64,6 +66,8 @@ type Aggregate = {
 export type Derivation = {
   crateId: string;
   name: string | null;
+  /** Whether the crate's metadata licence is open, so its copy of a shared entity wins over a restricted one */
+  openMetadata: boolean;
   entities: DerivedEntity[];
   aggregates: Aggregate[];
   warnings: Warning[];
@@ -79,7 +83,7 @@ const PROFILES: Record<string, string> = {
   SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication',
 };
 
-/** Types whose root collection is always null */
+/** Types of shared entities, whose root collection is always null */
 const UNPLACED = new Set(['Person', 'Organization', 'SoftwareApplication']);
 
 const CLASS_LABELS: Record<string, string> = {
@@ -320,8 +324,9 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
         rootCollection,
         metadataLicenseId: metadataLicense,
         contentLicenseId,
-        meta: { crateId, rocrate: virtualCrate(crate, entity, id, crateLicense, unheldFile), accessControl },
+        meta: { rocrate: virtualCrate(crate, entity, id, crateLicense, unheldFile), accessControl },
       },
+      shared: UNPLACED.has(type),
       ...(type === 'File' && {
         file: {
           id,
@@ -356,7 +361,14 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   if (notHeld > 0) {
     warnings.push({ msg: 'Files described but not held', count: notHeld });
   }
-  return { crateId, name: firstStringOrId(crate.root.name) ?? null, entities, aggregates: aggregates(placed, facts.parentCrates), warnings };
+  return {
+    crateId,
+    name: firstStringOrId(crate.root.name) ?? null,
+    openMetadata: facts.isOpenLicence(metadataLicense),
+    entities,
+    aggregates: aggregates(placed, facts.parentCrates),
+    warnings,
+  };
 }
 
 type Counted = 'collections' | 'objects' | 'files';

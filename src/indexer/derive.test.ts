@@ -74,6 +74,27 @@ describe('derivation', () => {
     expect(await ids(built)).toEqual([ROOT, `${ROOT}/object`, `${ROOT}/#alice`, `${ROOT}/#acme`, `${ROOT}/#tool`, `${ROOT}/a.txt`].sort());
   });
 
+  describe('shared entities', () => {
+    it('are people, organisations and software; collections, objects and files are held by their crate', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`),
+        person('#alice'),
+        thing('#acme', 'Organization', 'Organization'),
+        thing('#tool', 'SoftwareApplication', 'SoftwareApplication'),
+        fileDescribedButNotHeld('a.txt'),
+      ]);
+
+      const shared = (await derived(built)).entities.filter((entity) => entity.shared).map(({ row }) => row.id);
+
+      expect(shared.sort()).toEqual([`${ROOT}/#alice`, `${ROOT}/#acme`, `${ROOT}/#tool`].sort());
+    });
+
+    it('win first from a crate whose metadata licence is open', async () => {
+      expect((await derived(crate(collection(ROOT)))).openMetadata).toBe(true);
+      expect((await derived(crate(collection(ROOT), [], { metadataLicence: RESTRICTED }))).openMetadata).toBe(false);
+    });
+  });
+
   describe('rule 2, parent of a collection or object', () => {
     it('is its pcdm:memberOf', async () => {
       const built = crate(collection(ROOT, { hasMember: [`${ROOT}/sub`] }), [
@@ -508,8 +529,9 @@ describe('derivation', () => {
         description: 'One; Two',
         entityType: 'http://schema.org/Person',
         metadataLicenseId: CC_BY,
-        meta: { crateId: ROOT, accessControl: 'Public' },
+        meta: { accessControl: 'Public' },
       });
+      expect(row.meta).not.toHaveProperty('crateId');
       const rocrate = row.meta.rocrate as { '@context': unknown; '@graph': Record<string, unknown>[] };
       expect(rocrate['@context']).toEqual(built.metadata['@context']);
       expect(rocrate['@graph']).toContainEqual(

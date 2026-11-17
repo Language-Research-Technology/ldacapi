@@ -49,15 +49,20 @@ type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: Aggre
 const clearIndexedVersion = (prisma: PrismaClient, crateId: string) =>
   prisma.crateRecord.update({ where: { id: crateId }, data: { indexedVersion: null, indexedAt: null, entities: null, files: null } });
 
-/** Documents first, as they are found by the rows */
+/**
+ * Documents first, found by the links, so a delete cut short can be asked again. Then, once the rows have changed, the
+ * documents of what changed, as another crate may have linked to them since
+ */
 async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: string, progress: Progress) {
   await clearIndexedVersion(prisma, crateId);
   progress.start('search index');
-  await writers.documents.delete(crateId);
+  const removed = await writers.documents.delete(crateId);
   progress.start('aggregates');
   await writers.aggregates.delete(crateId);
   progress.start('database index');
-  await writers.rows.delete(crateId);
+  const { orphaned, rebuilt } = await writers.rows.delete(crateId);
+  progress.start('search index');
+  await writers.documents.sync([...new Set([...removed, ...orphaned, ...rebuilt])]);
 }
 
 /** What a job logs when it finishes, and what it writes to its crate's record */
@@ -73,6 +78,7 @@ async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, pro
   progress.start('aggregates');
   await prisma.aggregate.deleteMany();
   progress.start('database index');
+  await prisma.crateLink.deleteMany();
   await prisma.file.deleteMany();
   await prisma.entity.deleteMany();
   return {};
@@ -119,8 +125,8 @@ async function indexCrate({ prisma, repository, licences }: IndexerDeps, writers
     log.warn({ crateId: job.crateId, ...warning }, msg);
   }
   await deleteIndexes(prisma, writers, job.crateId, progress);
-  const written = await writers.rows.write(derivation, progress);
-  await writers.documents.write(derivation, readText, written, progress);
+  await writers.rows.write(derivation, progress);
+  await writers.documents.write(derivation, readText, progress);
   await writers.aggregates.write(derivation, progress);
   const counts = await countRows(prisma, job.crateId);
   const data = { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts };

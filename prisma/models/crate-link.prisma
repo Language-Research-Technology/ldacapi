@@ -1,0 +1,15 @@
+/// A crate containing an entity: the only record of which crates contain it
+model CrateLink {
+  crateId      String
+  entityId     String
+  /// For a person, organisation or software entity, this crate's derived row and document, which the entity's are when this crate wins
+  copy         Json?
+  /// Whether this crate's metadata licence is open, which wins first
+  openMetadata Boolean @default(false)
+
+  crate CrateRecord @relation(fields: [crateId], references: [id], onDelete: Cascade)
+
+  @@id([crateId, entityId])
+  @@index([entityId])
+  @@map("crate_link")
+}

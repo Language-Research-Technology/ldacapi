@@ -1,6 +1,7 @@
-import type { Prisma, PrismaClient } from '../generated/prisma/client.ts';
+import { Prisma, type PrismaClient } from '../generated/prisma/client.ts';
 import { fileStorageMeta } from '../repository/file-storage-meta.ts';
-import type { Derivation, DerivedEntity } from './derive.ts';
+import type { Derivation, DerivedEntity, EntityRow } from './derive.ts';
+import { beats, ClashError, type Contender, type Copy, linksById, lockEntities, TRANSACTION, winner } from './links.ts';
 import type { Progress } from './progress.ts';
 
 /** Rows per transaction */
@@ -8,8 +9,7 @@ const BATCH_SIZE = 1000;
 
 const batches = <T>(items: T[]) => Array.from({ length: Math.ceil(items.length / BATCH_SIZE) }, (_, i) => items.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE));
 
-/** The entity rows indexed from `crateId` */
-const rowsOf = (crateId: string): Prisma.EntityWhereInput => ({ meta: { path: ['crateId'], equals: crateId } });
+const entityData = (row: EntityRow) => ({ ...row, meta: row.meta as Prisma.InputJsonValue });
 
 /** The crate's root id is the id of the OCFL object holding it */
 function fileRow(crateId: string, { file }: DerivedEntity): Prisma.FileCreateManyInput | undefined {
@@ -20,7 +20,10 @@ function fileRow(crateId: string, { file }: DerivedEntity): Prisma.FileCreateMan
   return { ...row, meta: fileStorageMeta(crateId, path) };
 }
 
-/** Writes a crate's Entity and File rows */
+/** What deleting a crate's rows changed: entities left with no crate, and shared entities now another crate's copy */
+export type RowsDeleted = { orphaned: string[]; rebuilt: string[] };
+
+/** Writes a crate's crate links, and its Entity and File rows */
 export class RowsWriter {
   prisma: PrismaClient;
 
@@ -28,52 +31,116 @@ export class RowsWriter {
     this.prisma = prisma;
   }
 
-  /** The ids of the rows written: an entity another crate already has a row for keeps that row */
+  /** Fails on a clash, naming the entity */
   async write(derivation: Derivation, progress: Progress) {
     progress.start('database index', derivation.entities.length);
-    const written = new Set<string>();
     for (const batch of batches(derivation.entities)) {
-      const fileRows = batch.map((entity) => fileRow(derivation.crateId, entity));
       try {
-        await this.writeBatch(batch, fileRows, written);
+        await this.writeBatch(derivation, batch);
       } catch {
         // Row by row, so the failure names the entity that can't be written
-        for (const [i, entity] of batch.entries()) {
-          await progress.onItem(entity.row.id, () => this.writeBatch([entity], [fileRows[i]], written));
+        for (const entity of batch) {
+          await progress.onItem(entity.row.id, () => this.writeBatch(derivation, [entity]));
         }
       }
       progress.advance(batch.length);
     }
-    return written;
   }
 
-  private writeBatch(batch: DerivedEntity[], fileRows: (Prisma.FileCreateManyInput | undefined)[], written: Set<string>) {
+  private writeBatch({ crateId, openMetadata }: Derivation, batch: DerivedEntity[]) {
+    const ids = batch.map(({ row }) => row.id);
     return this.prisma.$transaction(async (tx) => {
-      const created = await tx.entity.createManyAndReturn({
-        data: batch.map(({ row }) => ({ ...row, meta: row.meta as Prisma.InputJsonValue })),
-        skipDuplicates: true,
-        select: { id: true },
-      });
-      const ids = new Set(created.map(({ id }) => id));
-      await tx.file.createMany({ data: fileRows.filter((row) => row && ids.has(row.id)) as Prisma.FileCreateManyInput[] });
-      for (const id of ids) {
-        written.add(id);
+      await lockEntities(tx, ids);
+      const rows = new Map((await tx.entity.findMany({ where: { id: { in: ids } }, select: { id: true, entityType: true } })).map((row) => [row.id, row]));
+      const others = linksById(
+        ids,
+        await tx.crateLink.findMany({
+          where: { entityId: { in: ids }, crateId: { not: crateId } },
+          select: { entityId: true, crateId: true, openMetadata: true },
+        }),
+      );
+      const ours = { crateId, openMetadata };
+      const held: DerivedEntity[] = [];
+      const created: EntityRow[] = [];
+      const replaced: EntityRow[] = [];
+      for (const entity of batch) {
+        const { id, entityType } = entity.row;
+        const holder = winner(others.get(id) as Contender[]);
+        const row = rows.get(id);
+        if (holder && row && row.entityType !== entityType) {
+          throw new ClashError(id, holder.crateId, crateId, { held: row.entityType, described: entityType });
+        }
+        if (!entity.shared) {
+          if (holder) {
+            throw new ClashError(id, holder.crateId, crateId);
+          }
+          held.push(entity);
+        } else if (!row) {
+          created.push(entity.row);
+        } else if (!holder || beats(ours, holder)) {
+          replaced.push(entity.row);
+        }
       }
-    });
+      await tx.crateLink.createMany({
+        data: batch.map(({ row, document, shared }) => ({
+          crateId,
+          entityId: row.id,
+          openMetadata,
+          copy: shared ? ({ row, document } satisfies Copy as Prisma.InputJsonValue) : Prisma.DbNull,
+        })),
+      });
+      await tx.entity.createMany({ data: [...held.map(({ row }) => row), ...created].map(entityData) });
+      await tx.file.createMany({ data: held.flatMap((entity) => fileRow(crateId, entity) ?? []) });
+      for (const row of replaced) {
+        await tx.entity.update({ where: { id: row.id }, data: entityData(row) });
+      }
+    }, TRANSACTION);
   }
 
-  async delete(crateId: string) {
-    await this.prisma.file.deleteMany({ where: { entity: rowsOf(crateId) } });
-    await this.prisma.entity.deleteMany({ where: rowsOf(crateId) });
+  /** Removes the crate's links, then the rows left with none, and makes the rows of shared entities it won the next crate's copy */
+  async delete(crateId: string): Promise<RowsDeleted> {
+    const deleted: RowsDeleted = { orphaned: [], rebuilt: [] };
+    for (const ids of batches(await crateEntityIds(this.prisma, crateId))) {
+      await this.prisma.$transaction(async (tx) => {
+        await lockEntities(tx, ids);
+        const links = linksById(
+          ids,
+          await tx.crateLink.findMany({ where: { entityId: { in: ids } }, select: { entityId: true, crateId: true, openMetadata: true } }),
+        );
+        const orphaned: string[] = [];
+        const rebuilt: { entityId: string; crateId: string }[] = [];
+        for (const [id, all] of links) {
+          const others = all.filter((link) => link.crateId !== crateId);
+          const next = winner(others);
+          if (!next) {
+            orphaned.push(id);
+          } else if (winner(all)?.crateId === crateId) {
+            rebuilt.push(next);
+          }
+        }
+        await tx.crateLink.deleteMany({ where: { crateId, entityId: { in: ids } } });
+        await tx.file.deleteMany({ where: { id: { in: orphaned } } });
+        await tx.entity.deleteMany({ where: { id: { in: orphaned } } });
+        const copies = rebuilt.length > 0 ? await tx.crateLink.findMany({ where: { OR: rebuilt }, select: { copy: true } }) : [];
+        for (const { copy } of copies) {
+          const { row } = copy as Copy;
+          await tx.entity.update({ where: { id: row.id }, data: entityData(row) });
+        }
+        deleted.orphaned.push(...orphaned);
+        deleted.rebuilt.push(...rebuilt.map(({ entityId }) => entityId));
+      }, TRANSACTION);
+    }
+    return deleted;
   }
 }
 
-/** The id of each entity row indexed from `crateId` */
-export const crateRowIds = async (prisma: PrismaClient, crateId: string) =>
-  (await prisma.entity.findMany({ where: rowsOf(crateId), select: { id: true } })).map(({ id }) => id);
+/** The id of each entity `crateId` contains */
+const crateEntityIds = async (prisma: PrismaClient, crateId: string) =>
+  (await prisma.crateLink.findMany({ where: { crateId }, select: { entityId: true } })).map(({ entityId }) => entityId);
 
-/** How many entity and file rows were indexed from `crateId` */
-export const countRows = async (prisma: PrismaClient, crateId: string) => ({
-  entities: await prisma.entity.count({ where: rowsOf(crateId) }),
-  files: await prisma.file.count({ where: { entity: rowsOf(crateId) } }),
-});
+/** How many entities and files `crateId` contains, shared ones included */
+export const countRows = async (prisma: PrismaClient, crateId: string) => {
+  const [{ files }] = await prisma.$queryRaw<[{ files: number }]>`
+    SELECT count(*)::int AS files FROM crate_link link JOIN file ON file.id = link."entityId" WHERE link."crateId" = ${crateId}`;
+  return { entities: await prisma.crateLink.count({ where: { crateId } }), files };
+};
