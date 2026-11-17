@@ -13,8 +13,12 @@ One RO-Crate, stored as one OCFL object in the repository. The unit of import, i
 _Avoid_: OCFL object (the storage), collection (what a crate may describe)
 
 **Import**:
-Bringing RO-Crates into the OCFL repository: `pnpm crates:import` today, the deposit API in future.
-_Avoid_: Seed
+Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`).
+_Avoid_: Seed, deposit
+
+**Deposit**:
+A crate sent through the deposit API, which writes it to the OCFL repository and indexes it.
+_Avoid_: Import, upload
 
 **Index**:
 Building the database index and the search index from the repository, for one crate or all of them. Both can be deleted and rebuilt at any time.
