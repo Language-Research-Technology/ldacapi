@@ -270,6 +270,35 @@ describe('an index job', () => {
     expect(await searchableIds()).toEqual([OTHER]);
   });
 
+  it('keeps the record of a crate gone from the repository when it is asked for again meanwhile, and that job runs', async () => {
+    await addCrate(GONE);
+    await index(GONE);
+    await testbed.started.repository.remove(GONE);
+    await testbed.started.indexQueue.index(GONE);
+    const { promise: removing, resolve: startRemoving } = Promise.withResolvers<void>();
+    const { promise: through, resolve: letThrough } = Promise.withResolvers<void>();
+    const { search } = testbed.started.indexer;
+    const working = workTheQueueWith({
+      remove: async (ids) => {
+        startRemoving();
+        await through;
+        await search.remove(ids);
+      },
+    });
+    await removing;
+    try {
+      // Put back, as an import would
+      await addCrate(GONE);
+      await testbed.started.indexQueue.index(GONE);
+      letThrough();
+      await working;
+
+      expect(await state(GONE)).toMatchObject({ state: 'indexed' });
+    } finally {
+      await testbed.started.repository.remove(GONE);
+    }
+  });
+
   it('fails for an object with no crate metadata', async () => {
     await testbed.started.repository.create(NO_METADATA, details, (draft) => draft.write('readme.txt', 'Not a crate'));
 
@@ -433,6 +462,14 @@ describe('deleting everything', () => {
     expect(await rowIds()).toEqual([]);
     expect(await searchableIds()).toEqual([]);
     expect(await testbed.started.prisma.indexJob.count()).toBe(0);
+  });
+
+  it('clears every crate’s failure', async () => {
+    await index(UNLICENSED);
+
+    await run(() => testbed.started.indexQueue.deleteEverything());
+
+    expect(await state(UNLICENSED)).toMatchObject({ state: 'not indexed' });
   });
 
   it('logs when it starts and finishes', async () => {

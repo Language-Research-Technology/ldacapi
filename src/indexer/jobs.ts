@@ -5,8 +5,6 @@ import type { Progress } from './progress.ts';
 
 const log = logger.child({ module: 'indexer' });
 
-const NO_PROGRESS = { stage: null, done: null, total: null };
-
 /** A job whose worker dies on this many attempts fails */
 const MAXIMUM_ATTEMPTS = 3;
 
@@ -37,15 +35,16 @@ export const removeWorker = async (prisma: PrismaClient, workerId: string) => {
   await prisma.indexWorker.deleteMany({ where: { id: workerId } });
 };
 
-/** Returns running jobs to waiting, or drops those whose crate has a job waiting already; with `refund`, as if never tried */
+/**
+ * Returns running jobs to waiting in their place, or drops those whose crate has a job waiting; with `refund`, as if never tried.
+ * Deleted and inserted again, as updating them to waiting fails on a job asked for meanwhile
+ */
 async function returnToWaiting(tx: Prisma.TransactionClient, ids: number[], { refund }: { refund: boolean }) {
   await tx.$executeRaw`
-    DELETE FROM index_job job WHERE id = ANY(${ids})
-    AND EXISTS (SELECT 1 FROM index_job waiting WHERE waiting."crateId" IS NOT DISTINCT FROM job."crateId" AND waiting.status = 'waiting')`;
-  await tx.indexJob.updateMany({
-    where: { id: { in: ids } },
-    data: { status: 'waiting', workerId: null, startedAt: null, ...(refund && { attempts: { decrement: 1 } }), ...NO_PROGRESS },
-  });
+    WITH returned AS (DELETE FROM index_job WHERE id = ANY(${ids}) RETURNING id, "crateId", kind, attempts, "createdAt")
+    INSERT INTO index_job (id, "crateId", kind, attempts, "createdAt")
+    SELECT id, "crateId", kind, attempts - ${refund ? 1 : 0}::int, "createdAt" FROM returned
+    ON CONFLICT DO NOTHING`;
 }
 
 /** Marks a job failed, replacing any earlier failure of its crate */
@@ -79,10 +78,12 @@ export async function returnDeadWorkersJobs(prisma: PrismaClient) {
 /**
  * Claims the oldest waiting job whose crate has none running, for `workerId`.
  * Deleting everything waits for every running job, and every job asked for after it waits for it.
- * The claim records `workerId` as alive with it, so its job is never taken for a dead worker's
+ * The claim records `workerId` as alive with it, so its job is never taken for a dead worker's.
+ * Claims are made one at a time, so each sees the jobs the others claimed running
  */
 export async function claim(prisma: PrismaClient, workerId: string): Promise<Job | undefined> {
-  const [, [job]] = await prisma.$transaction([
+  const [, , [job]] = await prisma.$transaction([
+    prisma.$executeRaw`SELECT pg_advisory_xact_lock(1, 1)`,
     touchWorker(prisma, workerId),
     prisma.$queryRaw<Job[]>`
     UPDATE index_job SET status = 'running', "workerId" = ${workerId}, attempts = attempts + 1, "startedAt" = now()
@@ -132,7 +133,11 @@ export const succeed = (prisma: PrismaClient, workerId: string, job: Job, record
       return false;
     }
     if (record && 'remove' in record) {
-      await tx.crateRecord.delete({ where: { id: record.crateId } });
+      // Kept, not indexed, for a job asked for it since, which removing it would delete
+      await tx.$queryRaw`SELECT 1 FROM crate WHERE id = ${record.crateId} FOR UPDATE`;
+      await tx.$executeRaw`
+        DELETE FROM crate WHERE id = ${record.crateId}
+        AND NOT EXISTS (SELECT 1 FROM index_job WHERE "crateId" = ${record.crateId} AND id <> ${job.id} AND status <> 'failed')`;
     } else if (record) {
       await tx.crateRecord.update({ where: { id: record.crateId }, data: record.data });
     }

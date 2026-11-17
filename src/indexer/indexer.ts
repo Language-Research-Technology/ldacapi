@@ -69,10 +69,10 @@ async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: st
 /** What a job logs when it finishes, and what it writes to its crate's record */
 type Outcome = { logged?: Record<string, unknown>; record?: RecordWrite };
 
-/** Empties both indexes wholesale, keeping every crate's record as not indexed */
+/** Empties both indexes wholesale, keeping every crate's record as not indexed, and clears every crate's failure */
 async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, progress: Progress): Promise<Outcome> {
   progress.start('database index');
-  await prisma.crateRecord.updateMany({ data: NOT_INDEXED });
+  await prisma.$transaction([prisma.crateRecord.updateMany({ data: NOT_INDEXED }), prisma.indexJob.deleteMany({ where: { status: 'failed' } })]);
   progress.start('search index');
   await deleteSearchIndex(opensearch);
   await prepareSearchIndex(opensearch, search);
