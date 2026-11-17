@@ -37,11 +37,11 @@ describe('the rule on importing the indexer', () => {
     await rm(project, { recursive: true, force: true });
   });
 
-  it.each(['src/admin/plugin.ts', 'src/index-queue/index-queue.ts'])('fails an import from %s', (path) => {
+  it.each(['src/admin/plugin.ts', 'src/index-queue/index-queue.ts', 'src/crates-import.test.ts'])('fails an import from %s', (path) => {
     expect(output).toContain(`${path}:1:30 lint/style/noRestrictedImports`);
   });
 
-  it.each(['src/worker.ts', 'src/indexer/crate.ts', 'scripts/index.ts', 'test/app.ts', 'src/crates-import.test.ts'])('allows an import from %s', (path) => {
+  it.each(['src/worker.ts', 'src/indexer/crate.ts', 'scripts/index.ts', 'test/app.ts'])('allows an import from %s', (path) => {
     expect(output).not.toContain(`${path}:`);
   });
 });

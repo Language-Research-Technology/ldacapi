@@ -4,15 +4,15 @@ import { join } from 'node:path';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { emptyEverything } from '../test/app.ts';
-import { collection, crate, writeCrates } from '../test/crate-builder.ts';
-import { config } from './configuration.ts';
-import { importCrates as importInto } from './crates-import.ts';
-import { countStates, createIndexQueue } from './index-queue/index-queue.ts';
-import { indexerDeps } from './indexer/deps.ts';
-import { indexAndSummarise } from './indexer/index-and-summarise.ts';
-import { prisma } from './prisma.ts';
-import { openOrCreateRepository } from './repository/repository.ts';
+import { config } from '../src/configuration.ts';
+import { importCrates as importInto } from '../src/crates-import.ts';
+import { countStates, createIndexQueue } from '../src/index-queue/index-queue.ts';
+import { indexerDeps } from '../src/indexer/deps.ts';
+import { indexAndSummarise } from '../src/indexer/index-and-summarise.ts';
+import { prisma } from '../src/prisma.ts';
+import { openOrCreateRepository } from '../src/repository/repository.ts';
+import { emptyEverything } from './app.ts';
+import { collection, crate, writeCrates } from './crate-builder.ts';
 
 const BUNDLED = 'arcp://name,bundled';
 

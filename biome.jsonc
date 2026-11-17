@@ -33,7 +33,7 @@
   },
   "overrides": [
     {
-      "includes": ["src/indexer/**", "src/worker.ts", "scripts/**", "test/**", "src/**/*.test.ts"],
+      "includes": ["src/indexer/**", "src/worker.ts", "scripts/**", "test/**"],
       "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
     }
   ],
