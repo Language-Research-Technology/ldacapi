@@ -112,7 +112,7 @@ function recordType(entity: Entity): string | undefined {
 
   // TODO: Require the type's LDaC profile in conformsTo again once production crates carry it.
   // Most production people, organisations, and some collections and objects lack it, so the check
-  // is off for now. See https://github.com/Language-Research-Technology/ldacapi/issues/97
+  // is off for now. See https://github.com/Language-Research-Technology/ldacapi/issues/112
   // const profile = type && PROFILES[type];
   // if (profile && !entity.conformsTo?.some((c: unknown) => firstStringOrId(c) === profile)) {
   //   return;
