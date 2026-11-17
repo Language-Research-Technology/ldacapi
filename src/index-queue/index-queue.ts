@@ -121,14 +121,9 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
 
   const recordIds = async () => (await prisma.crateRecord.findMany({ select: { id: true } })).map(({ id }) => id);
 
-  /** `crateId` and, with `under`, the crates under it, in the repository or listed */
-  const covered = async (crateId: string, { under = false }: Scope) => {
-    if (!under) {
-      return [crateId];
-    }
-    const ids = new Set([crateId, ...(await Array.fromAsync(crateIds(repository))), ...(await recordIds())]);
-    return [...ids].filter((id) => isWithin(id, crateId));
-  };
+  /** `crateId` and, with `under`, the listed crates under it */
+  const covered = async (crateId: string, { under = false }: Scope) =>
+    under ? [...new Set([crateId, ...(await recordIds())])].filter((id) => isWithin(id, crateId)) : [crateId];
 
   const askFor = async (crateId: string, kind: IndexJobKind, scope: Scope = {}) => {
     const asked = await covered(crateId, scope);
@@ -155,19 +150,19 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
       ]);
     },
 
-    /** Asks to index, or reindex, every crate in the repository, and delete each listed crate gone from it, returning their ids */
+    /**
+     * Asks to index, or reindex, every crate in the repository, including a listed crate it holds but can't read, which
+     * fails; and to delete each listed crate gone from it. Returns their ids
+     */
     async indexEverything({ reindex = false } = {}) {
-      const listed = await Array.fromAsync(crateIds(repository));
-      await ask(listed, reindex ? 'reindex' : 'index');
-      const known = new Set(listed);
-      const gone: string[] = [];
-      for (const crateId of await recordIds()) {
-        if (!known.has(crateId) && !(await repository.has(crateId))) {
-          gone.push(crateId);
-        }
-      }
+      const found = new Set(await Array.fromAsync(crateIds(repository)));
+      const unlisted = (await recordIds()).filter((id) => !found.has(id));
+      const held = await Promise.all(unlisted.map((id) => repository.has(id)));
+      const indexed = [...found, ...unlisted.filter((_, n) => held[n])];
+      const gone = unlisted.filter((_, n) => !held[n]);
+      await ask(indexed, reindex ? 'reindex' : 'index');
       await ask(gone, 'delete');
-      return [...listed, ...gone];
+      return [...indexed, ...gone];
     },
 
     /** Every crate known to be in the repository, by id */

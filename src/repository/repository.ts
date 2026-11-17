@@ -34,13 +34,16 @@ export async function openOrCreateRepository(root: string): Promise<StorageRoot>
 /** arocapi's content storage backend over the OCFL repository at `root` */
 export const contentStorage = async (root: string): Promise<StorageBackend['content']> => (await OcflStorage({ root })).content;
 
-/** The id of each crate in the repository, logging those that can't be read */
+/** The id of each crate in the repository, including one that can't be read whose inventory names it, logging those that can't be read */
 export async function* crateIds(repository: StorageRoot) {
   for await (const entry of repository.objects()) {
     if ('object' in entry) {
       yield entry.object.id;
-    } else {
-      log.error({ err: entry.error, objectRoot: entry.objectRoot, crateId: entry.id }, 'Cannot read crate');
+      continue;
+    }
+    log.error({ err: entry.error, objectRoot: entry.objectRoot, crateId: entry.id }, 'Cannot read crate');
+    if (entry.id) {
+      yield entry.id;
     }
   }
 }

@@ -124,18 +124,20 @@ describe('asking for a job', () => {
     expect(await jobs()).toContainEqual({ crateId: GONE, kind: 'delete', status: 'waiting' });
   });
 
-  it('keeps, with everything, a listed crate the repository holds but can’t read', async () => {
+  it('asks, with everything, to index a listed crate the repository holds but can’t read, so that it fails', async () => {
     await record(DAMAGED, INDEXED);
 
-    expect(await queue.indexEverything()).not.toContain(DAMAGED);
+    expect(await queue.indexEverything()).toContain(DAMAGED);
 
-    expect(await jobs()).not.toContainEqual(expect.objectContaining({ crateId: DAMAGED }));
+    expect(await jobs()).toContainEqual({ crateId: DAMAGED, kind: 'index', status: 'waiting' });
   });
 
   it.each([
     ['index', (crateId: string) => queue.index(crateId, { under: true })],
     ['reindex', (crateId: string) => queue.reindex(crateId, { under: true })],
-  ])('asks to %s a crate and each crate under it, by id, one job each', async (kind, ask) => {
+  ])('asks to %s a crate and each listed crate under it, by id, one job each', async (kind, ask) => {
+    await prisma.crateRecord.createMany({ data: [{ id: UNDER_A }, { id: UNDER_UNDER_A }, { id: B }] });
+
     expect((await ask(A)).sort()).toEqual([A, UNDER_A, UNDER_UNDER_A]);
 
     expect(await jobs()).toEqual([
@@ -145,8 +147,12 @@ describe('asking for a job', () => {
     ]);
   });
 
-  it('asks to delete a crate and each crate under it, including a listed crate gone from the repository', async () => {
-    await record(`${UNDER_A}/gone`);
+  it('leaves out, with those under it, a crate under it that isn’t listed yet, reading only the database', async () => {
+    expect(await queue.index(A, { under: true })).toEqual([A]);
+  });
+
+  it('asks to delete a crate and each listed crate under it, including one gone from the repository', async () => {
+    await prisma.crateRecord.createMany({ data: [{ id: UNDER_UNDER_A }, { id: `${UNDER_A}/gone` }] });
 
     expect((await queue.delete(UNDER_A, { under: true })).sort()).toEqual([UNDER_A, `${UNDER_A}/gone`, UNDER_UNDER_A].sort());
 
