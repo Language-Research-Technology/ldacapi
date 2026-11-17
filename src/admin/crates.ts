@@ -1,4 +1,4 @@
-import type { CrateState, StateName } from '../index-queue/index-queue.ts';
+import type { CrateState, IndexQueue, StateName } from '../index-queue/index-queue.ts';
 import { ancestorIds, countStates, STATES } from '../index-queue/index-queue.ts';
 
 type Crate = CrateState & { label: string; children: Crate[] };
@@ -92,12 +92,17 @@ const ALL_ACTIONS: ActionForm[] = [
   { action: 'delete', label: 'Delete all', confirm: 'Delete every index?' },
 ];
 
-/** The crates as a tree, how many are in each state, and a refresh while any is changing */
-export const cratesPage = (crates: CrateState[], workerRunning: boolean) => {
+type Failure = Awaited<ReturnType<IndexQueue['deleteEverythingFailure']>>;
+
+const failureDetail = ({ error, stage, failedAt }: NonNullable<Failure>) => `${error} (${[stage ?? [], `${time(failedAt)} UTC`].flat().join(', ')})`;
+
+/** The crates as a tree, how many are in each state, a refresh while any is changing, and how deleting everything last failed */
+export const cratesPage = (crates: CrateState[], workerRunning: boolean, deleteEverythingFailure: Failure) => {
   const counts = countStates(crates);
   return {
     refresh: CHANGING.some((state) => counts[state] > 0) ? REFRESH_SECONDS : undefined,
     workerRunning,
+    deleteEverythingFailed: deleteEverythingFailure && failureDetail(deleteEverythingFailure),
     counts: STATES.map((state) => ({ state, count: counts[state] })),
     actions: ALL_ACTIONS,
     crates: buildTree(crates).map(crateRow),

@@ -143,8 +143,13 @@ export const adminPages: FastifyPluginAsync<AdminOptions> = async (fastify, { au
         if (flash) {
           request.session.set('flash', undefined);
         }
-        const [crates, workerRunning] = await Promise.all([indexQueue.crates(), indexQueue.workerRunning()]);
-        return render(reply, 'crates', { title: 'Crates', user: request.session.get('admin')?.name, flash, ...cratesPage(crates, workerRunning) });
+        const [crates, workerRunning, deleteEverythingFailure] = await Promise.all([
+          indexQueue.crates(),
+          indexQueue.workerRunning(),
+          indexQueue.deleteEverythingFailure(),
+        ]);
+        const page = cratesPage(crates, workerRunning, deleteEverythingFailure);
+        return render(reply, 'crates', { title: 'Crates', user: request.session.get('admin')?.name, flash, ...page });
       });
 
       for (const [action, run] of Object.entries(actions)) {

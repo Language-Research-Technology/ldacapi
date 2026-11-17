@@ -166,6 +166,12 @@ export function createIndexQueue({ prisma, repository }: { prisma: PrismaClient;
 
     crates: async () => (await states()).map(crateState),
 
+    /** How deleting everything last failed, until it next succeeds */
+    async deleteEverythingFailure() {
+      const failed = await prisma.indexJob.findFirst({ where: { crateId: null, status: 'failed' }, select: { error: true, stage: true, failedAt: true } });
+      return failed ? { error: failed.error as string, stage: failed.stage, failedAt: failed.failedAt as Date } : undefined;
+    },
+
     /** The crate `crateId`, if it is known to be in the repository */
     crate: async (crateId: string) => (await states(Prisma.sql`WHERE crate.id = ${crateId}`)).map(crateState)[0],
 

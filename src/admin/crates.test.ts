@@ -200,6 +200,30 @@ describe('refreshing while indexes change', () => {
   });
 });
 
+describe('a failure of deleting everything', () => {
+  /** The banner's text, if the page shows one */
+  const banner = (body: string) => body.match(/<p [^>]*id="delete-everything-failed"[^>]*>([^<]*)<\/p>/)?.[1];
+
+  it.each([
+    [{ stage: 'search index' }, 'Deleting everything failed: Error: search refused (search index, 2026-11-16 09:30 UTC)'],
+    [{}, 'Deleting everything failed: Error: search refused (2026-11-16 09:30 UTC)'],
+  ])('shows its error, stage and time above the crates, given %o', async (stage, shown) => {
+    await started.prisma.indexJob.create({ data: { kind: 'delete', status: 'failed', error: 'Error: search refused', failedAt: FAILED_AT, ...stage } });
+
+    const { page: body } = await page();
+
+    expect(banner(body.body)).toBe(shown);
+  });
+
+  it('is not shown while deleting everything hasn’t failed', async () => {
+    await stage(A, 'A', {}, { status: 'failed', error: 'Error' });
+
+    const { page: body } = await page();
+
+    expect(banner(body.body)).toBeUndefined();
+  });
+});
+
 describe('the worker warning', () => {
   const WARNING = 'No worker running';
 
