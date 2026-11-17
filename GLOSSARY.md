@@ -9,8 +9,12 @@ arocapi's terms, such as **Record**, **Metadata**, **Content** and **Row**, mean
 ### Crates and indexes
 
 **Crate**:
-One RO-Crate, stored as one OCFL object in the repository. The unit of import, indexing and admin actions.
+One RO-Crate, stored as one OCFL object in the repository. The unit of import, indexing and admin actions. A collection, object or file belongs to exactly one crate.
 _Avoid_: OCFL object (the storage), collection (what a crate may describe)
+
+**Shared entity**:
+A person, organisation or software entity that more than one crate may describe. The index keeps one copy of it (ADR 0006).
+_Avoid_: Duplicate (a collection, object or file in two crates, which is an error)
 
 **Import**:
 Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`).
