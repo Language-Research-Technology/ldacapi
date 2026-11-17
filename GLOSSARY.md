@@ -68,6 +68,10 @@ _Avoid_: Damaged crate (one that can't be read)
 An entity that more than one crate describes under the same absolute IRI, indexed as one entity.
 _Avoid_: Duplicate entity
 
+**Aggregates**:
+What Oni shows about an entity and everything below it: how many collections, objects and files are below it, and which languages, communication modes and media types it and they have. A collection's aggregates take in members held in other crates.
+_Avoid_: Counts (one part of them), summaries, facets (a search result's)
+
 ### Authentication
 
 **Upstream provider**:
