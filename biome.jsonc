@@ -16,10 +16,27 @@
     "rules": {
       "preset": "recommended",
       "style": {
-        "useBlockStatements": "error"
+        "useBlockStatements": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "patterns": [
+              {
+                "group": ["**/indexer/**"],
+                "message": "Only the worker, the CLI scripts and tests run the indexer; ask for index jobs through src/index-queue/ instead."
+              }
+            ]
+          }
+        }
       }
     }
   },
+  "overrides": [
+    {
+      "includes": ["src/indexer/**", "src/worker.ts", "scripts/**", "test/**"],
+      "linter": { "rules": { "style": { "noRestrictedImports": "off" } } }
+    }
+  ],
   "css": { "parser": { "tailwindDirectives": true } },
   "javascript": {
     "formatter": {

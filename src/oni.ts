@@ -1,71 +1,72 @@
 import type { AuthorisedEntity, EntityTransformer } from 'arocapi';
 import type { FastifyRequest } from 'fastify';
-import { type AccessControl, accessControlOf } from './entity-meta.ts';
-import { prisma } from './prisma.ts';
-
-export const COLLECTION = 'http://pcdm.org/models#Collection';
-export const OBJECT = 'http://pcdm.org/models#Object';
+import type { AccessControl } from './access/access-control.ts';
+import { accessControlOf } from './entity-meta.ts';
+import type { PrismaClient } from './generated/prisma/client.ts';
 
 type Counts = { collections: number; objects: number; subCollections: number; files: number };
 
-type OniEntity = AuthorisedEntity & { counts: Counts; accessControl?: AccessControl };
+/** Oni's aggregates of an entity: what is below it, and the values at or below it */
+type Aggregates = { counts: Counts; language: string[]; communicationMode: string[]; mediaType: string[] };
 
-const NONE: Counts = { collections: 0, objects: 0, subCollections: 0, files: 0 };
+type OniEntity = AuthorisedEntity & Aggregates & { accessControl?: AccessControl };
 
-/** What is under each of `ids` by `memberOf`, which crosses into the crates of distributed collections */
-const countsUnder = async (ids: string[]) => {
-  const rows = await prisma.$queryRaw<(Counts & { anchor: string })[]>`
-    WITH RECURSIVE under AS (
-      SELECT "memberOf" AS anchor, id, "entityType", "memberOf" FROM entity WHERE "memberOf" = ANY(${ids})
-      UNION
-      SELECT u.anchor, e.id, e."entityType", e."memberOf" FROM entity e JOIN under u ON e."memberOf" = u.id
-    )
-    SELECT
-      anchor,
-      (count(*) FILTER (WHERE u."entityType" = ${COLLECTION}))::int AS collections,
-      (count(*) FILTER (WHERE u."entityType" = ${OBJECT}))::int AS objects,
-      (count(*) FILTER (WHERE u."entityType" = ${COLLECTION} AND u."memberOf" = u.anchor))::int AS "subCollections",
-      count(f.id)::int AS files
-    FROM under u LEFT JOIN file f ON f.id = u.id
-    GROUP BY anchor`;
-  return new Map(rows.map(({ anchor, ...counts }) => [anchor, counts]));
-};
+const none = (): Aggregates => ({ counts: { collections: 0, objects: 0, subCollections: 0, files: 0 }, language: [], communicationMode: [], mediaType: [] });
 
-const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Counts>>>();
+type AggregateRow = Counts & Omit<Aggregates, 'counts'> & { entityId: string };
 
-/** Counts for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
-const countsOf = (request: FastifyRequest, id: string) => {
-  let batch = batches.get(request);
-  if (!batch) {
-    const current = new Map<string, PromiseWithResolvers<Counts>>();
-    batch = current;
-    batches.set(request, current);
+/** The aggregates of each of `ids`, summing what each crate adds, in one query */
+export async function aggregatesOf(db: Pick<PrismaClient, '$queryRaw'>, ids: string[]) {
+  const rows = await db.$queryRaw<AggregateRow[]>`
+    SELECT "entityId",
+      sum(collections)::int AS collections, sum(objects)::int AS objects, sum("subCollections")::int AS "subCollections", sum(files)::int AS files,
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other.language) v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS language,
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other."communicationMode") v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS "communicationMode",
+      ARRAY(SELECT DISTINCT v COLLATE "C" FROM aggregate other, unnest(other."mediaType") v WHERE other."entityId" = aggregate."entityId" ORDER BY 1) AS "mediaType"
+    FROM aggregate WHERE "entityId" = ANY(${ids}) GROUP BY "entityId"`;
+  return new Map<string, Aggregates>(
+    rows.map(({ entityId, collections, objects, subCollections, files, ...values }) => [
+      entityId,
+      { counts: { collections, objects, subCollections, files }, ...values },
+    ]),
+  );
+}
+
+const batches = new WeakMap<FastifyRequest, Map<string, PromiseWithResolvers<Aggregates>>>();
+
+/** Aggregates for every entity a request transforms, in one query: arocapi transforms a page's entities in the same tick */
+const aggregatesFor = (db: Pick<PrismaClient, '$queryRaw'>, request: FastifyRequest, id: string) => {
+  const batch = batches.get(request) ?? new Map<string, PromiseWithResolvers<Aggregates>>();
+  if (!batches.has(request)) {
+    batches.set(request, batch);
     queueMicrotask(() => {
       batches.delete(request);
-      countsUnder([...current.keys()]).then(
-        (counts) => {
-          for (const [id, { resolve }] of current) {
-            resolve(counts.get(id) ?? NONE);
+      aggregatesOf(db, [...batch.keys()]).then(
+        (found) => {
+          for (const [id, { resolve }] of batch) {
+            resolve(found.get(id) ?? none());
           }
         },
         (error: unknown) => {
-          for (const { reject } of current.values()) {
+          for (const { reject } of batch.values()) {
             reject(error);
           }
         },
       );
     });
   }
-  let counts = batch.get(id);
-  if (!counts) {
-    counts = Promise.withResolvers<Counts>();
-    batch.set(id, counts);
+  let aggregates = batch.get(id);
+  if (!aggregates) {
+    aggregates = Promise.withResolvers<Aggregates>();
+    batch.set(id, aggregates);
   }
-  return counts.promise;
+  return aggregates.promise;
 };
 
 /** The fields Oni expects on every entity beyond the spec's: https://github.com/crate-works/oni/blob/main/docs/api-extensions.md */
-export const oniEntityTransformer: EntityTransformer<AuthorisedEntity, OniEntity> = async (entity, { request }, { meta }) => {
-  const accessControl = accessControlOf(meta);
-  return { ...entity, ...(accessControl && { accessControl }), counts: await countsOf(request, entity.id) };
-};
+export const oniEntityTransformer =
+  (db: Pick<PrismaClient, '$queryRaw'>): EntityTransformer<AuthorisedEntity, OniEntity> =>
+  async (entity, { request }, { meta }) => {
+    const accessControl = accessControlOf(meta);
+    return { ...entity, ...(accessControl && { accessControl }), ...(await aggregatesFor(db, request, entity.id)) };
+  };

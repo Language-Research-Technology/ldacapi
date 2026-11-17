@@ -1,25 +1,8 @@
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
 import { resolve } from 'node:path';
 import * as z from 'zod';
+import { databaseUrlSetting, type Env, parseNodeEnv } from './database-url.ts';
 import { generateCookieKey, generateSigningKey, type Jwk, SIGNING_ALG } from './oidc/keys.ts';
-
-type Env = Record<string, string | undefined>;
-
-const openLicenses = [
-  'https://creativecommons.org/licenses/by/3.0/au/',
-  'https://creativecommons.org/licenses/by/4.0/',
-  'https://creativecommons.org/licenses/by-nc/4.0/',
-  'https://creativecommons.org/licenses/by-nd/3.0/au/',
-];
-
-const indexType = {
-  RepositoryCollection: 'https://w3id.org/ldac/profile#Collection',
-  RepositoryObject: 'https://w3id.org/ldac/profile#Object',
-  File: '',
-  Person: 'https://w3id.org/ldac/profile#Person',
-  Organization: 'https://w3id.org/ldac/profile#Organization',
-  SoftwareApplication: 'https://w3id.org/ldac/profile#SoftwareApplication',
-};
 
 const oidcClient = z.strictObject({
   client_id: z.string().min(1),
@@ -60,6 +43,8 @@ const commaList = z.string().transform((value) =>
     .filter(Boolean),
 );
 
+const openLicenses = commaList.pipe(z.array(z.string()).min(1, 'Needs at least one licence id'));
+
 const cookieKeys = commaList.pipe(z.array(z.string().min(32, 'Each key must be at least 32 characters')).min(1, 'Needs at least one key'));
 
 const SAMPLE_LICENSE_ID = 'https://example.org/licence#A';
@@ -85,7 +70,7 @@ const requiredWithUpstream = (production: boolean) => {
 };
 
 export function loadConfig(processEnv: Env) {
-  const nodeEnv = z.enum(['development', 'test', 'production']).default('development').parse(processEnv.NODE_ENV);
+  const nodeEnv = parseNodeEnv(processEnv);
   const isDev = nodeEnv === 'development';
 
   const devDefault = (value: string) => (nodeEnv === 'production' ? z.string() : z.string().default(value));
@@ -115,7 +100,7 @@ export function loadConfig(processEnv: Env) {
 
   const result = z
     .object({
-      DATABASE_URL: devDefault(`postgresql://ldacapi:ldacapi@localhost:5432/ldacapi${nodeEnv === 'test' ? '_test' : ''}`),
+      DATABASE_URL: databaseUrlSetting(nodeEnv),
       OPENSEARCH_URL: devDefault('http://localhost:9200'),
       OCFL_ROOT: devDefault('storage/ocfl'),
       LDACAPI_PORT: z.coerce.number().int().default(8080),
@@ -123,6 +108,7 @@ export function loadConfig(processEnv: Env) {
       LDACAPI_MAX_PARAM_LENGTH: z.coerce.number().int().default(500),
       LOG_LEVEL: z.string().default({ development: 'debug', test: 'silent', production: 'info' }[nodeEnv]),
       ENTITY_INDEX: z.string().default(nodeEnv === 'test' ? 'entities_test' : 'entities'),
+      OPEN_LICENSES: openLicenses,
       DEFAULT_LICENSE: optional,
       DEFAULT_METADATA_LICENSE: optional,
       REMS_USER: optional,
@@ -195,7 +181,7 @@ export function loadConfig(processEnv: Env) {
     },
     defaultLicense: env.DEFAULT_LICENSE,
     defaultMetadataLicense: env.DEFAULT_METADATA_LICENSE,
-    openLicenses,
+    openLicenses: env.OPEN_LICENSES,
     prefix,
     rems: {
       user: env.REMS_USER,
@@ -206,7 +192,6 @@ export function loadConfig(processEnv: Env) {
     auth: env.auth,
     adminOrigin: env.ADMIN_ORIGIN,
     adminUsers: env.ADMIN_USERS,
-    indexType,
     search: { entityIndex: env.ENTITY_INDEX },
   };
 }

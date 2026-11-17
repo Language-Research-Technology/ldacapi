@@ -1,13 +1,26 @@
-<% if (it.crates.length === 0) { %>
-<p>The repository has no crates.</p>
-<% } else { %>
+<% if (it.deleteEverythingFailed) { %>
+<p role="alert" id="delete-everything-failed" class="mb-4 rounded border border-red-300 bg-red-50 px-4 py-3 text-red-900">Deleting everything failed: <%= it.deleteEverythingFailed %></p>
+<% } %>
+<% if (!it.workerRunning) { %>
+<p role="alert" class="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900">No worker running: queued crates wait until one starts.</p>
+<% } %>
+<ul id="state-counts" class="mb-4 flex flex-wrap gap-2 text-sm">
+<% for (const { state, count } of it.counts) { %>
+  <li class="rounded-full bg-white px-3 py-1 shadow-sm"><span class="font-medium"><%= state %>:</span> <span class="state-count" data-state="<%= state %>"><%= count %></span></li>
+<% } %>
+</ul>
 <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+<% if (it.crates.length > 0) { %>
   <input type="search" id="crate-filter" placeholder="Filter by name" aria-label="Filter crates by name" class="w-full max-w-sm rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm placeholder:text-zinc-400 focus:border-amber-500 focus:ring-2 focus:ring-amber-200 focus:outline-none">
+<% } %>
   <div class="flex gap-2">
 <% for (const form of it.actions) { %>
     <%~ include('./action-form', { form }) %>
 <% } %>
   </div>
 </div>
+<% if (it.crates.length === 0) { %>
+<p>No crates are listed yet. Index all to list every crate in the repository.</p>
+<% } else { %>
 <div id="crates" class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm"><%~ include('./crate-list', { crates: it.crates }) %></div>
 <% } %>

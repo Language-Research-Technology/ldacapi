@@ -1,177 +1,256 @@
-import type { Entity, ROCrate } from 'ro-crate';
-import { config } from '../configuration.ts';
+import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
+import type { StorageRoot } from '@ocfl/ocfl-fs';
+import type { Client } from '@opensearch-project/opensearch';
+import type { IndexJobKind, PrismaClient } from '../generated/prisma/client.ts';
 import { logger } from '../logger.ts';
-import { firstStringOrId } from '../utils.ts';
+import { deleteSearchIndex, prepareSearchIndex, type SearchBackend } from '../search-backend.ts';
+import { AggregatesWriter } from './aggregates.ts';
+import { openCrate, ParentCache } from './crate.ts';
+import { type DeriveFacts, derive } from './derive.ts';
+import { DocumentsWriter } from './documents.ts';
+import { claim, fail, heartbeat, type Job, type RecordWrite, release, removeWorker, returnDeadWorkersJobs, succeed, unfinished } from './jobs.ts';
+import { isOutage, waitForServices } from './outage.ts';
+import { Progress } from './progress.ts';
+import { RowsWriter } from './rows.ts';
 
 const log = logger.child({ module: 'indexer' });
 
-export type BaseOptions = {
-  defaultLicense?: string;
-  defaultMetadataLicense?: string;
-  name?: string;
+export type IndexerDeps = {
+  prisma: PrismaClient;
+  repository: StorageRoot;
+  opensearch: Client;
+  search: SearchBackend;
+  licences: Pick<DeriveFacts, 'defaultLicense' | 'defaultMetadataLicense' | 'isOpenLicence'>;
 };
 
-/** A URI reference relative to the crate root as a decoded path, dropping any query or fragment */
-function crateRelativePath(ref: string) {
-  const path = new URL(ref, 'file:///').pathname.slice(1);
-  if (!path) {
-    return;
+export type WorkOptions = (
+  | { until: 'empty' }
+  | {
+      /** Works the queue until it is empty and no job for `crateIds` is waiting or running, here or in any worker */
+      until: 'finished';
+      crateIds: string[];
+    }
+  | {
+      /** Waits for jobs until `signal` aborts, then stops, releasing the job it is running once its current step is done */
+      until: 'aborted';
+      signal: AbortSignal;
+    }
+) & {
+  heartbeatMilliseconds?: number;
+  /** How long to wait before looking for a job again when none is waiting */
+  pollMilliseconds?: number;
+  /** How long to wait between checks while the database or search is unavailable */
+  retryMilliseconds?: number;
+};
+
+type Writers = { rows: RowsWriter; documents: DocumentsWriter; aggregates: AggregatesWriter };
+
+const NOT_INDEXED = { indexedVersion: null, indexedAt: null, entities: null, files: null };
+
+/**
+ * Documents first, found by the links, so a delete cut short can be asked again. Then, once the rows have changed, the
+ * documents of what changed, as another crate may have linked to them since
+ */
+async function deleteIndexes(prisma: PrismaClient, writers: Writers, crateId: string, progress: Progress) {
+  await prisma.crateRecord.update({ where: { id: crateId }, data: NOT_INDEXED });
+  progress.start('search index');
+  const removed = await writers.documents.delete(crateId);
+  progress.start('aggregates');
+  await writers.aggregates.delete(crateId);
+  progress.start('database index');
+  const { orphaned, rebuilt } = await writers.rows.delete(crateId);
+  progress.start('search index');
+  const held = new Set(removed.held);
+  await writers.documents.sync([...new Set([...removed.shared, ...orphaned, ...rebuilt])].filter((id) => !held.has(id)));
+}
+
+/** What a job logs when it finishes, and what it writes to its crate's record */
+type Outcome = { logged?: Record<string, unknown>; record?: RecordWrite };
+
+/** Empties both indexes wholesale, keeping every crate's record as not indexed, and clears every crate's failure */
+async function deleteEverything({ prisma, opensearch, search }: IndexerDeps, progress: Progress): Promise<Outcome> {
+  progress.start('database index');
+  await prisma.$transaction([prisma.crateRecord.updateMany({ data: NOT_INDEXED }), prisma.indexJob.deleteMany({ where: { status: 'failed' } })]);
+  progress.start('search index');
+  await deleteSearchIndex(opensearch);
+  await prepareSearchIndex(opensearch, search);
+  progress.start('aggregates');
+  await prisma.aggregate.deleteMany();
+  progress.start('database index');
+  await prisma.crateLink.deleteMany();
+  await prisma.file.deleteMany();
+  await prisma.entity.deleteMany();
+  return {};
+}
+
+/** Deletes everything, or the crate's indexes (then its record, if it is gone from the repository), or indexes it */
+async function runJob(deps: IndexerDeps, writers: Writers, parents: ParentCache, job: Job, progress: Progress): Promise<Outcome> {
+  const { crateId, kind } = job;
+  if (crateId === null) {
+    return deleteEverything(deps, progress);
   }
+  if (!(await deps.repository.has(crateId))) {
+    await deleteIndexes(deps.prisma, writers, crateId, progress);
+    return { logged: { removed: true }, record: { crateId, remove: true } };
+  }
+  if (kind === 'delete') {
+    await deleteIndexes(deps.prisma, writers, crateId, progress);
+    return {};
+  }
+  return indexCrate(deps, writers, parents, crateId, kind, progress);
+}
+
+async function indexCrate(
+  { prisma, repository, licences }: IndexerDeps,
+  writers: Writers,
+  parents: ParentCache,
+  crateId: string,
+  kind: IndexJobKind,
+  progress: Progress,
+): Promise<Outcome> {
+  const opened = await openCrate(repository, parents, crateId);
+  const { indexedVersion } = await prisma.crateRecord.findUniqueOrThrow({ where: { id: crateId } });
+  if (kind === 'index' && indexedVersion === opened.version) {
+    log.debug({ crateId, version: opened.version }, 'Skipped: already indexed');
+    return { logged: { skipped: true } };
+  }
+  const { crate, heldFiles, readText, parentCrates } = await opened.read(progress);
+  progress.start('deriving');
+  if (crate.rootId !== crateId) {
+    throw new Error(`The crate's root id, ${crate.rootId}, isn't the id of the OCFL object holding it, ${crateId}`);
+  }
+  const derivation = derive(crate, { parentCrates, heldFiles, ...licences });
+  for (const { msg, ...warning } of derivation.warnings) {
+    log.warn({ crateId, ...warning }, msg);
+  }
+  await deleteIndexes(prisma, writers, crateId, progress);
+  await writers.rows.write(derivation, progress);
+  await writers.documents.write(derivation, readText, progress);
+  await writers.aggregates.write(derivation, progress);
+  const counts = { entities: derivation.entities.length, files: derivation.entities.filter(({ file }) => file).length };
+  const data = { name: derivation.name, indexedVersion: opened.version, indexedAt: new Date(), ...counts };
+  return { logged: { version: opened.version, ...counts }, record: { crateId, data } };
+}
+
+/** A job being run, and what stops it once another worker is found to hold its claim */
+type Running = { job: Job; progress: Progress; claimLost: AbortController };
+
+/** Runs the job and records its result, unless it was stopped or met an outage, which the caller releases it for */
+async function run(deps: IndexerDeps, writers: Writers, parents: ParentCache, workerId: string, { job, progress, claimLost }: Running) {
+  const fields = { jobId: job.id, crateId: job.crateId, kind: job.kind };
+  const started = Date.now();
+  log.info({ ...fields, attempt: job.attempts }, 'Job started');
+  const dropped = () => log.warn(fields, 'Result dropped: another worker holds the job');
   try {
-    return decodeURIComponent(path);
-  } catch {
-    return path;
-  }
-}
-
-/** Entity id → its path in the crate */
-export type LogicalPaths = Map<string, string>;
-
-export interface CrateFile {
-  size: number;
-}
-
-export interface CrateObject {
-  /** The id of the OCFL object holding the crate */
-  id: string;
-  /** The text content of a file within the crate */
-  text(path: string): Promise<string>;
-  /** The metadata of a file within the crate, such as size */
-  file(path: string): Promise<CrateFile>;
-}
-
-export class Indexer {
-  defaultLicense: string;
-  defaultMetadataLicense: string;
-  name: string;
-
-  constructor(opt?: BaseOptions) {
-    this.defaultLicense = opt?.defaultLicense || '';
-    this.defaultMetadataLicense = opt?.defaultMetadataLicense || '';
-    this.name = opt?.name || Object.getPrototypeOf(this).constructor.name;
-  }
-
-  static async create<T extends Indexer, O>(this: new (opt: O) => T, opt: O) {
-    const indexer = new this(opt);
-    await indexer.init();
-    return indexer;
-  }
-
-  deriveUniqueEntityId(crateRootId: string, entityId: string) {
-    if (entityId.startsWith(crateRootId)) {
-      return entityId;
-    } else if (entityId.match(/.+:.+/)) {
-      return entityId;
+    const { logged, record } = await runJob(deps, writers, parents, job, progress);
+    if (await succeed(deps.prisma, workerId, job, record)) {
+      log.info({ ...fields, ...logged, milliseconds: Date.now() - started }, 'Job finished');
     } else {
-      return `${crateRootId}/${entityId}`;
+      dropped();
+    }
+  } catch (error) {
+    if (claimLost.signal.aborted) {
+      dropped();
+      return;
+    }
+    if (isOutage(error) || progress.signal.aborted) {
+      throw error;
+    }
+    if (await fail(deps.prisma, workerId, job, error, progress)) {
+      log.error({ ...fields, stage: progress.stage, failedOn: progress.on, err: error }, 'Job failed');
+    } else {
+      dropped();
     }
   }
+}
 
-  /**
-   * Rename each entity's @id to its unique id, returning the path in the crate of each entity that has one
-   * Idempotent, as indexers share the crate
-   */
-  deriveUniqueEntityIds(crate: ROCrate) {
-    const descriptorId = crate.descriptor['@id'];
-    const prefix = `${crate.rootId}/`;
-    const paths: LogicalPaths = new Map();
-    for (const entity of crate.entities()) {
-      const original: string = entity['@id'];
-      if (original === descriptorId) {
-        continue;
+const INTERVALS = { heartbeatMilliseconds: 30_000, pollMilliseconds: 1000, retryMilliseconds: 5000 };
+
+/** Runs index jobs one at a time, until none is waiting or until stopped, as the worker and the CLI do */
+export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
+  const { prisma, search } = deps;
+  const signal = options.until === 'aborted' ? options.signal : new AbortController().signal;
+  const intervals = { ...INTERVALS, ...options };
+  const writers = {
+    rows: new RowsWriter(prisma),
+    documents: new DocumentsWriter(prisma, search),
+    aggregates: new AggregatesWriter(prisma),
+  };
+  const parents = new ParentCache(deps.repository);
+  const workerId = `${hostname()}:${process.pid}:${randomUUID()}`;
+  let running: Running | undefined;
+  const beat = async () => {
+    const current = running;
+    try {
+      if (!(await heartbeat(prisma, workerId, current))) {
+        const { job, claimLost } = current as Running;
+        log.warn({ jobId: job.id, crateId: job.crateId, kind: job.kind }, 'Stopping the job: another worker holds it');
+        claimLost.abort();
       }
-      const id = this.deriveUniqueEntityId(crate.rootId, original);
-      const path = id.startsWith(prefix) && crateRelativePath(id.slice(prefix.length));
-      if (path) {
-        paths.set(id, path);
-      }
-      if (id !== original) {
-        entity['@id'] = id;
-      }
+      await returnDeadWorkersJobs(prisma);
+    } catch (error) {
+      log.warn({ err: error }, 'Heartbeat failed');
     }
-    return paths;
-  }
-
-  async init() {}
-
-  async count(_crateId: string): Promise<number> {
-    throw new Error('Not Implemented');
-  }
-
-  /**
-   * Delete the index for a given crateId or all index entries if a crateId is not specified.
-   * All implementation of this method should ensure that when crateId is
-   * null or undefined, the entire index (or all entries) is deleted.
-   */
-  async delete(_crateId?: string) {
-    throw new Error('Not Implemented');
-  }
-
-  /** `topCollection` is the top-level collection the crate sits under, the crate's own root if it has no parent */
-  async index({ crateObject, crate, topCollection }: { crateObject: CrateObject; crate: ROCrate; topCollection: string }) {
-    const rootDataset = crate.root;
-    const crateId = crate.rootId;
-    const metadataLicense = firstStringOrId(crate.descriptor.license) || this.defaultMetadataLicense;
-    const license = firstStringOrId(rootDataset.license) || this.defaultLicense;
-    if (!rootDataset) {
-      log.warn({ crateId: crateObject.id }, 'Skipped: Does not contain an ROCrate with a valid root dataset');
-    } else if (crateId === './') {
-      log.warn({ crateId: crateObject.id }, "Skipped: Cannot process a crate with invalid identifier ('./')");
-    } else if (!metadataLicense) {
-      log.warn({ crateId }, 'Skipped: No metadata license found');
-    } else if (!license) {
-      log.warn({ crateId }, 'Skipped: No license found');
-    } else {
-      log.info({ crateId }, 'Indexing crate');
-      const paths = this.deriveUniqueEntityIds(crate);
+  };
+  // One beat at a time, the last awaited before the worker row is removed
+  let beating = Promise.resolve();
+  const beats = setInterval(() => {
+    beating = beating.then(beat);
+  }, intervals.heartbeatMilliseconds);
+  let ready = false;
+  let swept = false;
+  /** A job stopped or cut short by an outage, released once the database answers or the worker stops */
+  let unreleased: Job | undefined;
+  try {
+    while (!signal.aborted) {
+      let job: Job | undefined;
       try {
-        await this._index({ crateObject, crate, paths, license, metadataLicense, topCollection });
+        if (!ready) {
+          await prepareSearchIndex(deps.opensearch, search);
+          ready = true;
+        }
+        if (unreleased) {
+          await release(prisma, workerId, unreleased);
+          unreleased = undefined;
+        }
+        job = await claim(prisma, workerId);
+        // Idle polls leave dead workers' jobs to the heartbeat
+        if (!job && !swept) {
+          await returnDeadWorkersJobs(prisma);
+          job = await claim(prisma, workerId);
+        }
+        swept = !job;
+        if (job) {
+          const claimLost = new AbortController();
+          running = { job, progress: new Progress(AbortSignal.any([signal, claimLost.signal])), claimLost };
+          await run(deps, writers, parents, workerId, running);
+        } else if (options.until === 'aborted' || (options.until === 'finished' && (await unfinished(prisma, options.crateIds)))) {
+          await sleep(intervals.pollMilliseconds, undefined, { signal }).catch(() => {});
+        } else {
+          return;
+        }
       } catch (error) {
-        log.error({ err: error, crateId }, 'Error indexing crate');
+        unreleased ??= job;
+        if (isOutage(error)) {
+          log.warn({ err: error }, 'Paused: the database or search is unavailable');
+          await waitForServices(deps, intervals.retryMilliseconds, signal);
+        } else if (!signal.aborted) {
+          throw error;
+        }
+      } finally {
+        running = undefined;
       }
     }
-  }
-
-  async _index(_param: {
-    crateObject: CrateObject;
-    crate: ROCrate;
-    paths: LogicalPaths;
-    license: string;
-    metadataLicense: string;
-    topCollection: string;
-  }): Promise<void> {
-    throw new Error('Not Implemented');
-  }
-
-  /** Index a single entity within the crate. This needs to be implemented in the specific concrete indexer implementation. */
-  async _indexEntity(_param: { crateObject: CrateObject; crate: ROCrate; license: string; metadataLicense: string }) {
-    throw new Error('Not Implemented');
+  } finally {
+    // Left to the dead-worker sweep when the database can't be reached
+    const job = unreleased;
+    if (job) {
+      await release(prisma, workerId, job).catch((error: unknown) => log.warn({ err: error, jobId: job.id, crateId: job.crateId }, 'Job not released'));
+    }
+    clearInterval(beats);
+    await beating;
+    await removeWorker(prisma, workerId).catch((error: unknown) => log.warn({ err: error }, 'Worker not removed'));
   }
 }
-
-/** An entity's rootCollection: empty on the top-level collection itself */
-export const rootCollection = (topCollection: string, entityId: string) => (entityId === topCollection ? null : topCollection);
-
-/** The first collection `entity` is a member of, by `pcdm:memberOf` or `memberOf`, in a parsed crate or raw JSON-LD */
-export const memberOf = (entity: Record<string, unknown>) => firstStringOrId(entity['pcdm:memberOf']) || firstStringOrId(entity.memberOf);
-
-/** The id of the collection a crate's root is a member of, if any */
-export function parentCollection(root: Record<string, unknown>, rootId: string): string | undefined {
-  const parent = memberOf(root);
-  return parent && parent !== rootId ? parent : undefined;
-}
-
-const RecordType: Record<string, string> = config.indexType;
-
-/** The entity's first type that we index, if it conforms to that type's profile */
-export function recordType(entity: Entity): string | undefined {
-  const type = entity['@type'].find((t: string) => t in RecordType);
-  const profile = type && RecordType[type];
-  if (profile && !entity.conformsTo?.some((c: { '@id': string }) => c['@id'] === profile)) {
-    return;
-  }
-  return type;
-}
-
-/** The class URI of a record type, as the entity's row holds it */
-export const entityClass = (crate: ROCrate, type: string): string => crate.getContextDefinition(type) || RecordType[type];

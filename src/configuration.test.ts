@@ -22,10 +22,12 @@ const PRODUCTION = {
   OPENSEARCH_URL: 'http://search:9200',
   OCFL_ROOT: '/data/ocfl',
 };
+const OPEN = 'https://example.org/licenses/open';
+const load = (env: Record<string, string | undefined>) => loadConfig({ OPEN_LICENSES: OPEN, ...env });
 
 describe('loadConfig', () => {
   it('runs in development with no environment set', () => {
-    const config = loadConfig({});
+    const config = load({});
 
     expect(config.isDev).toBe(true);
     expect(config.databaseUrl).toBe('postgresql://ldacapi:ldacapi@localhost:5432/ldacapi');
@@ -35,7 +37,7 @@ describe('loadConfig', () => {
   });
 
   it('uses the test database and index, and logs nothing, in test', () => {
-    const config = loadConfig({ NODE_ENV: 'test' });
+    const config = load({ NODE_ENV: 'test' });
 
     expect(config.databaseUrl).toBe('postgresql://ldacapi:ldacapi@localhost:5432/ldacapi_test');
     expect(config.search.entityIndex).toBe('entities_test');
@@ -43,34 +45,34 @@ describe('loadConfig', () => {
   });
 
   it('reads values from the environment', () => {
-    const config = loadConfig({ LDACAPI_PORT: '9000', ENTITY_INDEX: 'other' });
+    const config = load({ LDACAPI_PORT: '9000', ENTITY_INDEX: 'other' });
 
     expect(config.port).toBe(9000);
     expect(config.search.entityIndex).toBe('other');
   });
 
   it('treats empty values as unset', () => {
-    expect(loadConfig({ OPENSEARCH_URL: '' }).opensearchUrl).toBe('http://localhost:9200');
+    expect(load({ OPENSEARCH_URL: '' }).opensearchUrl).toBe('http://localhost:9200');
   });
 
   it('requires connection details and OCFL root in production', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*OCFL_ROOT/);
-    expect(() => loadConfig({ NODE_ENV: 'production' })).not.toThrow(/TOKEN_ADMIN/);
+    expect(() => load({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL[\s\S]*OPENSEARCH_URL[\s\S]*OCFL_ROOT/);
+    expect(() => load({ NODE_ENV: 'production' })).not.toThrow(/TOKEN_ADMIN/);
   });
 
   it('starts in production once the required values are set', () => {
-    const config = loadConfig(PRODUCTION);
+    const config = load(PRODUCTION);
 
     expect(config.isDev).toBe(false);
     expect(config.logLevel).toBe('info');
   });
 
   it('leaves sign-in off without an upstream issuer', () => {
-    expect(loadConfig({}).auth).toBeUndefined();
+    expect(load({}).auth).toBeUndefined();
   });
 
   it('turns sign-in on with complete upstream settings', () => {
-    const config = loadConfig({ ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org/' });
+    const config = load({ ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org/' });
 
     expect(config.auth).toEqual({
       issuer: 'https://api.example.org',
@@ -93,43 +95,43 @@ describe('loadConfig', () => {
   });
 
   it('requires the upstream client ID and secret with an upstream issuer', () => {
-    expect(() => loadConfig({ OIDC_UPSTREAM_ISSUER: 'https://idp.example.org' })).toThrow(/OIDC_UPSTREAM_CLIENT_ID[\s\S]*OIDC_UPSTREAM_CLIENT_SECRET/);
+    expect(() => load({ OIDC_UPSTREAM_ISSUER: 'https://idp.example.org' })).toThrow(/OIDC_UPSTREAM_CLIENT_ID[\s\S]*OIDC_UPSTREAM_CLIENT_SECRET/);
   });
 
   it('requires a client with an upstream issuer', () => {
-    expect(() => loadConfig({ ...UPSTREAM, OIDC_CLIENTS: '[]' })).toThrow(/at least one client[\s\S]*OIDC_CLIENTS/);
-    expect(() => loadConfig({ ...UPSTREAM, OIDC_CLIENTS: undefined })).toThrow(/OIDC_CLIENTS/);
+    expect(() => load({ ...UPSTREAM, OIDC_CLIENTS: '[]' })).toThrow(/at least one client[\s\S]*OIDC_CLIENTS/);
+    expect(() => load({ ...UPSTREAM, OIDC_CLIENTS: undefined })).toThrow(/OIDC_CLIENTS/);
   });
 
   it('requires OIDC_ISSUER in production only when sign-in is on', () => {
-    expect(() => loadConfig(PRODUCTION)).not.toThrow();
-    expect(() => loadConfig({ ...PRODUCTION, ...UPSTREAM })).toThrow(/OIDC_ISSUER/);
-    expect(loadConfig({ ...PRODUCTION, ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' }).auth?.issuer).toBe('https://api.example.org');
+    expect(() => load(PRODUCTION)).not.toThrow();
+    expect(() => load({ ...PRODUCTION, ...UPSTREAM })).toThrow(/OIDC_ISSUER/);
+    expect(load({ ...PRODUCTION, ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' }).auth?.issuer).toBe('https://api.example.org');
   });
 
   it('requires an https upstream issuer in production only', () => {
     const upstream = { ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org', OIDC_UPSTREAM_ISSUER: 'http://idp.example.org' };
 
-    expect(() => loadConfig({ ...PRODUCTION, ...upstream })).toThrow(/OIDC_UPSTREAM_ISSUER/);
-    expect(loadConfig(upstream).auth?.upstream.issuer).toBe('http://idp.example.org');
+    expect(() => load({ ...PRODUCTION, ...upstream })).toThrow(/OIDC_UPSTREAM_ISSUER/);
+    expect(load(upstream).auth?.upstream.issuer).toBe('http://idp.example.org');
   });
 
   it('rejects an OIDC_ISSUER that is not a URL', () => {
-    expect(() => loadConfig({ OIDC_ISSUER: 'api.example.org' })).toThrow(/OIDC_ISSUER/);
+    expect(() => load({ OIDC_ISSUER: 'api.example.org' })).toThrow(/OIDC_ISSUER/);
   });
 
   it('rejects an OIDC_ISSUER with a path, query or hash', () => {
     for (const issuer of ['https://api.example.org/oidc', 'https://api.example.org/?x=1', 'https://api.example.org/#x']) {
-      expect(() => loadConfig({ OIDC_ISSUER: issuer })).toThrow(/origin[\s\S]*OIDC_ISSUER/);
+      expect(() => load({ OIDC_ISSUER: issuer })).toThrow(/origin[\s\S]*OIDC_ISSUER/);
     }
   });
 
   it('requires an https OIDC_ISSUER in production', () => {
-    expect(() => loadConfig({ ...PRODUCTION, ...UPSTREAM, OIDC_ISSUER: 'http://api.example.org' })).toThrow(/https[\s\S]*OIDC_ISSUER/);
+    expect(() => load({ ...PRODUCTION, ...UPSTREAM, OIDC_ISSUER: 'http://api.example.org' })).toThrow(/https[\s\S]*OIDC_ISSUER/);
   });
 
   it('reads clients from OIDC_CLIENTS', () => {
-    const config = loadConfig({
+    const config = load({
       ...UPSTREAM,
       OIDC_CLIENTS: JSON.stringify([
         { client_id: 'oni', redirect_uris: ['https://oni.example.org/callback'], post_logout_redirect_uris: ['https://oni.example.org/'] },
@@ -144,21 +146,21 @@ describe('loadConfig', () => {
   });
 
   it('rejects OIDC_CLIENTS that is not JSON', () => {
-    expect(() => loadConfig({ OIDC_CLIENTS: '[{client_id: oni}]' })).toThrow(/Invalid JSON[\s\S]*OIDC_CLIENTS/);
+    expect(() => load({ OIDC_CLIENTS: '[{client_id: oni}]' })).toThrow(/Invalid JSON[\s\S]*OIDC_CLIENTS/);
   });
 
   it('rejects clients without an ID or redirect URIs, or with unknown fields', () => {
-    expect(() => loadConfig({ OIDC_CLIENTS: '{"client_id":"oni"}' })).toThrow(/OIDC_CLIENTS/);
-    expect(() => loadConfig({ OIDC_CLIENTS: '[{"redirect_uris":["https://oni.example.org/callback"]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*client_id/);
-    expect(() => loadConfig({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uris":[]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*redirect_uris/);
-    expect(() => loadConfig({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uris":["not a url"]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*redirect_uris/);
-    expect(() => loadConfig({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uri":["https://oni.example.org/callback"]}]' })).toThrow(
+    expect(() => load({ OIDC_CLIENTS: '{"client_id":"oni"}' })).toThrow(/OIDC_CLIENTS/);
+    expect(() => load({ OIDC_CLIENTS: '[{"redirect_uris":["https://oni.example.org/callback"]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*client_id/);
+    expect(() => load({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uris":[]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*redirect_uris/);
+    expect(() => load({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uris":["not a url"]}]' })).toThrow(/OIDC_CLIENTS[\s\S]*redirect_uris/);
+    expect(() => load({ OIDC_CLIENTS: '[{"client_id":"oni","redirect_uri":["https://oni.example.org/callback"]}]' })).toThrow(
       /OIDC_CLIENTS[\s\S]*redirect_uri/,
     );
   });
 
   describe('OIDC keys', () => {
-    const withKeys = (keys: Record<string, string | undefined>) => loadConfig({ ...UPSTREAM, ...KEYS, ...keys }).auth;
+    const withKeys = (keys: Record<string, string | undefined>) => load({ ...UPSTREAM, ...KEYS, ...keys }).auth;
     const signingKeys = (...keys: object[]) => JSON.stringify({ keys });
 
     it('signs with the first signing key and keeps the rest for verifying', () => {
@@ -201,14 +203,14 @@ describe('loadConfig', () => {
     it('requires both in production when sign-in is on', () => {
       const production = { ...PRODUCTION, ...UPSTREAM, OIDC_ISSUER: 'https://api.example.org' };
 
-      expect(() => loadConfig(production)).toThrow(/OIDC_SIGNING_KEYS[\s\S]*OIDC_COOKIE_KEYS/);
-      expect(() => loadConfig({ ...production, OIDC_SIGNING_KEYS: KEYS.OIDC_SIGNING_KEYS })).toThrow(/OIDC_COOKIE_KEYS/);
-      expect(loadConfig({ ...production, ...KEYS }).auth?.signingKeys).toEqual([SIGNING_KEY]);
+      expect(() => load(production)).toThrow(/OIDC_SIGNING_KEYS[\s\S]*OIDC_COOKIE_KEYS/);
+      expect(() => load({ ...production, OIDC_SIGNING_KEYS: KEYS.OIDC_SIGNING_KEYS })).toThrow(/OIDC_COOKIE_KEYS/);
+      expect(load({ ...production, ...KEYS }).auth?.signingKeys).toEqual([SIGNING_KEY]);
     });
 
     it('generates throwaway keys when unset in test and development', () => {
       for (const NODE_ENV of ['test', 'development']) {
-        const auth = loadConfig({ ...UPSTREAM, NODE_ENV }).auth;
+        const auth = load({ ...UPSTREAM, NODE_ENV }).auth;
 
         expect(auth?.signingKeys).toEqual([expect.objectContaining({ kty: 'RSA', alg: 'RS256', use: 'sig', kid: expect.any(String), d: expect.any(String) })]);
         expect(auth?.cookieKeys).toEqual([expect.stringMatching(/^[\w-]{43}$/)]);
@@ -217,20 +219,20 @@ describe('loadConfig', () => {
   });
 
   it('reads admins from ADMIN_USERS as a comma-separated list, nobody when unset', () => {
-    expect(loadConfig({ ADMIN_USERS: ' alice@upstream , ,bob@upstream ' }).adminUsers).toEqual(['alice@upstream', 'bob@upstream']);
-    expect(loadConfig({}).adminUsers).toEqual([]);
+    expect(load({ ADMIN_USERS: ' alice@upstream , ,bob@upstream ' }).adminUsers).toEqual(['alice@upstream', 'bob@upstream']);
+    expect(load({}).adminUsers).toEqual([]);
   });
 
   describe('ENROLLMENT_URL', () => {
     const LICENCE = 'https://example.org/licenses/restricted#A';
 
     it('offers no enrolment URL when unset or empty', () => {
-      expect(loadConfig({}).enrollmentUrl).toBeUndefined();
-      expect(loadConfig({ ENROLLMENT_URL: '' }).enrollmentUrl).toBeUndefined();
+      expect(load({}).enrollmentUrl).toBeUndefined();
+      expect(load({ ENROLLMENT_URL: '' }).enrollmentUrl).toBeUndefined();
     });
 
     it('fills every {licenseId} with the URL-encoded licence id', () => {
-      const { enrollmentUrl } = loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource={licenseId}&return={licenseId}' });
+      const { enrollmentUrl } = load({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource={licenseId}&return={licenseId}' });
 
       expect(enrollmentUrl?.(LICENCE)).toBe(
         'https://rems.example.org/apply-for?resource=https%3A%2F%2Fexample.org%2Flicenses%2Frestricted%23A&return=https%3A%2F%2Fexample.org%2Flicenses%2Frestricted%23A',
@@ -239,35 +241,33 @@ describe('loadConfig', () => {
 
     it('rejects the old JavaScript template form, saying to use {licenseId}', () => {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: the old form, literally
-      expect(() => loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource=${licenseId}' })).toThrow(
+      expect(() => load({ ENROLLMENT_URL: 'https://rems.example.org/apply-for?resource=${licenseId}' })).toThrow(
         /Use \{licenseId\}, not \$\{licenseId\}[\s\S]*ENROLLMENT_URL/,
       );
     });
 
     it('rejects a value without {licenseId}', () => {
-      expect(() => loadConfig({ ENROLLMENT_URL: 'https://rems.example.org/apply-for' })).toThrow(/\{licenseId\}[\s\S]*ENROLLMENT_URL/);
+      expect(() => load({ ENROLLMENT_URL: 'https://rems.example.org/apply-for' })).toThrow(/\{licenseId\}[\s\S]*ENROLLMENT_URL/);
     });
 
     it('rejects a value that is not an absolute URL', () => {
-      expect(() => loadConfig({ ENROLLMENT_URL: '/apply-for?resource={licenseId}' })).toThrow(/ENROLLMENT_URL/);
+      expect(() => load({ ENROLLMENT_URL: '/apply-for?resource={licenseId}' })).toThrow(/ENROLLMENT_URL/);
     });
 
     it('rejects {licenseId} where a licence id would not make a URL', () => {
-      expect(() => loadConfig({ ENROLLMENT_URL: 'https://{licenseId}.rems.example.org/apply-for' })).toThrow(/ENROLLMENT_URL/);
+      expect(() => load({ ENROLLMENT_URL: 'https://{licenseId}.rems.example.org/apply-for' })).toThrow(/ENROLLMENT_URL/);
     });
 
     it('keeps a literal ${ other than the old placeholder', () => {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: a literal ${ in the URL
       const fragment = '#${x}';
-      const { enrollmentUrl } = loadConfig({ ENROLLMENT_URL: `https://rems.example.org/apply-for?resource={licenseId}${fragment}` });
+      const { enrollmentUrl } = load({ ENROLLMENT_URL: `https://rems.example.org/apply-for?resource={licenseId}${fragment}` });
 
       expect(enrollmentUrl?.('A')).toBe(`https://rems.example.org/apply-for?resource=A${fragment}`);
     });
 
     it('requires an https ENROLLMENT_URL in production', () => {
-      expect(() => loadConfig({ ...PRODUCTION, ENROLLMENT_URL: 'http://rems.example.org/apply-for?resource={licenseId}' })).toThrow(
-        /https[\s\S]*ENROLLMENT_URL/,
-      );
+      expect(() => load({ ...PRODUCTION, ENROLLMENT_URL: 'http://rems.example.org/apply-for?resource={licenseId}' })).toThrow(/https[\s\S]*ENROLLMENT_URL/);
     });
   });
 
@@ -275,26 +275,42 @@ describe('loadConfig', () => {
     const signIn = { ...UPSTREAM, ...KEYS, OIDC_ISSUER: 'https://api.example.org' };
 
     it('defaults to admin.localhost outside production', () => {
-      expect(loadConfig({}).adminOrigin).toBe('http://admin.localhost:8080');
-      expect(loadConfig({ NODE_ENV: 'test' }).adminOrigin).toBe('http://admin.localhost:8080');
+      expect(load({}).adminOrigin).toBe('http://admin.localhost:8080');
+      expect(load({ NODE_ENV: 'test' }).adminOrigin).toBe('http://admin.localhost:8080');
     });
 
     it('is unset by default in production, and read as an origin', () => {
-      expect(loadConfig({ ...PRODUCTION, ...signIn }).adminOrigin).toBeUndefined();
-      expect(loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'https://admin.example.org/' }).adminOrigin).toBe('https://admin.example.org');
+      expect(load({ ...PRODUCTION, ...signIn }).adminOrigin).toBeUndefined();
+      expect(load({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'https://admin.example.org/' }).adminOrigin).toBe('https://admin.example.org');
     });
 
     it('rejects an ADMIN_ORIGIN that is not an origin, or not https in production', () => {
-      expect(() => loadConfig({ ADMIN_ORIGIN: 'https://admin.example.org/admin' })).toThrow(/origin[\s\S]*ADMIN_ORIGIN/);
-      expect(() => loadConfig({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'http://admin.example.org' })).toThrow(/https[\s\S]*ADMIN_ORIGIN/);
+      expect(() => load({ ADMIN_ORIGIN: 'https://admin.example.org/admin' })).toThrow(/origin[\s\S]*ADMIN_ORIGIN/);
+      expect(() => load({ ...PRODUCTION, ...signIn, ADMIN_ORIGIN: 'http://admin.example.org' })).toThrow(/https[\s\S]*ADMIN_ORIGIN/);
     });
 
     it('rejects an ADMIN_ORIGIN that is the issuer’s origin', () => {
-      expect(() => loadConfig({ ...signIn, ADMIN_ORIGIN: 'https://api.example.org' })).toThrow(/OIDC_ISSUER[\s\S]*ADMIN_ORIGIN/);
+      expect(() => load({ ...signIn, ADMIN_ORIGIN: 'https://api.example.org' })).toThrow(/OIDC_ISSUER[\s\S]*ADMIN_ORIGIN/);
+    });
+  });
+
+  describe('OPEN_LICENSES', () => {
+    it('is required in every environment, with no default', () => {
+      for (const NODE_ENV of ['development', 'test', 'production']) {
+        expect(() => load({ ...PRODUCTION, NODE_ENV, OPEN_LICENSES: undefined })).toThrow(/OPEN_LICENSES/);
+      }
+      expect(() => load({ OPEN_LICENSES: '' })).toThrow(/OPEN_LICENSES/);
+      expect(() => load({ OPEN_LICENSES: ' , ' })).toThrow(/OPEN_LICENSES/);
+    });
+
+    it('reads the open licences as a comma-separated list', () => {
+      const other = 'https://example.org/licenses/also-open';
+
+      expect(load({ OPEN_LICENSES: ` ${OPEN} ,${other}` }).openLicenses).toEqual([OPEN, other]);
     });
   });
 
   it('rejects an unknown NODE_ENV', () => {
-    expect(() => loadConfig({ NODE_ENV: 'staging' })).toThrow();
+    expect(() => load({ NODE_ENV: 'staging' })).toThrow();
   });
 });

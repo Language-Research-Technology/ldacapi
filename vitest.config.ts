@@ -7,16 +7,18 @@ export default defineConfig({
     fileParallelism: false,
     coverage: {
       provider: 'v8',
-      // Entry points (scripts/, src/index.ts) run as their own process, unseen by coverage; they only parse arguments and call src/
+      // Entry points (scripts/, src/index.ts, src/worker.ts) run as their own process, unseen by coverage; they only parse arguments and call src/
       include: ['src/**/*.ts'],
-      exclude: ['src/generated/**', 'src/**/*.test.ts', 'src/index.ts'],
+      exclude: ['src/generated/**', 'src/**/*.test.ts', 'src/index.ts', 'src/worker.ts'],
       thresholds: {
         // Raised by vitest whenever a run beats them; commit the change
         autoUpdate: true,
-        lines: 93.52,
-        branches: 87.44,
-        functions: 95.33,
-        statements: 93.84,
+        lines: 98.1,
+        branches: 94.84,
+        functions: 98.71,
+        statements: 98.14,
+        'src/indexer/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
+        'src/index-queue/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
       },
     },
   },

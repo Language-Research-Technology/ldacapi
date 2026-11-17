@@ -1,6 +1,6 @@
 import cors from '@fastify/cors';
 import fastifySensible from '@fastify/sensible';
-import type { SearchBackend } from 'arocapi';
+import type { SearchBackend, StorageBackend } from 'arocapi';
 import arocapi, { AllVisibleEntityFilter, AllVisibleSearchFilter, errorHandler, notFoundHandler } from 'arocapi';
 import { EntityMetaMetadata } from 'arocapi/storage/entity-meta';
 import Fastify, { type FastifyPluginAsync } from 'fastify';
@@ -9,22 +9,23 @@ import { ADMIN_PATH, adminClient } from './admin/client.ts';
 import { adminPages } from './admin/plugin.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
+import type { IndexQueue } from './index-queue/index-queue.ts';
 import { logger } from './logger.ts';
 import { oidcProvider } from './oidc/provider.ts';
 import { oniEntityTransformer } from './oni.ts';
 import { prisma } from './prisma.ts';
-import type { Repository } from './repository.ts';
 
 type AppDeps = {
-  repository: Repository;
   search: SearchBackend;
+  storage: StorageBackend['content'];
+  indexQueue: IndexQueue;
 };
 
 const ldacapi: FastifyPluginAsync = async (fastify) => {
   fastify.get('/version', async () => ({ version: pkg.version }));
 };
 
-export function buildApp({ repository, search }: AppDeps) {
+export function buildApp({ search, storage, indexQueue }: AppDeps) {
   const fastify = Fastify({
     loggerInstance: logger,
     routerOptions: {
@@ -48,8 +49,8 @@ export function buildApp({ repository, search }: AppDeps) {
         isAuthenticated,
         entityVisibilityFilter: AllVisibleEntityFilter,
         searchVisibilityFilter: AllVisibleSearchFilter,
-        entityTransformers: [oniEntityTransformer],
-        storage: { metadata: EntityMetaMetadata(), content: repository.storage().content },
+        entityTransformers: [oniEntityTransformer(prisma)],
+        storage: { metadata: EntityMetaMetadata(), content: storage },
       });
       api.register(ldacapi);
     },
@@ -61,7 +62,7 @@ export function buildApp({ repository, search }: AppDeps) {
     fastify.register(oidcProvider, { auth: { ...auth, clients } });
   }
   if (auth && adminOrigin) {
-    fastify.register(adminPages, { prefix: ADMIN_PATH, auth, origin: adminOrigin, adminUsers: config.adminUsers, repository });
+    fastify.register(adminPages, { prefix: ADMIN_PATH, auth, origin: adminOrigin, adminUsers: config.adminUsers, indexQueue });
     // Nothing but the admin pages answers on the admin origin, so no crate file can run script there
     const adminHost = new URL(adminOrigin).host;
     fastify.addHook('onRequest', async (request, reply) => {

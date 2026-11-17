@@ -1,5 +1,6 @@
 import { loadEnvFile } from 'node:process';
 import { defineConfig } from 'prisma/config';
+import { loadDatabaseUrl } from './src/database-url.ts';
 
 try {
   loadEnvFile('.env');
@@ -9,14 +10,12 @@ try {
   }
 }
 
-const { config } = await import('./src/configuration.ts');
-
 export default defineConfig({
   schema: 'prisma',
   migrations: {
     path: 'prisma/migrations',
   },
   datasource: {
-    url: config.databaseUrl,
+    url: loadDatabaseUrl(process.env),
   },
 });

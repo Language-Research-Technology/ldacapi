@@ -1,24 +1,12 @@
-import { hasState, INDEX_TYPES, type IndexType, type RepositoryObject, State } from '../repository.ts';
+import type { CrateState, IndexQueue, StateName } from '../index-queue/index-queue.ts';
+import { ancestorIds, countStates, STATES } from '../index-queue/index-queue.ts';
 
-type Crate = RepositoryObject & { label: string; children: Crate[] };
+type Crate = CrateState & { label: string; children: Crate[] };
 
-const INDEX_LABELS: Record<IndexType, string> = { database: 'Database', search: 'Search' };
-
-/** How often the page reloads while an index is changing */
+/** How often the page reloads while a crate's indexes are changing */
 const REFRESH_SECONDS = 5;
 
-/** The ids of the crates `id` is under, nearest first, as indexing a crate also indexes the crates under it */
-function* ancestorIds(id: string) {
-  let path = id.replace(/\/+$/, '');
-  for (let slash = path.lastIndexOf('/'); slash > 0; slash = path.lastIndexOf('/')) {
-    path = path.slice(0, slash);
-    yield path;
-    yield `${path}/`;
-  }
-}
-
-/** Whether `id` is `crateId` or a crate under it */
-export const isWithin = (id: string, crateId: string) => id === crateId || ancestorIds(id).some((ancestor) => ancestor === crateId);
+const CHANGING: StateName[] = ['queued', 'indexing', 'deleting'];
 
 const parentOf = (id: string, crates: Map<string, Crate>) => {
   for (const ancestor of ancestorIds(id)) {
@@ -39,8 +27,8 @@ const sortTree = (crates: Crate[]) => {
   return crates;
 };
 
-const buildTree = (objects: RepositoryObject[]) => {
-  const crates = new Map(objects.map((object) => [object.id, { ...object, label: object.name ?? object.id, children: [] as Crate[] }]));
+const buildTree = (states: CrateState[]) => {
+  const crates = new Map(states.map((state) => [state.id, { ...state, label: state.name ?? state.id, children: [] as Crate[] }]));
   const roots: Crate[] = [];
   for (const crate of crates.values()) {
     (parentOf(crate.id, crates)?.children ?? roots).push(crate);
@@ -48,25 +36,55 @@ const buildTree = (objects: RepositoryObject[]) => {
   return sortTree(roots);
 };
 
-/** A form posting `crateId` (none for every crate) to an action */
-type ActionForm = { action: 'index' | 'delete'; label: string; crateId?: string | undefined; force?: boolean; confirm?: string };
+/** A form posting `crateId` (none for every crate), and with `under` the crates under it, to an action */
+type ActionForm = { action: 'index' | 'delete'; label: string; crateId?: string | undefined; force?: boolean; under?: boolean; confirm?: string };
 
-type CrateRow = { id: string; label: string; states: { label: string; value: string }[]; actions: ActionForm[]; children: CrateRow[] };
+type CrateRow = { id: string; label: string; state: StateName; detail?: string | undefined; actions: ActionForm[]; children: CrateRow[] };
 
-const crateRow = (crate: Crate): CrateRow => {
-  const indexed = hasState(crate.state, State.INDEXED);
-  const confirm = `Delete the indexes of ${crate.label}${crate.children.length > 0 ? ' and the crates under it' : ''}?`;
-  return {
-    id: crate.id,
-    label: crate.label,
-    states: INDEX_TYPES.map((index) => ({ label: INDEX_LABELS[index], value: crate.state[index] ?? 'not indexed' })),
-    actions: [
-      { action: 'index', label: indexed ? 'Reindex' : 'Index', crateId: crate.id, force: indexed },
-      { action: 'delete', label: 'Delete', crateId: crate.id, confirm },
-    ],
-    children: crate.children.map(crateRow),
-  };
+const counted = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
+const number = (count: number) => count.toLocaleString('en-AU');
+
+const time = (date: Date) => date.toISOString().replace('T', ' ').slice(0, 16);
+
+/** What the state shows beside its name */
+const detail = (crate: CrateState) => {
+  switch (crate.state) {
+    case 'indexed':
+      return `v${crate.version}, ${time(crate.indexedAt)} UTC, ${counted(crate.entities, 'entity', 'entities')}, ${counted(crate.files, 'file', 'files')}`;
+    case 'indexing': {
+      const counter = crate.done === null || crate.total === null ? [] : [`${number(crate.done)} of ${number(crate.total)}`];
+      return [crate.stage ?? [], counter, `since ${time(crate.startedAt)} UTC`].flat().join(', ');
+    }
+    case 'failed': {
+      const where = [crate.stage ?? [], crate.failedOn ? `on ${crate.failedOn}` : []].flat();
+      return `${crate.error} (${[...where, `${time(crate.failedAt)} UTC`, `attempt ${crate.attempts}`].join(', ')})`;
+    }
+    default:
+      return undefined;
+  }
 };
+
+const crateActions = (crate: Crate): ActionForm[] => [
+  { action: 'index', label: 'Index', crateId: crate.id },
+  { action: 'index', label: 'Reindex', crateId: crate.id, force: true },
+  { action: 'delete', label: 'Delete', crateId: crate.id, confirm: `Delete the indexes of ${crate.label}?` },
+];
+
+const underActions = (crate: Crate): ActionForm[] => [
+  { action: 'index', label: 'Index tree', crateId: crate.id, under: true },
+  { action: 'index', label: 'Reindex tree', crateId: crate.id, force: true, under: true },
+  { action: 'delete', label: 'Delete tree', crateId: crate.id, under: true, confirm: `Delete the indexes of ${crate.label} and the crates under it?` },
+];
+
+const crateRow = (crate: Crate): CrateRow => ({
+  id: crate.id,
+  label: crate.label,
+  state: crate.state,
+  detail: detail(crate),
+  actions: [...crateActions(crate), ...(crate.children.length > 0 ? underActions(crate) : [])],
+  children: crate.children.map(crateRow),
+});
 
 const ALL_ACTIONS: ActionForm[] = [
   { action: 'index', label: 'Index all' },
@@ -74,8 +92,19 @@ const ALL_ACTIONS: ActionForm[] = [
   { action: 'delete', label: 'Delete all', confirm: 'Delete every index?' },
 ];
 
-/** The crates as a tree, and a refresh while any index is changing */
-export const cratesPage = (objects: RepositoryObject[]) => {
-  const changing = objects.some(({ state }) => hasState(state, State.QUEUED, State.INDEXING, State.DELETING));
-  return { refresh: changing ? REFRESH_SECONDS : undefined, actions: ALL_ACTIONS, crates: buildTree(objects).map(crateRow) };
+type Failure = Awaited<ReturnType<IndexQueue['deleteEverythingFailure']>>;
+
+const failureDetail = ({ error, stage, failedAt }: NonNullable<Failure>) => `${error} (${[stage ?? [], `${time(failedAt)} UTC`].flat().join(', ')})`;
+
+/** The crates as a tree, how many are in each state, a refresh while any is changing, and how deleting everything last failed */
+export const cratesPage = (crates: CrateState[], workerRunning: boolean, deleteEverythingFailure: Failure) => {
+  const counts = countStates(crates);
+  return {
+    refresh: CHANGING.some((state) => counts[state] > 0) ? REFRESH_SECONDS : undefined,
+    workerRunning,
+    deleteEverythingFailed: deleteEverythingFailure && failureDetail(deleteEverythingFailure),
+    counts: STATES.map((state) => ({ state, count: counts[state] })),
+    actions: ALL_ACTIONS,
+    crates: buildTree(crates).map(crateRow),
+  };
 };

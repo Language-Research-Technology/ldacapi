@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from 'jose';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buildTestApp, repositoryWithContent, type TestApp } from '../../test/app.ts';
+import { buildTestApp, contentEverywhere, type TestApp } from '../../test/app.ts';
 import { startFakeUpstream, type UpstreamUser } from '../../test/fake-upstream.ts';
 import { authorizationRequest, Browser } from '../../test/oidc.ts';
 
@@ -87,7 +87,7 @@ beforeAll(async () => {
       OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
       REMS_ENDPOINT: `http://127.0.0.1:${(rems.address() as AddressInfo).port}`,
     },
-    { repository: repositoryWithContent },
+    { storage: contentEverywhere },
   ));
   ({ prefix } = config);
 

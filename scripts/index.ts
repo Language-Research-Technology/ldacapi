@@ -1,11 +1,10 @@
-import { Client } from '@opensearch-project/opensearch';
-import { config } from '../src/configuration.ts';
-import { createIndex, deleteIndex, init } from '../src/ocfl.ts';
-import { prisma } from '../src/prisma.ts';
+import { parseArgs } from 'node:util';
+import { openIndexing } from '../src/indexer/deps.ts';
+import { indexAndSummarise } from '../src/indexer/index-and-summarise.ts';
 
-const opensearch = new Client({ node: config.opensearchUrl });
-await init({ opensearchClient: opensearch });
-// A full rebuild, as deleting by crate misses rows that don't record their crate
-await deleteIndex();
-await createIndex();
-await Promise.all([prisma.$disconnect(), opensearch.close()]);
+const { values } = parseArgs({ options: { force: { type: 'boolean', default: false } } });
+
+const { deps, indexQueue, close } = await openIndexing();
+const { failed } = await indexAndSummarise(deps, indexQueue, () => indexQueue.indexEverything({ reindex: values.force }));
+process.exitCode = failed.length > 0 ? 1 : 0;
+await close();

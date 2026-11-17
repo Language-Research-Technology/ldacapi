@@ -31,6 +31,13 @@ describe('PrismaAdapter', () => {
     expect(await adapter.find('session-3')).toBeUndefined();
   });
 
+  it('finds nothing by user code, as the device flow is off', async () => {
+    const adapter = new PrismaAdapter('DeviceCode');
+    await adapter.upsert('device-1', { userCode: 'ABCD-EFGH' }, 60);
+
+    expect(await adapter.findByUserCode('ABCD-EFGH')).toBeUndefined();
+  });
+
   it('consumes an entry only once', async () => {
     const adapter = new PrismaAdapter('AuthorizationCode');
     await adapter.upsert('code-1', { grantId: 'grant-1' }, 60);

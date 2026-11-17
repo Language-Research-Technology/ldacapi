@@ -23,7 +23,7 @@ configures them as follows:
 - **Search backend**: arocapi's
   [`OpenSearchBackend`](https://arocapi.crate-works.org/configuration/search/#opensearchbackend),
   with the [fields](https://arocapi.crate-works.org/configuration/search/#fields)
-  declared in `src/indexer/search.ts`, where `entityType` filters on an
+  declared in `src/search-backend.ts`, where `entityType` filters on an
   entity's class URI and the "Record Type" facet, `recordType`, shows a
   readable label for it.
 - **Visibility**: every entity is visible to everyone, through arocapi's
@@ -38,19 +38,27 @@ configures them as follows:
 ldacapi adds what LDaCA needs on top (terms as in [GLOSSARY.md](GLOSSARY.md)):
 
 - **OCFL repository**: each crate is one [OCFL](https://ocfl.io/) object on
-  disk, imported with `pnpm crates:import` (`src/ocfl.ts`).
-- **Indexing**: `pnpm index` and the admin pages build the database index (the
-  Entity and File rows arocapi reads) and the search index (one search
-  document per entity) from the repository (`src/indexer/`). Both can be
-  rebuilt at any time.
+  disk, imported with `pnpm crates:import` (`src/repository/`).
+- **Indexing**: `pnpm index`, `pnpm crates:import` and the admin pages ask for index jobs
+  (`src/index-queue/`), and a worker (`src/worker.ts`) runs them, building the
+  database index (the Entity and File rows arocapi reads) and the search index
+  (one search document per entity) from the repository (`src/indexer/`). Jobs
+  and each crate's index state are kept in Postgres. Both indexes can be
+  rebuilt at any time (see [Indexing](#indexing)).
 - **Collections**: an entity's `rootCollection` is the top-level collection
   it sits under, and is empty on a top-level collection
   ([membership](https://arocapi.crate-works.org/concepts/entities/#membership)).
-  Indexing finds it by following `memberOf` up through the parent crates in
+  Indexing finds it by following `pcdm:memberOf` up through the parent crates in
   the repository, so a crate in a distributed collection gets the
   distributed collection's root whatever order the crates are indexed in. If
   a parent collection moves, reindex the crates under it: they keep the old
   `rootCollection` until then.
+- **Aggregates**: Oni shows each entity's counts of the collections, objects
+  and files below it, and the languages, communication modes and media types
+  at or below it. Each index job stores what its crate adds to every entity
+  above its own, including collections in parent crates, and the API sums
+  those per page (`src/oni.ts`), so a collection split across crates reads as
+  one.
 - **Sign-in**: the API is its own OIDC provider, signing users in at an
   upstream provider such as CILogon (`src/oidc/`,
   [ADR 0001](docs/adr/0001-own-oidc-provider.md)).
@@ -68,7 +76,7 @@ You need Node.js 26 (26.13 or later), [pnpm](https://pnpm.io/) and Docker.
 ```sh
 pnpm install
 docker compose up -d --wait   # Postgres, OpenSearch, Oni and a fake upstream provider
-pnpm bootstrap                # migrate the database, import test-data into OCFL, index
+pnpm bootstrap                # migrate the database, import test-data into OCFL and index it
 pnpm dev
 ```
 
@@ -81,22 +89,25 @@ pnpm dev
 | Upstream   | <http://localhost:8090/default>                       |
 | Postgres   | `postgresql://ldacapi:ldacapi@localhost:5432/ldacapi` |
 
-No configuration is needed for development, but sign-in is off until you
-copy `.env.example` to `.env` (see [Local sign-in](#local-sign-in)). To
-override a default, set it in `.env`.
+Copy `.env.example` to `.env` before starting the API: it sets
+`OPEN_LICENSES`, which is required (see [Licences](#licences)), and turns
+sign-in on (see [Local sign-in](#local-sign-in)). To override a default, set
+it in `.env`.
 
 ## Scripts
 
 | Script                     | Does                                                                             |
 | -------------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`                 | Run the API, restarting on changes, and rebuild the admin pages' stylesheet      |
+| `pnpm dev`                 | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet |
 | `pnpm build`               | Build the admin pages' stylesheet (run before deploying)                         |
 | `pnpm test`                | Run the tests (needs `docker compose up`)                                        |
 | `pnpm lint`                | Biome, Knip and TypeScript                                                       |
-| `pnpm bootstrap`           | `db:deploy`, `crates:import` and `index` in one go                               |
+| `pnpm bootstrap`           | `db:deploy` and `crates:import` in one go                                        |
 | `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
-| `pnpm crates:import [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository |
-| `pnpm index`               | Rebuild both indexes from the OCFL repository                                    |
+| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does |
+| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
+| `pnpm worker`              | Run index jobs as they are asked for                                             |
+| `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
 | `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
 | `pnpm db:deploy`           | Apply pending migrations                                                         |
@@ -107,11 +118,163 @@ override a default, set it in `.env`.
 
 Each folder in `test-data/` is one RO-Crate. `pnpm crates:import` imports them into the
 OCFL repository at `storage/ocfl` (gitignored), and re-running it only adds a
-new OCFL version for crates that changed. Run `pnpm index` afterwards.
+new OCFL version for crates that changed. It then indexes the crates it
+imported.
 
-The indexer skips a crate that has no metadata licence (the `license` of
-`ro-crate-metadata.json`) or no content licence (the `license` of the root
-dataset) unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set.
+To index an OCFL repository that already holds crates, in place, point
+`OCFL_ROOT` at it and run `pnpm index`: it lists every crate in the repository
+and indexes each one.
+
+A crate with no metadata licence (the `license` of `ro-crate-metadata.json`)
+or no content licence (the `license` of the root dataset) fails its index job,
+unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set. So does a
+crate whose root id isn't an absolute IRI.
+
+## Indexing
+
+Indexing runs in the worker (`pnpm worker`; `node src/worker.ts` in the
+image), never in the API. The admin pages, `pnpm index` and
+`pnpm crates:import` only ask for index jobs, which wait in a queue in
+Postgres. Each job is for one crate: "a crate and those under it" and "every
+crate" become one job per crate. Deleting every index is one job with no
+crate.
+
+### The worker
+
+- It runs one job at a time. A job reads its crate from the repository, writes
+  its database index (crate links, and Entity and File rows), then its search
+  index, then its share of Oni's aggregates, then records the crate's indexed
+  version.
+- Index skips a crate whose indexed version is its head version. Reindex
+  deletes and rebuilds it whatever its version.
+- Indexing a crate gone from the repository deletes its indexes and its record,
+  and succeeds; the record stays, not indexed, if another job for the crate
+  has been asked for meanwhile.
+- Any error in a crate fails its job at once, and nothing in it is skipped, so
+  an indexed version always means the whole crate is indexed: an entity whose
+  row can't be written fails it, as does a document search refuses. The failed
+  job records the error's message, its stage (reading the crate, deriving,
+  database index, search index or aggregates), the entity or file it was on,
+  when, and which attempt; the stack trace goes only to the log, with the job
+  id. Nothing retries it: fix the crate, then ask again. Indexing and deleting
+  are both safe to repeat.
+- A file the crate describes but doesn't hold is indexed and searchable, with
+  no content to preview or download (404), and one warning per crate counts
+  them. A held file that can't be read fails the job.
+- It never forces a search refresh, so new documents become searchable at
+  OpenSearch's next periodic refresh, within a second by default.
+- It writes a heartbeat to Postgres every 30 seconds, saving with it the
+  running job's stage and how much of it is done, of how much; that write is
+  the only one progress costs. The admin pages show "No worker running" when
+  no worker has written one for 5 minutes.
+- It logs a line when a job starts (job id, crate id, kind, attempt), when it
+  finishes (duration, version, entity and file counts) and when it fails
+  (crate id, job id, stage, stack trace). At `LOG_LEVEL=debug` it also logs
+  each entity it indexes, each file whose text it reads, and each crate
+  skipped as already indexed.
+- On SIGTERM or SIGINT it stops once the step the running job is on ends, puts
+  that job back in the queue, as if never tried, and exits. If Postgres can't
+  be reached then, it exits anyway, leaving the job to be recovered as a dead
+  worker's.
+- A worker silent for 5 minutes is dead. The next worker or `pnpm index` to
+  look for work puts its job back in the queue, to run again; a job whose
+  worker dies on three attempts fails. A worker wrongly judged dead stops its
+  job when its next heartbeat finds another worker holds it, and writes
+  nothing more.
+- A crate whose root id isn't the id of the OCFL object holding it fails at
+  deriving.
+- If Postgres or OpenSearch can't be reached, it logs that it has paused, puts
+  its job back in the queue, and tries again every 5 seconds, carrying on once
+  both answer.
+- `pnpm index` and `pnpm crates:import` work the queue as a worker does, and
+  write the same log lines, until no job is waiting and every job they asked
+  for has finished, whichever worker ran it. Then they log how many of the
+  crates they asked for were indexed, skipped, deleted and failed, and each
+  failure with its error, read from Postgres, and exit non-zero if any
+  failed.
+
+### Index states
+
+The admin pages' crates page shows one state per crate, and counts the crates
+in each state at the top:
+
+| State       | When                                                   | Shows                               |
+| ----------- | ------------------------------------------------------ | ----------------------------------- |
+| not indexed | it has no indexes                                      |                                     |
+| queued      | an index or reindex job waits                          |                                     |
+| indexing    | an index or reindex job is running                     | its stage, how much of it is done as of the last heartbeat, and when it started: "search index, 12,000 of 30,000, since 2026-11-17 10:42 UTC" |
+| deleting    | a delete job waits or runs, or deleting every index    |                                     |
+| indexed     | its last job succeeded                                 | version, when, entities and files   |
+| failed      | its last job failed                                    | the error, its stage, the entity or file it was on, when, and which attempt |
+
+A waiting or running job comes first, then a failed one, then what the last
+successful job recorded. A crate is listed once a job has been asked for it,
+so "Index all" lists every crate in the repository.
+
+### Shared entities and clashes
+
+A crate link records each entity a crate contains; it is the only record of an
+entity's crates. A crate's entity and file counts are its links, so an entity
+two crates contain counts in both.
+
+- **People, organisations and software** are shared entities: any number of
+  crates may describe the same one (one absolute IRI, such as an ORCID). Each
+  crate's link keeps its own copy, and the row and search document are wholly
+  one crate's copy: a crate whose metadata licence is open first, then the
+  lowest crate id. Copies are never merged, and indexing the crates in any
+  order gives the same rows. A person a crate mentions without the LDaC
+  profile has no link to it.
+- **Deleting a crate**, or reindexing it once it no longer contains an entity,
+  removes its links, then the entities no crate links to. A shared entity whose
+  winning crate goes becomes the next crate's copy, from the copy kept on its
+  link, without reading the repository.
+- **A clash** fails the job: a crate describing a collection, object or file
+  another crate already holds, or an id another crate describes as a different
+  kind of entity. The error names the entity and both crates, and the crate
+  holding it keeps its row. The failed crate shows as failed until its data is
+  fixed.
+
+### More than one worker
+
+Workers share the queue: each claims the oldest waiting job that no other
+worker holds, and two jobs for one crate never run at once. Deleting every
+index waits for the running jobs to finish and runs alone. To run more, start
+more workers against the same database, search index and repository, such as
+`docker compose up -d --scale worker=3` in [production](#production-with-docker-compose).
+Each worker holds one crate's metadata in memory at a time, and remembers
+each crate's parent collection (ids only), so a parent crate is read once
+rather than once per crate under it. Workers, `pnpm index` and
+`pnpm crates:import` cap node's heap at 768 MB (`--max-old-space-size`);
+uncapped, node lets garbage grow the heap with the machine's memory, past 1 GB
+for a large crate.
+
+### Known limits
+
+- There's no rebuild without a gap: "Reindex all" runs with the API up, so a
+  crate drops out of the API while its job runs.
+- A change to the search fields needs a maintenance window: delete the search
+  index and index every crate again (see [Running it](#running-it)).
+- Only the first 1,000,000 bytes of a `text/*` file are searchable; a file cut
+  short is logged.
+- A changed parent crate leaves the crates under it stale (their
+  `rootCollection`, and what they add to the aggregates of the collections
+  above them) until they are reindexed.
+- Entities' `Public` and `AuthorizationByApplication` labels, and which crate's
+  copy of a shared entity wins, lag a change to `OPEN_LICENSES` until their
+  crates are reindexed.
+- Which of two clashing crates holds a collection, object or file depends on
+  which was indexed first; the other fails on every run until the data is
+  fixed.
+- Reindexing the crate whose copy of a shared entity wins briefly shows the
+  next crate's copy while its job runs.
+- A crate put in the repository by another tool isn't listed on the admin pages
+  until "Index all" runs.
+- A crate on the older bare spelling (`memberOf`, `communicationMode` rather
+  than `pcdm:memberOf`, `ldac:communicationMode`) indexes without its parents
+  or LDaC facets, with no warning.
+- A crate too large for the 768 MB heap stops the process running its job;
+  after three tries the job fails with "Its worker died on each of 3 attempts".
+  Raise `--max-old-space-size` where the worker is started to index it.
 
 ## Configuration
 
@@ -131,6 +294,7 @@ set.
 | `LDACAPI_MAX_PARAM_LENGTH`                                 | `500`                                                 |
 | `LOG_LEVEL`                                                | `debug` in development, otherwise `info`              |
 | `ENTITY_INDEX`                                             | `entities`                                            |
+| `OPEN_LICENSES`                                            | none; always required                                 |
 | `DEFAULT_LICENSE`, `DEFAULT_METADATA_LICENSE`              | none                                                  |
 | `REMS_USER`, `REMS_KEY`, `REMS_ENDPOINT`, `ENROLLMENT_URL` | none                                                  |
 | `OIDC_UPSTREAM_ISSUER`                                     | none (sign-in is off)                                 |
@@ -141,7 +305,8 @@ set.
 | `ADMIN_ORIGIN`                                             | `http://admin.localhost:8080` outside production      |
 | `ADMIN_USERS`                                              | none (nobody is an admin)                             |
 
-With `NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT`
+`OPEN_LICENSES` must always be set (see [Licences](#licences)). With
+`NODE_ENV=production`, `DATABASE_URL`, `OPENSEARCH_URL` and `OCFL_ROOT` also
 have no defaults and must be set.
 
 ### Licences
@@ -152,10 +317,22 @@ Every entity has a metadata licence, which guards its RO-Crate metadata
 ([two licences per entity](https://arocapi.crate-works.org/concepts/licences/#two-licences-per-entity)).
 The indexer takes the metadata licence from the `license` of
 `ro-crate-metadata.json`, and the content licence from the entity's own
-`license` or else the root dataset's.
+`license`, else the nearest parent's in the crate that has one, else the root
+dataset's.
 
-A licence that isn't one of the open licences in `src/configuration.ts` needs
-an entitlement to it in REMS, looked up at `REMS_ENDPOINT` with `REMS_USER`
+`OPEN_LICENSES` lists the open licences, comma-separated: anyone may read
+what they cover, signed in or not, and the indexer labels entities under them
+`Public` for Oni (`AuthorizationByApplication` otherwise). The API refuses to
+start without it. `.env.example` lists four Creative Commons licences:
+
+```dotenv
+OPEN_LICENSES=https://creativecommons.org/licenses/by/3.0/au/,https://creativecommons.org/licenses/by/4.0/,https://creativecommons.org/licenses/by-nc/4.0/,https://creativecommons.org/licenses/by-nd/3.0/au/
+```
+
+The request-time check follows a change to the list at once, but stored labels
+only catch up when the crate is reindexed.
+
+Any other licence needs an entitlement to it in REMS, looked up at `REMS_ENDPOINT` with `REMS_USER`
 and `REMS_KEY`, once per request. If REMS can't be reached or returns an
 error, the API logs it and treats the user as holding no licences, so
 restricted entities are refused until it recovers.
@@ -273,15 +450,17 @@ API restarts. An admin session lasts 8 hours, and signing out of the admin
 pages also ends the session at our provider, ending on a signed-out page with a
 link to sign in again.
 
-The crates page shows every crate's state in each index. It can index,
-reindex or delete one crate's indexes, or index, reindex or delete all of them.
-An action on a crate covers the crate and the crates under it: those whose id
-is the crate's id followed by `/`. A crate that is already indexed needs
-reindexing. Indexing is refused while any crate it covers is being deleted,
-queued or indexing, deleting is refused while any crate it covers is queued or
-indexing, and an action on a crate that isn't in the repository is refused. The page reloads
-itself until the work finishes. Each action, accepted or refused, is logged at
-`info` with the admin's `sub`.
+The crates page shows each crate's index state. It can index, reindex or
+delete one crate's indexes, or a crate's and those of the crates under it (the
+"tree" actions): the listed crates whose id is the crate's id followed by `/`.
+It can also index or reindex every crate in the repository, which deletes the
+indexes of crates gone from it and fails a crate it can't read, or delete every
+index, which empties both indexes, discards the jobs waiting, clears every
+failure and leaves every crate listed as not indexed. If deleting every index
+fails, the page says so, with the error, until it next succeeds. An
+action on a crate the page doesn't list is refused. The page reloads itself
+until the work finishes. Each action, accepted or refused, is logged at `info`
+with the admin's `sub`.
 
 The admin pages are a client of our provider that needs no entry in
 `OIDC_CLIENTS`; their client secret and session keys are derived from
@@ -388,8 +567,10 @@ filesystems.
 
 ### Setting it up
 
-You need Docker with Compose, ports 80 and 443 open, and DNS for both hostnames
-pointing at the host. OpenSearch also needs a larger mmap limit on the host:
+You need Docker with Compose, ports 80 and 443 open, and DNS for `ADMIN_DOMAIN`
+pointing at the host. `DOMAIN`'s DNS follows once the crates are indexed
+(step 5 of [Installing](#installing)). OpenSearch also needs a larger mmap
+limit on the host:
 
 ```sh
 echo vm.max_map_count=262144 | sudo tee /etc/sysctl.d/99-opensearch.conf
@@ -411,18 +592,60 @@ Caddy's certificates, Postgres and OpenSearch keep their data in `data/`
 beside `compose.yaml`. OpenSearch runs as uid 1000 and can't fix its own
 directory's owner, so create it first.
 
-Copy `deploy/` to the host, then, in it:
+Copy `deploy/` to the host, then, in it, set it up:
 
 ```sh
 sudo install -d -o 1000 -g 1000 data/opensearch
 cp .env.example .env                  # DOMAIN, ADMIN_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, STORAGE_DIR
-cp ldacapi.env.example ldacapi.env    # sign-in, admins and the API's other settings
+cp ldacapi.env.example ldacapi.env    # sign-in, admins, open licences and the API's other settings
 chmod 600 .env ldacapi.env
 docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
-docker compose run --rm api pnpm db:deploy     # create the database's tables
-docker compose run --rm api pnpm ocfl:init     # create the empty OCFL repository
-docker compose up -d
 ```
+
+Register `https://<DOMAIN>/oauth/callback` as the redirect URI at the upstream
+provider. Compose sets the API's database, OpenSearch, storage, `OIDC_ISSUER`,
+`ADMIN_ORIGIN` and Oni's client in `OIDC_CLIENTS` from `.env`, so leave those
+out of `ldacapi.env`. Edit `oni/configuration.json` to change what Oni shows. Its
+endpoints use `DOMAIN`, so don't change them.
+
+### Installing
+
+On a new host, in `deploy/`:
+
+1. Migrate the database:
+
+   ```sh
+   docker compose run --rm api pnpm db:deploy
+   ```
+
+2. Put the crates in the repository. Either set `STORAGE_DIR` to storage whose
+   `ocfl` directory already holds them, or import them without indexing, which
+   creates the repository if there isn't one:
+
+   ```sh
+   docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import --no-index /import
+   ```
+
+3. Start the API and the worker, with the rest of the stack:
+
+   ```sh
+   docker compose up -d
+   ```
+
+4. Ask for every crate to be indexed: **Index all** on the admin pages
+   (`https://<ADMIN_DOMAIN>/admin/`), or
+
+   ```sh
+   docker compose run --rm api pnpm index
+   ```
+
+   `pnpm index` works the queue beside the worker and exits once every job it
+   asked for has finished, whichever worker ran it, summarising them.
+
+5. Switch traffic once the admin pages show every crate as indexed and none
+   failed: every count at the top but "indexed" is 0. Point `DOMAIN`'s DNS at
+   the host, then run `docker compose restart caddy` so Caddy gets its
+   certificate straight away.
 
 Nothing migrates the database on its own: you run `pnpm db:deploy` when you
 install and when you upgrade, after taking a backup.
@@ -431,13 +654,7 @@ OpenSearch is pinned to an exact version in both `deploy/compose.yaml` and the
 development `docker-compose.yml`, so bump the two together: its data directory
 can be upgraded but not downgraded. If it won't start after an upgrade, stop
 it, recreate `data/opensearch` as above, start it and rebuild the indexes with
-`docker compose run --rm api pnpm index`.
-
-Register `https://<DOMAIN>/oauth/callback` as the redirect URI at the upstream
-provider. Compose sets the API's database, OpenSearch, storage, `OIDC_ISSUER`,
-`ADMIN_ORIGIN` and Oni's client in `OIDC_CLIENTS` from `.env`, so leave those
-out of `ldacapi.env`. Edit `oni/configuration.json` to change what Oni shows. Its
-endpoints use `DOMAIN`, so don't change them.
+`docker compose run --rm api pnpm index --force`.
 
 ### Running it
 
@@ -446,8 +663,10 @@ crates read-only:
 
 ```sh
 docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import /import
-docker compose run --rm api pnpm index
 ```
+
+To index a repository that already holds crates in place, run
+`docker compose run --rm api pnpm index`.
 
 The stack runs the API's `main` image. To upgrade, back up the database and
 `STORAGE_DIR`, then pull the new images, apply any new migrations and restart:
@@ -455,20 +674,21 @@ The stack runs the API's `main` image. To upgrade, back up the database and
 ```sh
 docker compose exec -T db pg_dump -U ldacapi -Fc ldacapi > ldacapi-$(date +%F).dump
 docker compose pull
-docker compose stop api
+docker compose stop api worker
 docker compose run --rm api pnpm db:deploy
 docker compose up -d
 ```
 
-`pnpm index` deletes both indexes and rebuilds them, so run it when an upgrade
-changes what they hold. If an upgrade changes the search fields, the API and
-`pnpm index` stop with an error naming the changed field, as they check the
-search index's mapping before anything else. Delete the search index (named by
-`ENTITY_INDEX`, `entities` by default) first, then rebuild and start again:
+`pnpm index --force` rebuilds both indexes of every crate, so run it when an upgrade
+changes what they hold. If an upgrade changes the search fields, the worker,
+`pnpm index` and `pnpm crates:import` stop with an error naming the changed
+field, as they check the search index's mapping before running any job. Delete
+the search index (named by `ENTITY_INDEX`, `entities` by default) first, then
+rebuild and start again:
 
 ```sh
 docker compose exec opensearch curl -sX DELETE localhost:9200/entities
-docker compose run --rm api pnpm index
+docker compose run --rm api pnpm index --force
 docker compose up -d
 ```
 
@@ -480,6 +700,26 @@ merging, restore the database from the backup.
 
 To restore the database from a backup, stop the API and run
 `docker compose exec -T db pg_restore -U ldacapi -d ldacapi --clean < ldacapi-<date>.dump`.
+
+## Release notes
+
+### The indexer redesign
+
+Indexing moves out of the API into the worker, with its jobs and each crate's
+index state in Postgres (see [Indexing](#indexing)). Rebuild both indexes
+after upgrading: there's no upgrade path for the indexes, or the index state,
+an earlier release built. Install on a new host as in
+[Installing](#installing) where you can. To upgrade in place, follow the
+upgrade steps in [Running it](#running-it), but delete the search index after
+`pnpm db:deploy` and index every crate again:
+
+```sh
+docker compose exec opensearch curl -sX DELETE localhost:9200/entities
+docker compose run --rm api pnpm index --force
+docker compose up -d
+```
+
+The [known limits](#known-limits) apply from this release.
 
 ## Database
 
@@ -497,6 +737,17 @@ pnpm db:migrate --name arocapi-<version>
 `pnpm test` needs Postgres and OpenSearch from `docker compose up`. Each run
 creates its own database and search index, and drops them afterwards, so runs
 never touch your dev data or each other.
+
+`pnpm benchmark` checks indexing against its targets: a 30,000-entity collection
+indexed in under 10 minutes, with the indexing process under 1 GB, and a page of
+100 entities read at most 50 ms slower with their aggregates than without. It generates
+the collection twice, once as one crate and once split across a top
+collection, sub-collection crates and object crates, with text files of 50 KB,
+1 MB and 5 MB. It indexes each into a new database and search index, prints the
+wall-clock time, peak memory and aggregates read time, and drops them. On a
+16-core workstation it takes about 20 s (750 MB peak) as one crate and 90 s
+(260 MB) split. It takes a while, so it is
+run by hand, not by `pnpm test` or CI; `pnpm benchmark --help` lists its options.
 
 ## Working on Oni
 
