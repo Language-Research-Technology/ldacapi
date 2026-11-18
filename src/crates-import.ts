@@ -1,6 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { OcflError, type StorageRoot, type VersionDetails } from '@ocfl/ocfl-fs';
+import type { StorageRoot } from '@ocfl/ocfl-fs';
 import { ROCrate } from 'ro-crate';
 import type { IndexQueue, Summary } from './index-queue/index-queue.ts';
 import { logger } from './logger.ts';
@@ -12,21 +12,12 @@ type Indexing = { indexQueue: IndexQueue; run: (ask: () => Promise<string[]>) =>
 type Imported = { written: string[]; failed: boolean };
 
 /** Merges the crate at `path` into its OCFL object, creating the object on first import */
-async function importCrate(repository: StorageRoot, crateId: string, path: string) {
-  const details: VersionDetails = {
-    message: `Imported from ${path}`,
-    user: { name: 'ldacapi crates:import', address: 'https://github.com/Language-Research-Technology/ldacapi' },
-  };
-  try {
-    return await repository.create(crateId, details, (draft) => draft.import(path));
-  } catch (error) {
-    if (!(error instanceof OcflError && error.code === 'OBJECT_EXISTS')) {
-      throw error;
-    }
-  }
-  const object = await repository.open(crateId);
-  return object.update(details, (draft) => draft.import(path));
-}
+const importCrate = (repository: StorageRoot, crateId: string, path: string) =>
+  repository.createOrUpdate(
+    crateId,
+    { message: `Imported from ${path}`, user: { name: 'ldacapi crates:import', address: 'https://github.com/Language-Research-Technology/ldacapi' } },
+    (draft) => draft.import(path),
+  );
 
 async function importAll(repository: StorageRoot, source: string, indexQueue?: IndexQueue): Promise<Imported> {
   const imported: Imported = { written: [], failed: false };
@@ -40,8 +31,7 @@ async function importAll(repository: StorageRoot, source: string, indexQueue?: I
       await indexQueue?.index(crate.rootId);
     } catch (error) {
       // A crate another writer holds, or one that needs recovery, is left for a person; the rest still import
-      const lockedAt = error instanceof OcflError ? error.lockedAt : undefined;
-      logger.error({ err: error, crateId: crate.rootId, path, lockedAt }, 'Cannot import crate');
+      logger.error({ err: error, crateId: crate.rootId, path }, 'Cannot import crate');
       imported.failed = true;
     }
   }

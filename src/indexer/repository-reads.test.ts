@@ -51,7 +51,8 @@ function countingMetadataReads(object: OcflObject): OcflObject {
     },
   });
   const files = new Map(object.head.files).set(METADATA, counted);
-  return Object.create(object, { head: { value: Object.create(object.head, { files: { value: files } }) } });
+  const file = (path: string) => (path === METADATA ? counted : object.head.file(path));
+  return Object.create(object, { head: { value: Object.create(object.head, { files: { value: files }, file: { value: file } }) } });
 }
 
 /** The repository, counting each object it opens and each crate's metadata read */

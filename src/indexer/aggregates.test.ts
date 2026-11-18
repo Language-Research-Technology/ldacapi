@@ -81,7 +81,7 @@ describe('aggregates of a collection split across crates', () => {
   });
 
   it('are gone for a crate gone from the repository', async () => {
-    await testbed.started.repository.remove(EIGHTIES);
+    await testbed.started.repository.purge(EIGHTIES);
 
     await run(() => testbed.started.indexQueue.index(EIGHTIES));
 
