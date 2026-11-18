@@ -177,7 +177,7 @@ const databaseGoingDown = () => {
     get: () => unreachable,
     apply: () => {
       const failed = Promise.reject(new Error('Connection terminated unexpectedly'));
-      // Prisma's queries only reject once awaited, so one left un-awaited, as in a failed `$transaction`'s array, isn't unhandled
+      // Prisma's queries are lazy, so one never awaited (as in a failed `$transaction`'s array) never rejects
       failed.catch(() => {});
       return failed;
     },
