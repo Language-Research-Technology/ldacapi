@@ -3,8 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { Client } from '@opensearch-project/opensearch';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from './generated/prisma/client.ts';
-import { deleteSearchIndex } from './search-backend.ts';
+import { PrismaClient } from '../src/generated/prisma/client.ts';
+import { deleteSearchIndex } from '../src/search-backend.ts';
 
 const PROJECT_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
