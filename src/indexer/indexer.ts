@@ -184,10 +184,9 @@ export async function workTheQueue(deps: IndexerDeps, options: WorkOptions) {
   const beat = async () => {
     const current = running;
     try {
+      // Not logged: the job logs a real loss itself
       if (!(await heartbeat(prisma, workerId, current))) {
-        const { job, claimLost } = current as Running;
-        log.warn({ jobId: job.id, crateId: job.crateId, kind: job.kind }, 'Stopping the job: another worker holds it');
-        claimLost.abort();
+        (current as Running).claimLost.abort();
       }
       await returnDeadWorkersJobs(prisma);
     } catch (error) {

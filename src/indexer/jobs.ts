@@ -18,7 +18,7 @@ const touchWorker = (prisma: PrismaClient, workerId: string) => {
 
 /**
  * Records a worker as alive, now, with the progress of the job it is `running`: the only write of progress.
- * Returns false if the worker no longer holds that job's claim
+ * Returns false if the worker no longer holds that job's claim, or the job has just ended
  */
 export async function heartbeat(prisma: PrismaClient, workerId: string, running?: { job: Job; progress: Progress }) {
   if (!running) {
