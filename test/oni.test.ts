@@ -47,7 +47,7 @@ describe('Oni entity fields', () => {
 
     const counts = Object.fromEntries(await Promise.all(ids.map(async (id) => [id, Object.values((await entity(id)).counts) as number[]] as const)));
 
-    expect(Object.keys(counts)).toHaveLength(30);
+    expect(Object.keys(counts)).toHaveLength(28);
     expect(Object.fromEntries(Object.entries(counts).filter(([, values]) => values.some((n) => n > 0)))).toEqual(COUNTS);
   });
 

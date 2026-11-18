@@ -222,9 +222,8 @@ two crates contain counts in both.
   crate's link keeps its own copy, and the row and search document are wholly
   one crate's copy: a crate whose metadata licence is open first, then the
   lowest crate id. Copies are never merged, and indexing the crates in any
-  order gives the same rows. Until production crates carry the LDaC profiles,
-  entities are indexed by `@type` alone, so a crate links to every person it
-  mentions, profiled or not.
+  order gives the same rows. A person a crate mentions without the LDaC
+  profile has no link to it.
 - **Deleting a crate**, or reindexing it once it no longer contains an entity,
   removes its links, then the entities no crate links to. A shared entity whose
   winning crate goes becomes the next crate's copy, from the copy kept on its
