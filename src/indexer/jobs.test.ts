@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { collection, crate } from '../../test/crate-builder.ts';
+import { holdTransaction, lockWaits } from '../../test/transactions.ts';
 import type { Job } from './jobs.ts';
 
 const CRATE = 'arcp://name,claimed';
@@ -41,33 +42,17 @@ it('records a worker judged dead as alive again when it next claims, so its new 
   expect(await indexQueue.crate(CRATE)).toMatchObject({ state: 'indexing' });
 });
 
-/** How many statements in this database wait on a lock another transaction holds */
-const lockWaits = async () =>
-  (
-    await testbed.started.prisma.$queryRaw<unknown[]>`
-      SELECT 1 FROM pg_locks lock JOIN pg_stat_activity activity ON activity.pid = lock.pid
-      WHERE NOT lock.granted AND activity.datname = current_database()`
-  ).length;
-
 it('drops a released job when a job for its crate is asked for meanwhile', async () => {
   const { prisma, indexQueue } = testbed.started;
   // Imported once the testbed has read its configuration
   const { claim, release } = await import('./jobs.ts');
   await indexQueue.index(CRATE);
   const job = (await claim(prisma, 'stopping')) as Job;
-  const { promise: asked, resolve: ask } = Promise.withResolvers<void>();
-  const { promise: committed, resolve: commit } = Promise.withResolvers<void>();
-  const asking = prisma.$transaction(async (tx) => {
-    await tx.indexJob.create({ data: { crateId: CRATE, kind: 'reindex' } });
-    ask();
-    await committed;
-  });
-  await asked;
+  const asking = await holdTransaction(prisma, (tx) => tx.indexJob.create({ data: { crateId: CRATE, kind: 'reindex' } }));
 
   const releasing = release(prisma, 'stopping', job);
-  await vi.waitFor(async () => expect(await lockWaits()).toBe(1));
-  commit();
-  await asking;
+  await vi.waitFor(async () => expect(await lockWaits(prisma)).toBe(1));
+  await asking.commit();
   await releasing;
 
   expect(await prisma.indexJob.findMany({ select: { kind: true, status: true } })).toEqual([{ kind: 'reindex', status: 'waiting' }]);
@@ -89,24 +74,16 @@ it('claims one job at a time, so deleting everything never runs beside a crateâ€
     `CREATE TRIGGER hold_claim BEFORE UPDATE ON index_job FOR EACH ROW WHEN (NEW."workerId" = 'slow') EXECUTE FUNCTION hold_claim()`,
   );
   try {
-    const { promise: held, resolve: hold } = Promise.withResolvers<void>();
-    const { promise: freed, resolve: free } = Promise.withResolvers<void>();
-    const holding = prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(9, 9)`;
-      hold();
-      await freed;
-    });
-    await held;
+    const holding = await holdTransaction(prisma, (tx) => tx.$executeRaw`SELECT pg_advisory_xact_lock(9, 9)`);
     const slow = claim(prisma, 'slow');
-    await vi.waitFor(async () => expect(await lockWaits()).toBe(1));
+    await vi.waitFor(async () => expect(await lockWaits(prisma)).toBe(1));
 
     let fastClaimed = false;
     const fast = claim(prisma, 'fast').finally(() => {
       fastClaimed = true;
     });
-    await vi.waitFor(async () => expect(fastClaimed || (await lockWaits()) === 2).toBe(true));
-    free();
-    await holding;
+    await vi.waitFor(async () => expect(fastClaimed || (await lockWaits(prisma)) === 2).toBe(true));
+    await holding.commit();
 
     expect(await slow).toMatchObject({ crateId: CRATE });
     expect(await fast).toBeUndefined();

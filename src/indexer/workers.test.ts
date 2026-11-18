@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ocflTestbed } from '../../test/app.ts';
 import { collection, crate } from '../../test/crate-builder.ts';
+import { holdTransaction, lockWaits } from '../../test/transactions.ts';
 import { countStates } from '../index-queue/index-queue.ts';
 import type { Document } from '../search-backend.ts';
 import type { IndexerDeps } from './indexer.ts';
@@ -114,23 +115,12 @@ const startWorking = async (deps: Partial<IndexerDeps> = {}, heartbeatMillisecon
 const stopWhileRunning = async (crateId: string) => {
   const { prisma, indexQueue } = testbed.started;
   await indexQueue.index(crateId);
-  const { promise: locked, resolve: lock } = Promise.withResolvers<void>();
-  const { promise: unlocked, resolve: unlock } = Promise.withResolvers<void>();
-  const holding = prisma.$transaction(
-    async (tx) => {
-      await tx.$executeRaw`LOCK TABLE crate IN ACCESS EXCLUSIVE MODE`;
-      lock();
-      await unlocked;
-    },
-    { timeout: 60_000 },
-  );
-  await locked;
+  const holding = await holdTransaction(prisma, (tx) => tx.$executeRaw`LOCK TABLE crate IN ACCESS EXCLUSIVE MODE`);
   const { stop, working } = await startWorking();
   await vi.waitFor(async () => expect(await jobs()).toEqual([{ status: 'running', attempts: 1 }]));
 
   stop.abort();
-  unlock();
-  await holding;
+  await holding.commit();
   await working;
 };
 
@@ -301,7 +291,48 @@ describe('a heartbeat that fails', () => {
   });
 });
 
+describe('a job that ends while a heartbeat runs', () => {
+  /** Holds the worker's heartbeat, once it has started for the running job, until the job's search write has done `then` and the job has ended */
+  const endDuringHeartbeat = async (then: (documents: Document[]) => Promise<void>, ended: string) => {
+    const { prisma } = testbed.started;
+    const { search, letThrough } = searchHeld(then);
+    const { working, stop } = await startWorker(FIRST, { search });
+    // Progress, written only by a heartbeat sent with the running job, so the next is sent with it too
+    await vi.waitFor(async () => expect(await prisma.indexJob.findFirstOrThrow()).toMatchObject({ stage: expect.any(String) }));
+    const holding = await holdTransaction(prisma, (tx) => tx.$queryRaw`SELECT 1 FROM index_worker FOR NO KEY UPDATE`);
+    await vi.waitFor(async () => expect(await lockWaits(prisma)).toBeGreaterThan(0));
+
+    letThrough();
+    await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ crateId: FIRST, msg: ended })), { timeout: 10_000 });
+    await holding.commit();
+    stop.abort();
+    await working;
+
+    expect(logs.filter(({ level }) => level === 40)).toEqual([]);
+  };
+
+  it('logs no warning when it finishes', async () => {
+    await endDuringHeartbeat((documents) => testbed.started.indexer.search.index(documents), 'Job finished');
+  });
+
+  it('logs no warning when it fails', async () => {
+    await endDuringHeartbeat(async () => {
+      throw new Error('Refused');
+    }, 'Job failed');
+  });
+});
+
 describe('a job whose claim is taken away while it runs', () => {
+  const heartbeatAt = async () => (await testbed.started.prisma.indexWorker.findFirstOrThrow({ where: { id: { not: 'another' } } })).heartbeatAt;
+
+  /** Resolves with the worker's next heartbeat after `since` */
+  const nextHeartbeat = (since: Date) =>
+    vi.waitFor(async () => {
+      const at = await heartbeatAt();
+      expect(at.getTime()).toBeGreaterThan(since.getTime());
+      return at;
+    });
+
   /**
    * Runs the job until its search write, takes its claim away, then lets the write do `then` until `finished`.
    * With `heartbeat`, the worker's heartbeat finds the claim gone before the write goes on
@@ -314,7 +345,8 @@ describe('a job whose claim is taken away while it runs', () => {
     await testbed.started.prisma.indexWorker.create({ data: { id: 'another' } });
     await testbed.started.prisma.indexJob.updateMany({ data: { workerId: 'another' } });
     if (heartbeat) {
-      await vi.waitFor(() => expect(logs).toContainEqual(expect.objectContaining({ crateId: FIRST, msg: 'Stopping the job: another worker holds it' })));
+      // Beats run one at a time, so the second is recorded only after the first has acted on the lost claim
+      await nextHeartbeat(await nextHeartbeat(await heartbeatAt()));
     }
 
     letThrough();
