@@ -153,7 +153,7 @@ describe('an index job', () => {
 
     expect(await state(UNREADABLE)).toMatchObject({
       state: 'failed',
-      error: expect.stringContaining('ENOENT'),
+      error: expect.stringMatching(/^OcflError: The content of unreadable\.txt, .* is missing\.$/),
       stage: 'reading the crate',
       failedOn: 'unreadable.txt',
     });
@@ -262,7 +262,7 @@ describe('an index job', () => {
     await addCrate(GONE);
     await index(GONE);
     await index(OTHER);
-    await testbed.started.repository.remove(GONE);
+    await testbed.started.repository.purge(GONE);
 
     await index(GONE);
 
@@ -274,7 +274,7 @@ describe('an index job', () => {
   it('keeps the record of a crate gone from the repository when it is asked for again meanwhile, and that job runs', async () => {
     await addCrate(GONE);
     await index(GONE);
-    await testbed.started.repository.remove(GONE);
+    await testbed.started.repository.purge(GONE);
     await testbed.started.indexQueue.index(GONE);
     const { promise: removing, resolve: startRemoving } = Promise.withResolvers<void>();
     const { promise: through, resolve: letThrough } = Promise.withResolvers<void>();
@@ -296,7 +296,7 @@ describe('an index job', () => {
 
       expect(await state(GONE)).toMatchObject({ state: 'indexed' });
     } finally {
-      await testbed.started.repository.remove(GONE);
+      await testbed.started.repository.purge(GONE);
     }
   });
 
@@ -305,7 +305,10 @@ describe('an index job', () => {
 
     await index(NO_METADATA);
 
-    expect(await state(NO_METADATA)).toMatchObject({ state: 'failed', error: `Error: No ro-crate-metadata.json in ${NO_METADATA}` });
+    expect(await state(NO_METADATA)).toMatchObject({
+      state: 'failed',
+      error: expect.stringContaining(`<${NO_METADATA}> has no file at logical path "ro-crate-metadata.json"`),
+    });
   });
 
   it('fails, writing nothing, for a crate whose root id isn’t its object’s id', async () => {
@@ -470,7 +473,7 @@ describe('a delete job for a crate gone from the repository, asked for by indexi
   it('removes the crate from search and the crates listed', async () => {
     await addCrate(GONE);
     await index(GONE);
-    await testbed.started.repository.remove(GONE);
+    await testbed.started.repository.purge(GONE);
 
     await run(() => testbed.started.indexQueue.indexEverything());
 

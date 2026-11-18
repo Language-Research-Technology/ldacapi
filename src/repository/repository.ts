@@ -1,11 +1,11 @@
-import { createStorageRoot, OcflError, openStorageRoot, type StorageRoot } from '@ocfl/ocfl-fs';
+import { createStorageRoot, isOcflError, openStorageRoot, type StorageRoot } from '@ocfl/ocfl-fs';
 import type { StorageBackend } from 'arocapi';
 import { OcflStorage } from 'arocapi/storage/ocfl';
 import { logger } from '../logger.ts';
 
 const log = logger.child({ module: 'repository' });
 
-const isMissing = (error: unknown) => error instanceof OcflError && error.code === 'INVALID_STORAGE_ROOT' && error.ocflCode === 'E069';
+const isMissing = (error: unknown) => isOcflError(error, 'STORAGE_ROOT_NOT_FOUND');
 
 /** The OCFL repository at `root`, which must exist */
 export async function openRepository(root: string): Promise<StorageRoot> {
@@ -37,7 +37,7 @@ export const contentStorage = async (root: string): Promise<StorageBackend['cont
 /** The id of each crate in the repository, including one that can't be read whose inventory names it, logging those that can't be read */
 export async function* crateIds(repository: StorageRoot) {
   for await (const entry of repository.objects()) {
-    if ('object' in entry) {
+    if (entry.status === 'opened') {
       yield entry.object.id;
       continue;
     }

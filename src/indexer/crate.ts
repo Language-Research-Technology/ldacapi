@@ -1,5 +1,5 @@
 import { buffer } from 'node:stream/consumers';
-import type { OcflFile, OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
+import type { OcflObject, StorageRoot } from '@ocfl/ocfl-fs';
 import { type RawEntity, ROCrate } from 'ro-crate';
 import { logger } from '../logger.ts';
 import { parentCollection } from './derive.ts';
@@ -14,13 +14,7 @@ type CrateJson = { '@graph': RawEntity[] };
 
 const METADATA = 'ro-crate-metadata.json';
 
-const readCrateJson = async (object: OcflObject): Promise<CrateJson> => {
-  const file = object.head.files.get(METADATA);
-  if (!file) {
-    throw new Error(`No ${METADATA} in ${object.id}`);
-  }
-  return JSON.parse(await file.text());
-};
+const readCrateJson = async (object: OcflObject, signal?: AbortSignal): Promise<CrateJson> => JSON.parse(await object.head.file(METADATA).text({ signal }));
 
 /**
  * Each crate's parent collection, by the digest of the metadata it was read from: ids only, so a worker keeps it while
@@ -38,7 +32,7 @@ export class ParentCache {
   async of(crateId: string) {
     const object = await this.repository.open(crateId);
     const known = this.#known.get(crateId);
-    if (known && known.digest === object.head.files.get(METADATA)?.digest) {
+    if (known && known.digest === object.head.file(METADATA).digest) {
       return known.parent;
     }
     return this.remember(object, await ROCrate.create(await readCrateJson(object)));
@@ -47,7 +41,7 @@ export class ParentCache {
   /** Remembers the parent collection of `crate`, read from `object`, and returns it */
   remember(object: OcflObject, crate: ROCrate) {
     const parent = parentCollection(crate);
-    this.#known.set(object.id, { digest: (object.head.files.get(METADATA) as OcflFile).digest, parent });
+    this.#known.set(object.id, { digest: object.head.file(METADATA).digest, parent });
     return parent;
   }
 }
@@ -107,9 +101,8 @@ async function heldFiles(object: OcflObject, progress: Progress) {
 }
 
 /** Reads the text of a held file, up to `TEXT_LIMIT` bytes */
-const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>) => async (path: string) => {
-  const file = object.head.files.get(path) as OcflFile;
-  const bytes = await buffer(await file.stream({ end: TEXT_LIMIT - 1 }));
+const textReader = (object: OcflObject, sizes: ReadonlyMap<string, number>, signal: AbortSignal) => async (path: string) => {
+  const bytes = await buffer(await object.head.file(path).stream({ end: TEXT_LIMIT - 1, signal }));
   const size = sizes.get(path) as number;
   if (size > TEXT_LIMIT) {
     log.warn({ crateId: object.id, path, size }, 'File text cut short');
@@ -128,10 +121,10 @@ export async function openCrate(repository: StorageRoot, parents: ParentCache, c
     version: object.head.number,
     /** Reads and parses the crate's metadata, and finds the files it holds */
     async read(progress: Progress) {
-      const crate = await ROCrate.create(await readCrateJson(object));
+      const crate = await ROCrate.create(await readCrateJson(object, progress.signal));
       parents.remember(object, crate);
       const sizes = await heldFiles(object, progress);
-      return { crate, heldFiles: sizes, readText: textReader(object, sizes), parentCrates: await parentCrates(parents, crate) };
+      return { crate, heldFiles: sizes, readText: textReader(object, sizes, progress.signal), parentCrates: await parentCrates(parents, crate) };
     },
   };
 }

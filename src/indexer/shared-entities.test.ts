@@ -136,7 +136,7 @@ describe('a person two crates describe', () => {
     const gone = crate(collection('arcp://name,g-gone'), [person(PERSON, { name: 'Ada (gone)' })]);
     await put(gone);
     await index(FIRST, gone.id, SECOND);
-    await testbed.started.repository.remove(gone.id);
+    await testbed.started.repository.purge(gone.id);
 
     await remove(FIRST);
 
@@ -147,7 +147,7 @@ describe('a person two crates describe', () => {
     const gone = crate(collection('arcp://name,a-gone'), [person(PERSON, { name: 'Ada (gone)' })]);
     await put(gone);
     await index(gone.id, SECOND);
-    await testbed.started.repository.remove(gone.id);
+    await testbed.started.repository.purge(gone.id);
 
     await run(() => testbed.started.indexQueue.index(gone.id));
 
