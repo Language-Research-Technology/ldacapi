@@ -126,9 +126,10 @@ To index an OCFL repository that already holds crates, in place, point
 and indexes each one.
 
 A crate with no metadata licence (the `license` of `ro-crate-metadata.json`)
-or no content licence (the `license` of the root dataset) fails its index job,
-unless `DEFAULT_METADATA_LICENSE` or `DEFAULT_LICENSE` is set. So does a
-crate whose root id isn't an absolute IRI.
+fails its index job unless `DEFAULT_METADATA_LICENSE` is set, and one with no
+content licence (the `license` of the root dataset) fails unless
+`DEFAULT_LICENSE` is set (see [Licences](#licences)). A crate whose root id
+isn't an absolute IRI fails too.
 
 ## Indexing
 
@@ -296,7 +297,8 @@ set.
 | `LOG_LEVEL`                                                | `debug` in development, otherwise `info`              |
 | `ENTITY_INDEX`                                             | `entities`                                            |
 | `OPEN_LICENSES`                                            | none; always required                                 |
-| `DEFAULT_LICENSE`, `DEFAULT_METADATA_LICENSE`              | none                                                  |
+| `DEFAULT_METADATA_LICENSE`                                 | none                                                  |
+| `DEFAULT_LICENSE`                                          | none                                                  |
 | `REMS_USER`, `REMS_KEY`, `REMS_ENDPOINT`, `ENROLLMENT_URL` | none                                                  |
 | `OIDC_UPSTREAM_ISSUER`                                     | none (sign-in is off)                                 |
 | `OIDC_UPSTREAM_CLIENT_ID`, `OIDC_UPSTREAM_CLIENT_SECRET`   | none                                                  |
@@ -320,6 +322,12 @@ The indexer takes the metadata licence from the `license` of
 `ro-crate-metadata.json`, and the content licence from the entity's own
 `license`, else the nearest parent's in the crate that has one, else the root
 dataset's.
+
+Each default fills in only its own licence: `DEFAULT_METADATA_LICENSE` the
+metadata licence, and `DEFAULT_LICENSE` the root dataset's content licence,
+which every entity with none of its own or from a parent inherits. Most
+production crates have no metadata licence, so production needs
+`DEFAULT_METADATA_LICENSE`.
 
 `OPEN_LICENSES` lists the open licences, comma-separated: anyone may read
 what they cover, signed in or not, and the indexer labels entities under them
