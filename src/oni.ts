@@ -16,7 +16,7 @@ const none = (): Aggregates => ({ counts: { collections: 0, objects: 0, subColle
 type AggregateRow = Counts & Omit<Aggregates, 'counts'> & { entityId: string };
 
 /** The aggregates of each of `ids`, summing what each crate adds, in one query */
-export async function aggregatesOf(db: Pick<PrismaClient, '$queryRaw'>, ids: string[]) {
+async function aggregatesOf(db: Pick<PrismaClient, '$queryRaw'>, ids: string[]) {
   const rows = await db.$queryRaw<AggregateRow[]>`
     SELECT "entityId",
       sum(collections)::int AS collections, sum(objects)::int AS objects, sum("subCollections")::int AS "subCollections", sum(files)::int AS files,

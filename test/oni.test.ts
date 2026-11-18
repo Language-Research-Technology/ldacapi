@@ -75,6 +75,23 @@ describe('Oni entity fields', () => {
     await started.prisma.entity.delete({ where: { id } });
   });
 
+  it('fail every entity of the page when they cannot be read', async () => {
+    const { oniEntityTransformer } = await import('../src/oni.ts');
+    const read = vi.spyOn(started.prisma, '$queryRaw').mockRejectedValueOnce(new Error('database down'));
+    try {
+      const transform = oniEntityTransformer(started.prisma) as (...args: unknown[]) => Promise<unknown>;
+      const request = {};
+
+      const page = [BUNDLED, DISTRIBUTED].map((id) => transform({ id }, { request }, { meta: null }));
+
+      for (const entity of page) {
+        await expect(entity).rejects.toThrow('database down');
+      }
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it('are read for a whole page of entities in one query', async () => {
     const read = vi.spyOn(started.prisma, '$queryRaw');
 

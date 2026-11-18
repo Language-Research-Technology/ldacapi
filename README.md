@@ -107,7 +107,6 @@ it in `.env`.
 | `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does |
 | `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
 | `pnpm worker`              | Run index jobs as they are asked for                                             |
-| `pnpm benchmark`           | Time indexing over a generated 30,000-entity collection (see [Tests](#tests))    |
 | `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
 | `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
 | `pnpm db:deploy`           | Apply pending migrations                                                         |
@@ -746,17 +745,6 @@ pnpm db:migrate --name arocapi-<version>
 `pnpm test` needs Postgres and OpenSearch from `docker compose up`. Each run
 creates its own database and search index, and drops them afterwards, so runs
 never touch your dev data or each other.
-
-`pnpm benchmark` checks indexing against its targets: a 30,000-entity collection
-indexed in under 10 minutes, with the indexing process under 1 GB, and a page of
-100 entities read at most 50 ms slower with their aggregates than without. It generates
-the collection twice, once as one crate and once split across a top
-collection, sub-collection crates and object crates, with text files of 50 KB,
-1 MB and 5 MB. It indexes each into a new database and search index, prints the
-wall-clock time, peak memory and aggregates read time, and drops them. On a
-16-core workstation it takes about 20 s (750 MB peak) as one crate and 90 s
-(260 MB) split. It takes a while, so it is
-run by hand, not by `pnpm test` or CI; `pnpm benchmark --help` lists its options.
 
 ## Working on Oni
 

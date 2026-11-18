@@ -13,7 +13,7 @@ export default async function setup() {
   // Configuration is read on import, so only once the environment is complete
   const { loadConfig } = await import('../src/configuration.ts');
   const config = loadConfig({ ...process.env, NODE_ENV: 'test' });
-  const { createScratchIndexes } = await import('../src/scratch-indexes.ts');
+  const { createScratchIndexes } = await import('./scratch-indexes.ts');
   const { databaseUrl, entityIndex, drop } = await createScratchIndexes(
     { databaseUrl: config.databaseUrl, opensearchUrl: config.opensearchUrl, entityIndex: config.search.entityIndex },
     `${process.pid}_${randomBytes(3).toString('hex')}`,
