@@ -197,8 +197,8 @@ importers:
         specifier: ^7.10.1
         version: 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)
       arocapi:
-        specifier: 5.0.0-beta.12
-        version: 5.0.0-beta.12(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.68)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
+        specifier: 5.0.0-beta.13
+        version: 5.0.0-beta.13(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.68)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3)
       eta:
         specifier: ^4.6.0
         version: 4.6.0
@@ -1535,8 +1535,8 @@ packages:
     resolution: {integrity: sha512-VipTB0gXgGIFO2Rg9yEVN5wLt2AurJcZqDbgmYSwPwsykhLrQhs240/bfceev4w68lI8JshoOJIk9uW7tFzROw==}
     engines: {node: '>=22'}
 
-  arocapi@5.0.0-beta.12:
-    resolution: {integrity: sha512-hsN8v5xbbrK5UNKvzswfl6Q+SRsVcMwjJmrHVZDUJxJMvnpSdZqkK1HUg0LrWn/McJheLsMOAnmSDF/9G8Sh/g==}
+  arocapi@5.0.0-beta.13:
+    resolution: {integrity: sha512-qaMaFQz7fD5X/4Kr/mVk1eVhvWGm6dJNB0MbYeW+EWeJaMyaB2hh1pXZ8q8mMZcWogxKMVoCOVie8FgRYoRvKA==}
     engines: {node: '>=22.18'}
     peerDependencies:
       '@aws-sdk/client-s3': ^3
@@ -4218,7 +4218,7 @@ snapshots:
 
   argue-cli@3.2.0: {}
 
-  arocapi@5.0.0-beta.12(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.68)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
+  arocapi@5.0.0-beta.13(@fastify/swagger@9.9.1)(@ocfl/ocfl-fs@1.0.0-beta.68)(@opensearch-project/opensearch@3.9.0)(@prisma/client@7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2))(fastify@5.12.7)(openapi-types@12.1.3):
     dependencies:
       '@fastify/sensible': 6.0.7
       '@prisma/client': 7.10.1(prisma@7.10.1(@types/node@26.6.6)(@types/react@19.3.0)(magicast@0.5.5)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)(typescript@7.0.2))(typescript@7.0.2)

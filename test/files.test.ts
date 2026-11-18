@@ -13,10 +13,21 @@ const testbed = ocflTestbed(
   ]),
 );
 
-const get = (id: string) => testbed.started.app.inject({ method: 'GET', url: `${testbed.started.config.prefix}/file/${encodeURIComponent(id)}` });
+const get = (id: string, headers: Record<string, string> = {}) =>
+  testbed.started.app.inject({ method: 'GET', url: `${testbed.started.config.prefix}/file/${encodeURIComponent(id)}`, headers });
 
 beforeAll(async () => {
   await testbed.indexOnly(ROOT);
+});
+
+describe('a held file', () => {
+  it('serves a byte range of its content from the repository', async () => {
+    const response = await get(HELD, { range: 'bytes=5-9' });
+
+    expect(response.statusCode).toBe(206);
+    expect(response.headers['content-range']).toBe('bytes 5-9/10');
+    expect(response.body).toBe('words');
+  });
 });
 
 describe('a file described but not held', () => {
