@@ -175,7 +175,12 @@ const databaseGoingDown = () => {
   let down = false;
   const unreachable: unknown = new Proxy(() => {}, {
     get: () => unreachable,
-    apply: async () => Promise.reject(new Error('Connection terminated unexpectedly')),
+    apply: () => {
+      const failed = Promise.reject(new Error('Connection terminated unexpectedly'));
+      // Prisma's queries are lazy, so one never awaited (as in a failed `$transaction`'s array) never rejects
+      failed.catch(() => {});
+      return failed;
+    },
   });
   const client = new Proxy(prisma, {
     get(target, key) {
