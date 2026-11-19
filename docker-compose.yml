@@ -37,7 +37,7 @@ services:
       retries: 20
 
   oni:
-    image: ghcr.io/crate-works/oni:2
+    image: ghcr.io/crate-works/oni:3
     environment:
       - ONI_API_ENDPOINT=http://localhost:8080/api
     volumes:

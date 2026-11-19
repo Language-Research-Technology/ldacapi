@@ -41,7 +41,7 @@ services:
 
   oni:
     <<: *hardening
-    image: ghcr.io/crate-works/oni:2
+    image: ghcr.io/crate-works/oni:3
     volumes:
       - ./oni/configuration.json:/configuration.json:ro
     read_only: true
