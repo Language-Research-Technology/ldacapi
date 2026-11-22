@@ -36,11 +36,9 @@ const privateRsaJwk = z.looseObject({ kty: z.literal('RSA'), kid: z.string().min
 
 const signingKeys = json.pipe(z.object({ keys: z.array(privateRsaJwk).min(1, 'Needs at least one key') }));
 
-const commaList = z.string().transform((value) =>
-  value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean),
+const commaList = z.string().transform(
+  (value) => value.split(',').map((item) => item.trim()),
+  // .filter(Boolean),
 );
 
 const openLicenses = commaList.pipe(z.array(z.string()).min(1, 'Needs at least one licence id'));
@@ -167,7 +165,7 @@ export function loadConfig(processEnv: Env) {
     throw new Error(`Invalid environment:\n${z.prettifyError(result.error)}`);
   }
   const env = result.data;
-
+  console.log(env.OPEN_LICENSES);
   return {
     isDev,
     databaseUrl: env.DATABASE_URL,
