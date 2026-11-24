@@ -96,22 +96,22 @@ it in `.env`.
 
 ## Scripts
 
-| Script                     | Does                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------- |
-| `pnpm dev`                 | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet |
-| `pnpm build`               | Build the admin pages' stylesheet (run before deploying)                         |
-| `pnpm test`                | Run the tests (needs `docker compose up`)                                        |
-| `pnpm lint`                | Biome, Knip and TypeScript                                                       |
-| `pnpm bootstrap`           | `db:deploy` and `crates:import` in one go                                        |
-| `pnpm ocfl:init`           | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already        |
-| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does |
-| `pnpm index [--force]`     | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
-| `pnpm worker`              | Run index jobs as they are asked for                                             |
-| `pnpm generate-keys`       | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                  |
-| `pnpm db:migrate`          | Create and apply a migration after a schema change                               |
-| `pnpm db:deploy`           | Apply pending migrations                                                         |
-| `pnpm db:reset`            | Drop and recreate the dev database                                               |
-| `pnpm db:console`          | Open `psql` on the dev database                                                  |
+| Script                                  | Does                                                                                                                                                                                                                                |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                              | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet                                                                                                                                          |
+| `pnpm build`                            | Build the admin pages' stylesheet (run before deploying)                                                                                                                                                                            |
+| `pnpm test`                             | Run the tests (needs `docker compose up`)                                                                                                                                                                                           |
+| `pnpm lint`                             | Biome, Knip and TypeScript                                                                                                                                                                                                          |
+| `pnpm bootstrap`                        | `db:deploy` and `crates:import` in one go                                                                                                                                                                                           |
+| `pnpm ocfl:init`                        | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already                                                                                                                                                           |
+| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does                        |
+| `pnpm index [--force]`                  | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
+| `pnpm worker`                           | Run index jobs as they are asked for                                                                                                                                                                                                |
+| `pnpm generate-keys`                    | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                                                                                                                                                                     |
+| `pnpm db:migrate`                       | Create and apply a migration after a schema change                                                                                                                                                                                  |
+| `pnpm db:deploy`                        | Apply pending migrations                                                                                                                                                                                                            |
+| `pnpm db:reset`                         | Drop and recreate the dev database                                                                                                                                                                                                  |
+| `pnpm db:console`                       | Open `psql` on the dev database                                                                                                                                                                                                     |
 
 ## Test data
 
@@ -198,14 +198,14 @@ crate.
 The admin pages' crates page shows one state per crate, and counts the crates
 in each state at the top:
 
-| State       | When                                                   | Shows                               |
-| ----------- | ------------------------------------------------------ | ----------------------------------- |
-| not indexed | it has no indexes                                      |                                     |
-| queued      | an index or reindex job waits                          |                                     |
-| indexing    | an index or reindex job is running                     | its stage, how much of it is done as of the last heartbeat, and when it started: "search index, 12,000 of 30,000, since 2026-11-17 10:42 UTC" |
-| deleting    | a delete job waits or runs, or deleting every index    |                                     |
-| indexed     | its last job succeeded                                 | version, when, entities and files   |
-| failed      | its last job failed                                    | the error, its stage, the entity or file it was on, when, and which attempt |
+| State       | When                                                | Shows                                                                                                                                         |
+| ----------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| not indexed | it has no indexes                                   |                                                                                                                                               |
+| queued      | an index or reindex job waits                       |                                                                                                                                               |
+| indexing    | an index or reindex job is running                  | its stage, how much of it is done as of the last heartbeat, and when it started: "search index, 12,000 of 30,000, since 2026-11-17 10:42 UTC" |
+| deleting    | a delete job waits or runs, or deleting every index |                                                                                                                                               |
+| indexed     | its last job succeeded                              | version, when, entities and files                                                                                                             |
+| failed      | its last job failed                                 | the error, its stage, the entity or file it was on, when, and which attempt                                                                   |
 
 A waiting or running job comes first, then a failed one, then what the last
 successful job recorded. A crate is listed once a job has been asked for it,
