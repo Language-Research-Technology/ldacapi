@@ -96,29 +96,62 @@ it in `.env`.
 
 ## Scripts
 
-| Script                                  | Does                                                                                                                                                                                                                                |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm dev`                              | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet                                                                                                                                          |
-| `pnpm build`                            | Build the admin pages' stylesheet (run before deploying)                                                                                                                                                                            |
-| `pnpm test`                             | Run the tests (needs `docker compose up`)                                                                                                                                                                                           |
-| `pnpm lint`                             | Biome, Knip and TypeScript                                                                                                                                                                                                          |
-| `pnpm bootstrap`                        | `db:deploy` and `crates:import` in one go                                                                                                                                                                                           |
-| `pnpm ocfl:init`                        | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already                                                                                                                                                           |
-| `pnpm crates:import [--no-index] [dir]` | Import each crate folder in `dir` (default `test-data`) into the OCFL repository, then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does                        |
-| `pnpm index [--force]`                  | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does |
-| `pnpm worker`                           | Run index jobs as they are asked for                                                                                                                                                                                                |
-| `pnpm generate-keys`                    | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                                                                                                                                                                     |
-| `pnpm db:migrate`                       | Create and apply a migration after a schema change                                                                                                                                                                                  |
-| `pnpm db:deploy`                        | Apply pending migrations                                                                                                                                                                                                            |
-| `pnpm db:reset`                         | Drop and recreate the dev database                                                                                                                                                                                                  |
-| `pnpm db:console`                       | Open `psql` on the dev database                                                                                                                                                                                                     |
+| Script                                                   | Does                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm dev`                                               | Run the API and the worker, restarting on changes, and rebuild the admin pages' stylesheet                                                                                                                                                                  |
+| `pnpm build`                                             | Build the admin pages' stylesheet (run before deploying)                                                                                                                                                                                                    |
+| `pnpm test`                                              | Run the tests (needs `docker compose up`)                                                                                                                                                                                                                   |
+| `pnpm lint`                                              | Biome, Knip and TypeScript                                                                                                                                                                                                                                  |
+| `pnpm bootstrap`                                         | `db:deploy` and `crates:import --mode sync` in one go                                                                                                                                                                                                       |
+| `pnpm ocfl:init`                                         | Create an empty OCFL repository at `OCFL_ROOT`, unless one exists already                                                                                                                                                                                   |
+| `pnpm crates:import --mode sync\|add [--no-index] [dir]` | Import every crate at or below `dir` (default `test-data`) into the OCFL repository (see [Importing crates](#importing-crates)), then index each crate imported (unless `--no-index`), waiting for those jobs and summarising them; fails if any crate does |
+| `pnpm index [--force]`                                   | Index every crate whose head version isn't indexed (`--force`: every crate), and delete the indexes of crates gone from the repository, then run the queue until those jobs are finished, summarising them; fails if any crate does                         |
+| `pnpm worker`                                            | Run index jobs as they are asked for                                                                                                                                                                                                                        |
+| `pnpm generate-keys`                                     | Print new `OIDC_SIGNING_KEYS` and `OIDC_COOKIE_KEYS` for `.env`                                                                                                                                                                                             |
+| `pnpm db:migrate`                                        | Create and apply a migration after a schema change                                                                                                                                                                                                          |
+| `pnpm db:deploy`                                         | Apply pending migrations                                                                                                                                                                                                                                    |
+| `pnpm db:reset`                                          | Drop and recreate the dev database                                                                                                                                                                                                                          |
+| `pnpm db:console`                                        | Open `psql` on the dev database                                                                                                                                                                                                                             |
 
 ## Test data
 
-Each folder in `test-data/` is one RO-Crate. `pnpm crates:import` imports them into the
-OCFL repository at `storage/ocfl` (gitignored), and re-running it only adds a
+Each folder in `test-data/` is one RO-Crate. `pnpm bootstrap` imports them into the
+OCFL repository at `storage/ocfl` (gitignored) with `--mode sync`, and re-running it only adds a
 new OCFL version for crates that changed. It then indexes the crates it
 imported.
+
+### Importing crates
+
+`pnpm crates:import` finds crates by walking `dir` and every folder below it
+(ADR 0008):
+
+- Every folder holding `ro-crate-metadata.json` is one crate, `dir` itself
+  included, at any depth. A crate's OCFL object leaves out the folders of
+  crates below it, so a collection's folder can hold its members' folders.
+  Folders between them that aren't crates stay part of the crate above.
+- Where a crate sits on disk says nothing about which collection it belongs
+  to: that comes only from `pcdm:memberOf` and `pcdm:hasMember` in its
+  metadata.
+- Anything whose name starts with `.` is left out, between crates and inside
+  them. `.DS_Store`, `._*`, `.Spotlight-V100`, `.Trashes` and `.fseventsd` are
+  left out silently; anything else, such as `.git`, with a warning naming it.
+- Symlinks are never followed: each is left out with a warning.
+- A folder outside any crate that leads to no crate gets a warning (only the
+  highest such folder), as does a `dir` holding no crate at all. Warnings
+  don't fail the import.
+- A folder that can't be read, a crate whose metadata can't be read, and
+  folders whose crates share a root `@id` are all skipped. The rest still
+  import, and the import fails at the end.
+
+`--mode` is required:
+
+- `sync` makes each crate's new OCFL version hold exactly what its folder
+  holds.
+- `add` adds and replaces files from each folder and removes none, for a
+  directory of new or changed files.
+
+Either way, a crate whose folder hasn't changed gets no new version, every
+earlier version is kept, and no crate is deleted.
 
 To index an OCFL repository that already holds crates, in place, point
 `OCFL_ROOT` at it and run `pnpm index`: it lists every crate in the repository
@@ -525,7 +558,7 @@ docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:
 ```
 
 `pnpm ocfl:init` (which creates an empty OCFL repository; the API won't start
-without one), `pnpm crates:import [dir]` (mount `dir` into the container) and
+without one), `pnpm crates:import --mode sync|add [dir]` (mount `dir` into the container) and
 `pnpm index` run the same way, offline. Give them and `pnpm db:deploy` the API's environment file:
 Prisma and the scripts load the whole [configuration](#configuration).
 `pnpm generate-keys` reads no configuration, so it needs no environment file:
@@ -630,7 +663,7 @@ On a new host, in `deploy/`:
    creates the repository if there isn't one:
 
    ```sh
-   docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import --no-index /import
+   docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import --mode sync --no-index /import
    ```
 
 3. Start the API and the worker, with the rest of the stack:
@@ -666,10 +699,11 @@ it, recreate `data/opensearch` as above, start it and rebuild the indexes with
 ### Running it
 
 Import crates and index them with the API's image, mounting the directory of
-crates read-only:
+crates read-only (`--mode add` instead adds to the crates without removing any
+files; see [Importing crates](#importing-crates)):
 
 ```sh
-docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import /import
+docker compose run --rm -v /path/to/crates:/import:ro api pnpm crates:import --mode sync /import
 ```
 
 To index a repository that already holds crates in place, run

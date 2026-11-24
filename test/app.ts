@@ -103,7 +103,7 @@ export const ocflStorage = ({ crates, source }: { crates?: Crate[]; source?: (sc
     if (crates) {
       await writeCrates(join(storage, 'crates'), crates);
     }
-    execFileSync('node', ['scripts/crates-import.ts', '--no-index', ...sources], {
+    execFileSync('node', ['scripts/crates-import.ts', '--mode', 'sync', '--no-index', ...sources], {
       env: { ...process.env, OCFL_ROOT: ocflRoot(), LOG_LEVEL: 'silent' },
       stdio: 'ignore',
     });

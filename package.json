@@ -35,7 +35,7 @@
     "crates:import": "node --env-file-if-exists=.env --max-old-space-size=768 scripts/crates-import.ts",
     "index": "node --env-file-if-exists=.env --max-old-space-size=768 scripts/index.ts",
     "worker": "node --env-file-if-exists=.env --max-old-space-size=768 src/worker.ts",
-    "bootstrap": "pnpm db:deploy && pnpm crates:import",
+    "bootstrap": "pnpm db:deploy && pnpm crates:import --mode sync",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset",
