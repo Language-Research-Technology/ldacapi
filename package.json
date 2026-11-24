@@ -48,7 +48,7 @@
     "generate-keys": "node scripts/generate-keys.ts"
   },
   "license": "GPL-3.0-or-later",
-  "packageManager": "pnpm@12.16.1",
+  "packageManager": "pnpm@12.23.0",
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@fastify/formbody": "^9.0.1",

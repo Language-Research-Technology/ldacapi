@@ -4,11 +4,17 @@ update:
 autoDedupe: true
 saveTypes: true
 
+lockfile:
+  includeResolutionSettings: true
+
 allowBuilds:
+  # Downloads the Prisma schema engine binaries that migrate and generate use.
   "@prisma/engines": true
+  # Preinstall only checks the Node.js version is supported.
   prisma: true
+  # Installs the git hooks.
   lefthook: true
-  # ships prebuilt binaries; its install script only builds from source
+  # Transitive via @tailwindcss/cli; ships prebuilt binaries, its install script only builds from source.
   "@parcel/watcher": false
 minimumReleaseAgeExclude:
   - arocapi@5.0.0-beta.13
