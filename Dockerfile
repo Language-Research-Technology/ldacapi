@@ -2,7 +2,7 @@ FROM node:26-slim AS base
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl \
   && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/pnpm/pnpm:12.16.1 /opt/pnpm /opt/pnpm
+COPY --from=ghcr.io/pnpm/pnpm:12.23.0 /opt/pnpm /opt/pnpm
 RUN for bin in pnpm pn pnpx pnx; do ln -s "/opt/pnpm/$bin" "/usr/local/bin/$bin"; done
 ENV pnpm_config_store_dir=/pnpm-store \
   CHECKPOINT_DISABLE=1
@@ -28,10 +28,12 @@ COPY scripts scripts
 COPY src src
 COPY --from=build /app/src/generated src/generated
 COPY --from=build /app/src/admin/public/admin.css src/admin/public/
-# node_modules is fixed at build time; pnpm's pre-run install check would need the network
+# node_modules is fixed at build time; pnpm's pre-run install check, or fetching packageManager's
+# pnpm, would need the network and a writable home
 ENV NODE_ENV=production \
   LDACAPI_HOST=0.0.0.0 \
-  pnpm_config_verify_deps_before_run=false
+  pnpm_config_verify_deps_before_run=false \
+  pnpm_config_manage_package_manager_versions=false
 EXPOSE 8080
 USER node
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
