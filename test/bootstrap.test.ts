@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,19 +22,24 @@ const opensearch = new Client({ node: config.opensearchUrl });
 const emptyEverything = () => emptyIndexes(prisma, opensearch);
 
 /**
- * A new OCFL repository, imported by `pnpm crates:import` from `source` (test-data by default) with `args`, and how to run
- * `pnpm index` over it
+ * A new OCFL repository, imported by `pnpm crates:import --mode sync` from `source` (test-data by default) with `args`,
+ * and how to run `pnpm index` over it
  */
 const repository = () => {
   let storage: string;
   const env = () => ({ ...process.env, OCFL_ROOT: join(storage, 'ocfl'), LOG_LEVEL: 'silent', DEFAULT_LICENSE: '' });
+  /** Returns the import's exit status, run with exactly `args` */
+  const importWith = async (args: string[], source?: (scratch: string) => Promise<string>) => {
+    storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
+    const sources = source ? [await source(storage)] : [];
+    return spawnSync('node', ['scripts/crates-import.ts', ...args, ...sources], { env: env(), stdio: 'ignore' }).status;
+  };
   return {
+    importWith,
     /** Returns the import's exit status */
-    async create(source?: (scratch: string) => Promise<string>, ...args: string[]) {
-      storage = await mkdtemp(join(tmpdir(), 'ldacapi-'));
-      const sources = source ? [await source(storage)] : [];
-      return spawnSync('node', ['scripts/crates-import.ts', ...args, ...sources], { env: env(), stdio: 'ignore' }).status;
-    },
+    create: (source?: (scratch: string) => Promise<string>, ...args: string[]) => importWith(['--mode', 'sync', ...args], source),
+    /** Whether an import created the repository */
+    exists: () => existsSync(join(storage, 'ocfl')),
     index: (...args: string[]) => spawnSync('node', ['scripts/index.ts', ...args], { env: env(), stdio: 'ignore' }).status,
     remove: () => rm(storage, { recursive: true, force: true }),
   };
@@ -92,6 +98,18 @@ describe('import', () => {
 
     expect(testData.index('--force')).toBe(0);
     expect(await indexedAt()).not.toEqual(before);
+  });
+});
+
+describe('import without a mode', () => {
+  const unmoded = repository();
+
+  afterEach(() => unmoded.remove());
+
+  it.each([[[]], [['--mode', 'merge']]])('exits with an error before writing anything, given %j', async (args) => {
+    expect(await unmoded.importWith(args)).not.toBe(0);
+
+    expect(unmoded.exists()).toBe(false);
   });
 });
 

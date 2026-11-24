@@ -24,7 +24,7 @@ const imported = async (...crates: Crate[]) => {
   const source = join(storage, 'crates');
   const root = join(storage, 'ocfl');
   await writeCrates(source, crates);
-  expect(await importCrates(await openOrCreateRepository(root), source)).toBe(true);
+  expect(await importCrates(await openOrCreateRepository(root), source, { mode: 'sync' })).toBe(true);
   const repository = await openStorageRoot(root);
   return async (id: string) => (await repository.open(id)).head;
 };

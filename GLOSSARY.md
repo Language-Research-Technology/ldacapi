@@ -17,8 +17,16 @@ A person, organisation or software entity that more than one crate may describe.
 _Avoid_: Duplicate (a collection, object or file in two crates, which is an error)
 
 **Import**:
-Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`), then indexing them.
+Bringing RO-Crates from a directory into the OCFL repository (`pnpm crates:import`), then indexing them. Every folder at or below the directory that holds RO-Crate metadata is one crate, which leaves out the folders of crates below it (ADR 0008).
 _Avoid_: Seed, deposit
+
+**Sync**:
+The import mode in which each crate's new version holds exactly what its folder holds. Earlier versions are kept, and no crate is deleted.
+_Avoid_: Mirror, replace
+
+**Add**:
+The import mode in which each crate's new version adds and replaces files from its folder and removes none.
+_Avoid_: Merge, append
 
 **Deposit**:
 A crate sent through the deposit API, which writes it to the OCFL repository and indexes it.

@@ -100,15 +100,19 @@ export const crate = (root: Part, parts: Part[] = [], { metadataLicence = CC_BY 
   return { id, metadata: { '@context': CONTEXT, '@graph': [...entities, ...undescribed] }, files };
 };
 
+/** Writes `crate` into `folder`, as `crates:import` reads it */
+export const writeCrateAt = async (folder: string, { metadata, files }: Crate) => {
+  await mkdir(folder, { recursive: true });
+  await writeFile(join(folder, 'ro-crate-metadata.json'), JSON.stringify(metadata, null, 2));
+  for (const [path, content] of files) {
+    await mkdir(dirname(join(folder, path)), { recursive: true });
+    await writeFile(join(folder, path), content);
+  }
+};
+
 /** Writes each crate into its own folder under `directory`, as `crates:import` reads them */
 export const writeCrates = async (directory: string, crates: Crate[]) => {
-  for (const { id, metadata, files } of crates) {
-    const folder = join(directory, id.replace(/[^A-Za-z0-9]+/g, '_'));
-    await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, 'ro-crate-metadata.json'), JSON.stringify(metadata, null, 2));
-    for (const [path, content] of files) {
-      await mkdir(dirname(join(folder, path)), { recursive: true });
-      await writeFile(join(folder, path), content);
-    }
+  for (const crate of crates) {
+    await writeCrateAt(join(directory, crate.id.replace(/[^A-Za-z0-9]+/g, '_')), crate);
   }
 };
