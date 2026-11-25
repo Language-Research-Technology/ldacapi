@@ -42,14 +42,14 @@ const logoutSource = async (ctx: KoaContextWithOIDC, form: string) => {
 };
 
 // Clients come only from our configuration, so they get every scope they ask for that we support, without a consent screen
+// oidc-provider only asks once the request has a client and the session an account
 const loadExistingGrant = (audience: string) => async (ctx: KoaContextWithOIDC) => {
-  const { client, session, provider } = ctx.oidc;
-  if (!client || !session?.accountId) {
-    return undefined;
-  }
-  const grantId = session.grantIdFor(client.clientId);
+  const { provider } = ctx.oidc;
+  const { clientId } = ctx.oidc.client as NonNullable<KoaContextWithOIDC['oidc']['client']>;
+  const session = ctx.oidc.session as NonNullable<KoaContextWithOIDC['oidc']['session']>;
+  const grantId = session.grantIdFor(clientId);
   const existing = grantId ? await provider.Grant.find(grantId) : undefined;
-  const grant = existing ?? new provider.Grant({ clientId: client.clientId, accountId: session.accountId });
+  const grant = existing ?? new provider.Grant({ clientId, accountId: session.accountId });
   const scopes = () => [grant.getOIDCScope(), grant.getResourceScope(audience)].join('|');
   const granted = scopes();
   const requested = SCOPES.split(' ')
@@ -154,9 +154,11 @@ export const oidcProvider: FastifyPluginAsync<{ auth: AuthConfig }> = async (fas
     reply.hijack();
     await callback(request.raw, reply.raw);
   };
+  /* v8 ignore next -- handOff answers first, but Fastify needs a handler */
+  const handledByHandOff = async () => {};
   for (const path of ['/.well-known/openid-configuration', ...Object.values(routes)]) {
     for (const url of [path, `${path}/*`]) {
-      fastify.route({ method: ['GET', 'POST'], url, onRequest: handOff, handler: async () => {} });
+      fastify.route({ method: ['GET', 'POST'], url, onRequest: handOff, handler: handledByHandOff });
     }
   }
 

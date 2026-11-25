@@ -12,8 +12,8 @@ afterEach(async () => {
   upstream = undefined;
 });
 
-const start = async (tokenEndpointAuthMethod: 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt') => {
-  upstream = await startFakeUpstream({ ...CLIENT, tokenEndpointAuthMethod });
+const start = async (tokenEndpointAuthMethod: 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt', withoutIdToken = false) => {
+  upstream = await startFakeUpstream({ ...CLIENT, tokenEndpointAuthMethod, withoutIdToken });
   return createUpstream({ issuer: upstream.issuer, ...CLIENT, redirectUri: 'http://localhost:8080/oauth/callback', scope: 'openid profile' });
 };
 
@@ -32,5 +32,15 @@ describe('authenticating at the upstream token endpoint', () => {
     const client = await start('private_key_jwt');
 
     await expect(client.discover()).rejects.toThrow(/only: private_key_jwt/);
+  });
+
+  it('refuses a token response without an ID token', async () => {
+    const client = await start('client_secret_basic', true);
+    const checks = client.newChecks('state');
+    const callback = new URL(upstream?.signIn((await client.authorizationUrl(checks)).toString(), ALICE) ?? '');
+
+    await expect(client.tokens(Object.fromEntries(callback.searchParams), checks)).rejects.toMatchObject({
+      cause: { message: expect.stringContaining('"id_token"') },
+    });
   });
 });

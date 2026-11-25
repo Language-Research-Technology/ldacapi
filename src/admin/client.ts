@@ -16,7 +16,7 @@ export const adminPostLogoutRedirectUri = (adminOrigin: string) => `${adminOrigi
 /** The admin pages' own client of our provider, which needs no configuration */
 export const adminClient = ({ cookieKeys }: AuthConfig, adminOrigin: string) => ({
   client_id: 'ldacapi-admin',
-  client_secret: derivedKey(cookieKeys[0] ?? '', 'admin client secret').toString('base64url'),
+  client_secret: derivedKey(cookieKeys[0], 'admin client secret').toString('base64url'),
   redirect_uris: [adminRedirectUri(adminOrigin)],
   post_logout_redirect_uris: [adminPostLogoutRedirectUri(adminOrigin)],
   grant_types: ['authorization_code'],

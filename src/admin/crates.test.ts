@@ -95,6 +95,15 @@ describe('the crate tree', () => {
     expect(shape(crateTree(body.body))).toEqual([{ id: BUNDLED }, { id: PEOPLE, children: [{ id: EXTRA, children: [{ id: MORE }] }] }]);
   });
 
+  it('orders crates by name, then by id', async () => {
+    await stage('arcp://name,z', 'Aardvarks');
+    await stage(A, 'Aardvarks');
+
+    const { page: body } = await page();
+
+    expect(crateTree(body.body).map(({ id }) => id)).toEqual([A, 'arcp://name,z', BUNDLED, PEOPLE]);
+  });
+
   it('labels a crate by its id until its name is known', async () => {
     const { page: body } = await page();
 

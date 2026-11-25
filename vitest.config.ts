@@ -11,16 +11,7 @@ export default defineConfig({
       // Entry points (scripts/, src/index.ts, src/worker.ts) run as their own process, unseen by coverage; they only parse arguments and call src/
       include: ['src/**/*.ts'],
       exclude: ['src/generated/**', 'src/**/*.test.ts', 'src/index.ts', 'src/worker.ts'],
-      thresholds: {
-        // Raised by vitest whenever a run beats them; commit the change
-        autoUpdate: true,
-        lines: 99,
-        branches: 96.44,
-        functions: 98.91,
-        statements: 98.95,
-        'src/indexer/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
-        'src/index-queue/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
-      },
+      thresholds: { 100: true },
     },
   },
 });

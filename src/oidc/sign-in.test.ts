@@ -6,6 +6,12 @@ import { buildTestApp, contentEverywhere, type TestApp } from '../../test/app.ts
 import { startFakeUpstream, type UpstreamUser } from '../../test/fake-upstream.ts';
 import { authorizationRequest, Browser } from '../../test/oidc.ts';
 
+// Real, unless a test makes it fail
+vi.mock('jose', async (importOriginal) => {
+  const jose = await importOriginal<typeof import('jose')>();
+  return { ...jose, jwtVerify: vi.fn(jose.jwtVerify) };
+});
+
 const ISSUER = 'http://localhost:8080';
 const AUDIENCE = `${ISSUER}/api`;
 const REDIRECT_URI = 'http://localhost:5173/callback';
@@ -31,6 +37,7 @@ let prefix: string;
 // Stands in for REMS, entitling Alice to the restricted licence
 let rems: Server;
 let remsRequests: IncomingMessage[] = [];
+let remsStatus = 200;
 
 const startAuthorization = async (browser: Browser, params: Record<string, string> = {}) => {
   const { url, verifier } = await authorizationRequest({
@@ -63,6 +70,9 @@ const tokenRequest = (params: Record<string, string>, url = '/oauth/token', head
 const exchangeCode = async (redirect: URL, verifier: string) =>
   tokenRequest({ grant_type: 'authorization_code', code: redirect.searchParams.get('code') ?? '', redirect_uri: REDIRECT_URI, code_verifier: verifier });
 
+const fetchRestricted = (bearer: string) =>
+  app.inject({ method: 'GET', url: `${prefix}/file/${encodeURIComponent(RESTRICTED_FILE)}`, headers: { authorization: `Bearer ${bearer}` } });
+
 const verify = async (token: string, audience: string) => {
   const jwks = (await app.inject({ method: 'GET', url: '/oauth/jwks', headers: { host: 'localhost:8080' } })).json();
   return (await jwtVerify(token, createLocalJWKSet(jwks), { issuer: ISSUER, audience })).payload;
@@ -73,7 +83,7 @@ beforeAll(async () => {
   rems = createServer((request, response) => {
     remsRequests.push(request);
     const user = new URL(request.url ?? '', 'http://rems').searchParams.get('user');
-    response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(user === ALICE.sub ? [{ resource: RESTRICTED }] : []));
+    response.writeHead(remsStatus, { 'content-type': 'application/json' }).end(JSON.stringify(user === ALICE.sub ? [{ resource: RESTRICTED }] : []));
   });
   await new Promise<void>((resolve) => rems.listen(0, '127.0.0.1', resolve));
 
@@ -156,10 +166,8 @@ describe('signing in at the upstream provider', () => {
     expect(decodeProtectedHeader(access_token).alg).toBe('RS256');
     expect(await verify(access_token, AUDIENCE)).toMatchObject({ sub: ALICE.sub });
 
-    const restricted = (bearer: string) =>
-      app.inject({ method: 'GET', url: `${prefix}/file/${encodeURIComponent(RESTRICTED_FILE)}`, headers: { authorization: `Bearer ${bearer}` } });
     remsRequests = [];
-    const content = await restricted(access_token);
+    const content = await fetchRestricted(access_token);
     expect(content.statusCode).toBe(200);
     expect(content.body).toBe('content');
     expect(remsRequests.map((request) => request.url)).toEqual([`/entitlements?user=${encodeURIComponent(ALICE.sub)}`]);
@@ -167,7 +175,7 @@ describe('signing in at the upstream provider', () => {
     const refreshed = await tokenRequest({ grant_type: 'refresh_token', refresh_token }, tokenEndpoint);
     expect(refreshed.statusCode).toBe(200);
     expect(refreshed.json().refresh_token).not.toBe(refresh_token);
-    expect((await restricted(refreshed.json().access_token)).statusCode).toBe(200);
+    expect((await fetchRestricted(refreshed.json().access_token)).statusCode).toBe(200);
   });
 
   it('signs in after the sign-in page is loaded twice', async () => {
@@ -217,6 +225,59 @@ describe('signing in at the upstream provider', () => {
     const redirect = new URL(returned.headers.location as string);
     expect(redirect.searchParams.get('error')).toBeNull();
     expect((await exchangeCode(redirect, verifier)).statusCode).toBe(200);
+  });
+
+  it('signs a user with a session in again without the upstream provider, adding scopes they ask for', async () => {
+    const { browser } = await signIn(ALICE, { scope: 'openid' });
+    const again = async (scope: string) => {
+      const { response, verifier } = await startAuthorization(browser, { scope });
+      return { redirect: new URL(response.headers.location as string), verifier };
+    };
+
+    const same = await again('openid');
+    expect(`${same.redirect.origin}${same.redirect.pathname}`).toBe(REDIRECT_URI);
+    expect((await exchangeCode(same.redirect, same.verifier)).statusCode).toBe(200);
+    const wider = await again('openid profile');
+
+    expect(await verify((await exchangeCode(wider.redirect, wider.verifier)).json().id_token, ONI.client_id)).toMatchObject({ name: ALICE.name });
+  });
+
+  it('leaves out the claims a user has no value for', async () => {
+    const { redirect, verifier } = await signIn({ sub: 'nameless@upstream' }, { scope: 'openid profile email' });
+
+    const claims = await verify((await exchangeCode(redirect, verifier)).json().id_token, ONI.client_id);
+
+    expect(claims.sub).toBe('nameless@upstream');
+    expect(claims).not.toHaveProperty('name');
+    expect(claims).not.toHaveProperty('email');
+  });
+
+  it('refuses tokens for a resource other than the API', async () => {
+    const { response } = await startAuthorization(new Browser(app, ISSUER), { resource: 'https://other.example.org/' });
+
+    const redirect = new URL(response.headers.location as string);
+    expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT_URI);
+    expect(redirect.searchParams.get('error')).toBe('invalid_target');
+  });
+
+  it('withholds restricted content while REMS is failing', async () => {
+    const { redirect, verifier } = await signIn(ALICE);
+    const { access_token } = (await exchangeCode(redirect, verifier)).json();
+    remsStatus = 500;
+
+    const content = await fetchRestricted(access_token).finally(() => {
+      remsStatus = 200;
+    });
+
+    expect(content.statusCode).toBe(403);
+  });
+
+  it('fails a request when checking its bearer token goes wrong, rather than serving it anonymously', async () => {
+    const { redirect, verifier } = await signIn(ALICE);
+    const { access_token } = (await exchangeCode(redirect, verifier)).json();
+    vi.mocked(jwtVerify).mockRejectedValueOnce(new TypeError('broken'));
+
+    expect((await fetchRestricted(access_token)).statusCode).toBe(500);
   });
 
   it('gives a client only the claims of the scopes it asks for', async () => {

@@ -88,7 +88,7 @@ async function verifyUserId(request: FastifyRequest): Promise<string | undefined
       algorithms: [SIGNING_ALG],
       typ: 'at+jwt',
     });
-    return payload.sub || undefined;
+    return payload.sub;
   } catch (error) {
     if (error instanceof errors.JOSEError) {
       return;
