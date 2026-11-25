@@ -32,6 +32,7 @@ COPY --from=build /app/src/admin/public/admin.css src/admin/public/
 # pnpm, would need the network and a writable home
 ENV NODE_ENV=production \
   LDACAPI_HOST=0.0.0.0 \
+  OCFL_ROOT=/ocfl \
   pnpm_config_verify_deps_before_run=false \
   pnpm_config_manage_package_manager_versions=false
 EXPOSE 8080

@@ -58,13 +58,17 @@ services:
     environment: &api-environment
       DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
       OPENSEARCH_URL: http://opensearch:9200
-      OCFL_ROOT: /storage/ocfl
       OIDC_ISSUER: https://${DOMAIN:?Set DOMAIN in .env}
       ADMIN_ORIGIN: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
       OIDC_CLIENTS: >-
         [{"client_id":"oni","redirect_uris":["https://${DOMAIN}/auth/callback"],"post_logout_redirect_uris":["https://${DOMAIN}/"]}]
-    volumes:
-      - ${STORAGE_DIR:?Set STORAGE_DIR in .env}:/storage
+    # OCFL_DIR must already exist, owned by uid 1000, rather than Docker creating it as root
+    volumes: &ocfl-volume
+      - type: bind
+        source: ${OCFL_DIR:?Set OCFL_DIR in .env}
+        target: /ocfl
+        bind:
+          create_host_path: false
     read_only: true
     tmpfs:
       - /tmp
@@ -81,8 +85,7 @@ services:
     command: ["node", "--max-old-space-size=768", "src/worker.ts"]
     env_file: ldacapi.env
     environment: *api-environment
-    volumes:
-      - ${STORAGE_DIR:?Set STORAGE_DIR in .env}:/storage
+    volumes: *ocfl-volume
     read_only: true
     tmpfs:
       - /tmp
