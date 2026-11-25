@@ -68,16 +68,15 @@ jobs:
         env:
           IMAGE: ${{ steps.build.outputs.imageid }}
         run: |
-          storage=$(mktemp -d)
-          chmod 777 "$storage"
+          ocfl=$(mktemp -d)
+          chmod 777 "$ocfl"
           env_file=$(mktemp)
           cat > "$env_file" <<'ENV'
           DATABASE_URL=postgresql://ldacapi:ldacapi@localhost:5432/ldacapi
           OPENSEARCH_URL=http://localhost:9200
-          OCFL_ROOT=/storage/ocfl
           OPEN_LICENSES=https://creativecommons.org/licenses/by/4.0/
           ENV
-          run=(--network host --read-only --tmpfs /tmp --env-file "$env_file" -v "$storage:/storage")
+          run=(--network host --read-only --tmpfs /tmp --env-file "$env_file" -v "$ocfl:/ocfl")
           docker run --rm "${run[@]}" -v "$PWD/test-data:/app/test-data:ro" "$IMAGE" pnpm bootstrap
           docker run --rm "$IMAGE" test -f src/admin/public/admin.css
           docker run -d --name api "${run[@]}" "$IMAGE"

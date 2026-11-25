@@ -542,7 +542,7 @@ them. Don't set `LDACAPI_HOST` there: the healthcheck requests `127.0.0.1`, so
 the API must keep listening on `0.0.0.0`.
 
 ```sh
-docker run -d --env-file ldacapi.env -p 8080:8080 -v /srv/ldacapi:/storage \
+docker run -d --env-file ldacapi.env -p 8080:8080 --mount type=bind,src=/srv/ldacapi/ocfl,dst=/ocfl \
   ghcr.io/language-research-technology/ldacapi:main
 ```
 
@@ -556,7 +556,7 @@ apply the migrations once from the new image, so several replicas never race
 to migrate:
 
 ```sh
-docker run --rm --env-file ldacapi.env -v /srv/ldacapi:/storage ldacapi pnpm db:deploy
+docker run --rm --env-file ldacapi.env --mount type=bind,src=/srv/ldacapi/ocfl,dst=/ocfl ldacapi pnpm db:deploy
 ```
 
 `pnpm ocfl:init` (which creates an empty OCFL repository; the API won't start
@@ -571,9 +571,10 @@ docker run --rm ldacapi pnpm generate-keys >> ldacapi.env
 
 ### Storage
 
-The image has no default `OCFL_ROOT`. Mount your storage and set `OCFL_ROOT`
-to a path inside the container (above, `OCFL_ROOT=/storage/ocfl`). The API runs
-as the image's `node` user, uid 1000, so the OCFL repository must be readable by
+Mount the OCFL repository at `/ocfl`, the image's `OCFL_ROOT`. For a new
+repository, mount an empty directory and run `pnpm ocfl:init` to create the
+repository in it. The directory must exist: `--mount` refuses a missing one,
+where `-v` would create it owned by root, which the API can't write to. The API runs as the image's `node` user, uid 1000, so the OCFL repository must be readable by
 uid 1000. `pnpm crates:import` writes to the repository, so give it write access
 too when you run it.
 
@@ -619,15 +620,16 @@ echo vm.max_map_count=262144 | sudo tee /etc/sysctl.d/99-opensearch.conf
 sudo sysctl --system
 ```
 
-Storage is a directory on the host, usually an NFS mount, set by `STORAGE_DIR`
-in `.env`. The OCFL repository is its `ocfl` directory. Imports are staged
+The OCFL repository is a directory on the host, usually on an NFS mount, set
+by `OCFL_DIR` in `.env`. It must exist before the stack starts: Compose won't
+create it. For a new repository, make it empty. Imports are staged
 inside the repository, in `extensions/ocfl-js-workspace`, and committed by
 renaming them into place, so the repository must be on one filesystem, with no
 mount point inside it, and that filesystem must support hard links, as NFS
 does. The API runs as uid 1000, so the directory must be writable by
 uid 1000: on NFS, set the owner on the server or map the export to uid 1000, as
 root in the container is squashed. Otherwise `pnpm ocfl:init` fails with
-`EACCES: permission denied, mkdir '/storage/ocfl'`. Serving and indexing only
+`EACCES: permission denied, open '/ocfl/ocfl_1.1.md'`. Serving and indexing only
 read, so a read-only mount works if you import crates elsewhere.
 
 Caddy's certificates, Postgres and OpenSearch keep their data in `data/`
@@ -638,7 +640,8 @@ Copy `deploy/` to the host, then, in it, set it up:
 
 ```sh
 sudo install -d -o 1000 -g 1000 data/opensearch
-cp .env.example .env                  # DOMAIN, ADMIN_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, STORAGE_DIR
+sudo install -d -o 1000 -g 1000 /mnt/ldacapi/ocfl   # OCFL_DIR, unless it exists already
+cp .env.example .env                  # DOMAIN, ADMIN_DOMAIN, ACME_EMAIL, POSTGRES_PASSWORD, OCFL_DIR
 cp ldacapi.env.example ldacapi.env    # sign-in, admins, open licences and the API's other settings
 chmod 600 .env ldacapi.env
 docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
@@ -660,8 +663,8 @@ On a new host, in `deploy/`:
    docker compose run --rm api pnpm db:deploy
    ```
 
-2. Put the crates in the repository. Either set `STORAGE_DIR` to storage whose
-   `ocfl` directory already holds them, or import them without indexing, which
+2. Put the crates in the repository. Either set `OCFL_DIR` to a repository
+   that already holds them, or import them without indexing, which
    creates the repository if there isn't one:
 
    ```sh
@@ -712,7 +715,7 @@ To index a repository that already holds crates in place, run
 `docker compose run --rm api pnpm index`.
 
 The stack runs the API's `main` image. To upgrade, back up the database and
-`STORAGE_DIR`, then pull the new images, apply any new migrations and restart:
+`OCFL_DIR`, then pull the new images, apply any new migrations and restart:
 
 ```sh
 docker compose exec -T db pg_dump -U ldacapi -Fc ldacapi > ldacapi-$(date +%F).dump
