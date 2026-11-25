@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { ROCrate } from 'ro-crate';
 import { describe, expect, it } from 'vitest';
-import { type Crate, collection, crate, fileDescribedButNotHeld, object, type Part, person } from '../../test/crate-builder.ts';
+import { type Crate, collection, crate, fileDescribedButNotHeld, licence, object, type Part, person } from '../../test/crate-builder.ts';
 import { type DeriveFacts, derive } from './derive.ts';
 
 const ROOT = 'arcp://name,derive';
@@ -21,9 +21,13 @@ const derived = async (built: Crate, given: Partial<DeriveFacts> = {}) => derive
 
 const fileRows = async (built: Crate, given: Partial<DeriveFacts> = {}) => (await derived(built, given)).entities.flatMap(({ file }) => (file ? [file] : []));
 
+type Derived = { row: { id: string; meta: { rocrate: unknown } } };
+
+/** The entities of an entity's virtual crate */
+const graphOf = (entity: Derived) => (entity.row.meta.rocrate as { '@graph': Record<string, unknown>[] })['@graph'];
+
 /** The root entity of an entity's virtual crate */
-const virtualRoot = (entity: { row: { id: string; meta: { rocrate: unknown } } }) =>
-  (entity.row.meta.rocrate as { '@graph': Record<string, unknown>[] })['@graph'].find(({ '@id': id }) => id === entity.row.id);
+const virtualRoot = (entity: Derived) => graphOf(entity).find(({ '@id': id }) => id === entity.row.id);
 
 const entityOf = async (built: Crate, id: string, given: Partial<DeriveFacts> = {}) => {
   const found = (await derived(built, given)).entities.find(({ row }) => row.id === id);
@@ -333,9 +337,9 @@ describe('derivation', () => {
         thing(`${ROOT}/object`, ['Dataset', 'RepositoryObject'], 'Object', { memberOf: { '@id': ROOT }, 'ldac:linguisticGenre': 'Narrative' }),
       ]);
 
-      const rocrate = (await entityOf(built, `${ROOT}/object`)).row.meta.rocrate as { '@graph': Record<string, unknown>[] };
+      const graph = graphOf(await entityOf(built, `${ROOT}/object`));
 
-      expect(rocrate['@graph'].find((entity) => entity['@id'] === `${ROOT}/object`)).toMatchObject({
+      expect(graph.find((entity) => entity['@id'] === `${ROOT}/object`)).toMatchObject({
         memberOf: [{ '@id': ROOT }],
         'ldac:linguisticGenre': ['Narrative'],
       });
@@ -534,9 +538,9 @@ describe('derivation', () => {
     it('gives the virtual crate the crate root’s conformsTo when the entity has none', async () => {
       const built = crate(collection(ROOT), [fileDescribedButNotHeld('a.txt', { licence: RESTRICTED })]);
 
-      const rocrate = (await entityOf(built, `${ROOT}/a.txt`)).row.meta.rocrate as { '@graph': Record<string, unknown>[] };
+      const graph = graphOf(await entityOf(built, `${ROOT}/a.txt`));
 
-      expect(rocrate['@graph'].find((entity) => entity['@id'] === `${ROOT}/a.txt`)).toMatchObject({
+      expect(graph.find((entity) => entity['@id'] === `${ROOT}/a.txt`)).toMatchObject({
         conformsTo: [{ '@id': 'https://w3id.org/ldac/profile#Collection' }],
         license: [{ '@id': RESTRICTED }],
       });
@@ -679,6 +683,175 @@ describe('derivation', () => {
 
       expect(document).not.toHaveProperty('datePublished');
       expect([document.dateCreated, document.temporalCoverage]).toEqual([['1901-02-03'], ['1900']]);
+    });
+  });
+
+  describe('rule 15, what a virtual crate holds: its entity, and what it links to up to the records it reaches', () => {
+    /** The entities of an entity's virtual crate other than its descriptor and root, by id */
+    const linkedIn = (entity: Derived) =>
+      Object.fromEntries(
+        graphOf(entity)
+          .filter(({ '@id': id }) => id !== entity.row.id && id !== 'ro-crate-metadata.json')
+          .map((held) => [held['@id'], held]),
+      );
+
+    const linked = async (built: Crate, id: string) => linkedIn(await entityOf(built, id));
+
+    it('holds a linked record as a stub: its id, type, name and description', async () => {
+      const built = crate(
+        collection(ROOT, { name: 'Root', description: 'All of it', hasPart: ['a.txt'], hasMember: [`${ROOT}/object`], datePublished: '2001' }),
+        [fileDescribedButNotHeld('a.txt', { isPartOf: ROOT }), object(`${ROOT}/object`, { memberOf: ROOT })],
+      );
+
+      expect(await linked(built, `${ROOT}/a.txt`)).toEqual({
+        [ROOT]: { '@id': ROOT, '@type': ['Dataset', 'RepositoryCollection'], name: ['Root'], description: ['All of it'] },
+      });
+    });
+
+    it('holds a profiled person as a stub, and any other person in full, with what it links to', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { author: [{ '@id': '#alice' }, { '@id': '#bob' }], licence: null }),
+        person('#alice', { name: 'Alice', email: 'alice@example.org', homeLocation: { '@id': '#home' } }),
+        thing('#bob', 'Person', undefined, { name: 'Bob', email: 'bob@example.org', homeLocation: { '@id': '#home' } }),
+        thing('#home', 'Place', undefined, { name: 'Home' }),
+      ]);
+
+      expect(await linked(built, `${ROOT}/object`)).toEqual({
+        '#alice': { '@id': '#alice', '@type': ['Person'], name: ['Alice'] },
+        '#bob': { '@id': '#bob', '@type': ['Person'], name: ['Bob'], email: ['bob@example.org'], homeLocation: [{ '@id': '#home' }] },
+        '#home': { '@id': '#home', '@type': ['Place'], name: ['Home'] },
+      });
+    });
+
+    it('holds a linked file’s stub with its filename', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { hasPart: ['a.eaf'], licence: null }),
+        fileDescribedButNotHeld('a.eaf', { name: 'Annotations', filename: 'a.eaf', encodingFormat: 'application/xml' }),
+      ]);
+
+      expect((await linked(built, `${ROOT}/object`))['a.eaf']).toEqual({ '@id': 'a.eaf', '@type': ['File'], name: ['Annotations'], filename: ['a.eaf'] });
+    });
+
+    it('holds a linked language with its code, and a licence with its name and description', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { inLanguage: { '@id': '#eng' }, licence: RESTRICTED }),
+        thing('#eng', 'Language', undefined, { name: 'English', code: 'eng' }),
+        licence(RESTRICTED, { name: 'Restricted', description: 'Ask first' }),
+      ]);
+
+      const found = await linked(built, `${ROOT}/object`);
+
+      expect([found['#eng'], found[RESTRICTED]]).toEqual([
+        { '@id': '#eng', '@type': ['Language'], name: ['English'], code: ['eng'] },
+        { '@id': RESTRICTED, '@type': ['CreativeWork'], name: ['Restricted'], description: ['Ask first'] },
+      ]);
+    });
+
+    it('follows links through entities that aren’t records, however far, and holds each once', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { contentLocation: { '@id': '#recorded' }, spatialCoverage: { '@id': '#covered' }, licence: null }),
+        thing('#recorded', 'Place', undefined, { name: 'Recorded', geo: { '@id': '#point' } }),
+        thing('#point', 'Geometry', undefined, { asWKT: 'POINT(153.02 -27.47)', 'geo:hasSource': { '@id': '#survey' } }),
+        thing('#survey', 'CreativeWork', undefined, { name: 'Survey', about: { '@id': '#covered' } }),
+        thing('#covered', 'Place', undefined, { name: 'Covered', geo: { '@id': '#area' } }),
+        thing('#area', 'Geometry', undefined, { asWKT: 'POLYGON((0 0, 1 0, 1 1, 0 0))', 'geo:hasSource': { '@id': '#survey' } }),
+      ]);
+
+      expect(await linked(built, `${ROOT}/object`)).toEqual({
+        '#recorded': { '@id': '#recorded', '@type': ['Place'], name: ['Recorded'], geo: [{ '@id': '#point' }] },
+        '#point': { '@id': '#point', '@type': ['Geometry'], asWKT: ['POINT(153.02 -27.47)'], 'geo:hasSource': [{ '@id': '#survey' }] },
+        '#survey': { '@id': '#survey', '@type': ['CreativeWork'], name: ['Survey'], about: [{ '@id': '#covered' }] },
+        '#covered': { '@id': '#covered', '@type': ['Place'], name: ['Covered'], geo: [{ '@id': '#area' }] },
+        '#area': { '@id': '#area', '@type': ['Geometry'], asWKT: ['POLYGON((0 0, 1 0, 1 1, 0 0))'], 'geo:hasSource': [{ '@id': '#survey' }] },
+      });
+    });
+
+    it('stops at a record reached through other entities, holding it as a stub without what it links to', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { author: { '@id': '#bob' }, licence: null }),
+        thing('#bob', 'Person', undefined, { name: 'Bob', affiliation: { '@id': '#acme' } }),
+        thing('#acme', 'Organization', 'Organization', { name: 'Acme', location: { '@id': '#hq' } }),
+        thing('#hq', 'Place', undefined, { name: 'HQ' }),
+      ]);
+
+      expect(Object.keys(await linked(built, `${ROOT}/object`)).sort()).toEqual(['#acme', '#bob']);
+    });
+
+    it('holds each object’s participants with their postcode polygons, and the collection only as a stub, in a survey-shaped crate', async () => {
+      const names = ['one', 'two'];
+      const participants = (n: string) => [1, 2].map((p) => `#${n}-participant-${p}`);
+      const built = crate(collection(ROOT, { name: 'Survey', hasMember: names.map((n) => `${ROOT}/${n}`), contentLocation: { '@id': '#australia' } }), [
+        thing('#australia', 'Place', undefined, { name: 'Australia' }),
+        ...names.flatMap((n) => [
+          object(`${ROOT}/${n}`, {
+            memberOf: ROOT,
+            hasPart: [`${n}.pdf`],
+            'ldac:researchParticipant': participants(n).map((p) => ({ '@id': p })),
+            licence: null,
+          }),
+          fileDescribedButNotHeld(`${n}.pdf`, { isPartOf: `${ROOT}/${n}` }),
+          ...participants(n).flatMap((p) => [
+            thing(p, 'Person', undefined, { name: p, homeLocation: { '@id': `${p}-postcode` } }),
+            thing(`${p}-postcode`, 'Place', undefined, { name: '2000', geo: { '@id': `${p}-polygon` } }),
+            thing(`${p}-polygon`, 'Geometry', undefined, { asWKT: 'POLYGON((151 -33, 152 -33, 152 -34, 151 -33))' }),
+          ]),
+        ]),
+      ]);
+
+      const byId = new Map((await derived(built)).entities.map((entity) => [entity.row.id, entity]));
+
+      for (const n of names) {
+        const held = linkedIn(byId.get(`${ROOT}/${n}`) as Derived);
+        const reached = participants(n).flatMap((p) => [p, `${p}-postcode`, `${p}-polygon`]);
+        expect(Object.keys(held).sort()).toEqual([ROOT, `${n}.pdf`, ...reached].sort());
+        expect(held[ROOT]).toEqual({ '@id': ROOT, '@type': ['Dataset', 'RepositoryCollection'], name: ['Survey'] });
+        expect(Object.keys(linkedIn(byId.get(`${ROOT}/${n}.pdf`) as Derived))).toEqual([`${ROOT}/${n}`]);
+      }
+    });
+
+    it('leaves a link to an entity the crate doesn’t describe, or to its descriptor, as a reference alone', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { citation: [{ '@id': 'https://example.org/paper' }, { '@id': 'ro-crate-metadata.json' }], licence: null }),
+      ]);
+
+      const entity = await entityOf(built, `${ROOT}/object`);
+
+      expect(virtualRoot(entity)).toMatchObject({ citation: [{ '@id': 'https://example.org/paper' }, { '@id': 'ro-crate-metadata.json' }] });
+      expect(linkedIn(entity)).toEqual({});
+    });
+
+    it('holds no second copy of an entity that links to itself, or that an entity it reaches links back to', async () => {
+      const built = crate(collection(ROOT), [
+        person('#alice', { name: 'Alice', sameAs: { '@id': '#alice' }, knowsAbout: { '@id': '#topic' } }),
+        thing('#topic', 'DefinedTerm', undefined, { name: 'Topic', subjectOf: { '@id': '#alice' } }),
+      ]);
+
+      const entity = await entityOf(built, `${ROOT}/#alice`);
+
+      expect(virtualRoot(entity)).toMatchObject({ sameAs: [{ '@id': '#alice' }] });
+      expect(Object.keys(linkedIn(entity))).toEqual(['#topic']);
+    });
+
+    it('takes the crate root’s conformsTo as references alone, holding nothing the profile links to', async () => {
+      const built = crate(collection(ROOT), [
+        fileDescribedButNotHeld('a.txt'),
+        thing('https://w3id.org/ldac/profile#Collection', 'Profile', undefined, { name: 'Collection', author: { '@id': '#ldac' } }),
+        thing('#ldac', 'Organization', undefined, { name: 'LDaC' }),
+      ]);
+
+      const entity = await entityOf(built, `${ROOT}/a.txt`);
+
+      expect(virtualRoot(entity)).toMatchObject({ conformsTo: [{ '@id': 'https://w3id.org/ldac/profile#Collection' }] });
+      expect(linkedIn(entity)).toEqual({});
+    });
+
+    it('types its root a Dataset once', async () => {
+      const built = crate(collection(ROOT), [fileDescribedButNotHeld('a.txt')]);
+
+      expect((await derived(built)).entities.map((entity) => virtualRoot(entity)?.['@type'])).toEqual([
+        ['Dataset', 'RepositoryCollection'],
+        ['File', 'Dataset'],
+      ]);
     });
   });
 });
