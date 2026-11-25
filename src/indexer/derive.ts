@@ -2,7 +2,7 @@ import type { GeoPoint } from 'arocapi';
 import { type Entity, ROCrate } from 'ro-crate';
 import type { AccessControl } from '../access/access-control.ts';
 import type { EntityMeta } from '../entity-meta.ts';
-import { entityId } from '../repository/entity-id.ts';
+import { entityId, isAbsoluteIri } from '../repository/entity-id.ts';
 import type { Document } from '../search-backend.ts';
 
 /** What derivation needs besides the crate, looked up beforehand */
@@ -249,7 +249,7 @@ function virtualCrate(crate: ROCrate, entity: Entity, id: string, license: strin
 /** Every entity row, file row and search document a crate gives, by the derivation rules */
 export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   const crateId = crate.rootId;
-  if (entityId(crateId, crateId) !== crateId) {
+  if (!isAbsoluteIri(crateId)) {
     throw new Error(`The crate's root id, ${crateId}, isn't an absolute IRI`);
   }
   const metadataLicense = firstStringOrId(crate.descriptor.license) || facts.defaultMetadataLicense;

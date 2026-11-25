@@ -5,6 +5,7 @@ import type { ImportProgress, StorageRoot } from '@ocfl/ocfl-fs';
 import { ROCrate } from 'ro-crate';
 import type { IndexQueue, Summary } from './index-queue/index-queue.ts';
 import { logger } from './logger.ts';
+import { isAbsoluteIri } from './repository/entity-id.ts';
 
 /** How to index what is imported: the queue to ask, and how to run what `ask` asks for until finished, summarising it */
 type Indexing = { indexQueue: IndexQueue; run: (ask: () => Promise<string[]>) => Promise<Summary> };
@@ -190,14 +191,20 @@ async function writeCrate(
   }
 }
 
-/** The root `@id` of the crate in `folder`, or undefined, logged, when its metadata can't be read */
+/** The root `@id` of the crate in `folder`, or undefined, logged, when unreadable or not an absolute IRI */
 async function readCrateId(folder: string): Promise<string | undefined> {
+  let rootId: string;
   try {
-    return (await ROCrate.create(JSON.parse(await readFile(join(folder, METADATA), 'utf-8')))).rootId;
+    ({ rootId } = await ROCrate.create(JSON.parse(await readFile(join(folder, METADATA), 'utf-8'))));
   } catch (error) {
     logger.error({ err: error, path: folder }, 'Cannot read crate metadata');
     return undefined;
   }
+  if (!isAbsoluteIri(rootId)) {
+    logger.error({ path: folder, rootId }, 'Crate root id is not an absolute IRI');
+    return undefined;
+  }
+  return rootId;
 }
 
 async function importAll(
