@@ -54,7 +54,8 @@ services:
     <<: *hardening
     image: ghcr.io/language-research-technology/ldacapi:main
     env_file: ldacapi.env
-    environment:
+    # The worker loads the same configuration, so it needs the same settings
+    environment: &api-environment
       DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
       OPENSEARCH_URL: http://opensearch:9200
       OCFL_ROOT: /storage/ocfl
@@ -79,10 +80,7 @@ services:
     image: ghcr.io/language-research-technology/ldacapi:main
     command: ["node", "--max-old-space-size=768", "src/worker.ts"]
     env_file: ldacapi.env
-    environment:
-      DATABASE_URL: postgresql://ldacapi:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/ldacapi
-      OPENSEARCH_URL: http://opensearch:9200
-      OCFL_ROOT: /storage/ocfl
+    environment: *api-environment
     volumes:
       - ${STORAGE_DIR:?Set STORAGE_DIR in .env}:/storage
     read_only: true
