@@ -278,10 +278,9 @@ more workers against the same database, search index and repository, such as
 `docker compose up -d --scale worker=3` in [production](#production-with-docker-compose).
 Each worker holds one crate's metadata in memory at a time, and remembers
 each crate's parent collection (ids only), so a parent crate is read once
-rather than once per crate under it. Workers, `pnpm index` and
-`pnpm crates:import` cap node's heap at 768 MB (`--max-old-space-size`);
-uncapped, node lets garbage grow the heap with the machine's memory, past 1 GB
-for a large crate.
+rather than once per crate under it. Node sets its heap limit from the
+machine's memory (about 2 GB on an 8 GB host); to set it yourself, give the
+worker `NODE_OPTIONS=--max-old-space-size=<MB>`.
 
 ### Known limits
 
@@ -307,9 +306,9 @@ for a large crate.
 - A crate on the older bare spelling (`memberOf`, `communicationMode` rather
   than `pcdm:memberOf`, `ldac:communicationMode`) indexes without its parents
   or LDaC facets, with no warning.
-- A crate too large for the 768 MB heap stops the process running its job;
-  after three tries the job fails with "Its worker died on each of 3 attempts".
-  Raise `--max-old-space-size` where the worker is started to index it.
+- A crate too large for node's heap stops the process running its job; after
+  three tries the job fails with "Its worker died on each of 3 attempts".
+  Raise the limit with `NODE_OPTIONS=--max-old-space-size=<MB>` to index it.
 
 ## Configuration
 
