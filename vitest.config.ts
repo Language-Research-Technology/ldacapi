@@ -15,9 +15,9 @@ export default defineConfig({
         // Raised by vitest whenever a run beats them; commit the change
         autoUpdate: true,
         lines: 99,
-        branches: 96.43,
-        functions: 98.9,
-        statements: 98.94,
+        branches: 96.44,
+        functions: 98.91,
+        statements: 98.95,
         'src/indexer/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
         'src/index-queue/**': { lines: 100, branches: 100, functions: 100, statements: 100 },
       },

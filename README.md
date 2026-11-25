@@ -139,9 +139,10 @@ imported.
 - A folder outside any crate that leads to no crate gets a warning (only the
   highest such folder), as does a `dir` holding no crate at all. Warnings
   don't fail the import.
-- A folder that can't be read, a crate whose metadata can't be read, and
-  folders whose crates share a root `@id` are all skipped. The rest still
-  import, and the import fails at the end.
+- A folder that can't be read, a crate whose metadata can't be read, a crate
+  whose root `@id` isn't an absolute IRI (such as `./`, which means it has no
+  id of its own), and folders whose crates share a root `@id` are all skipped.
+  The rest still import, and the import fails at the end.
 
 `--mode` is required:
 
@@ -160,8 +161,9 @@ and indexes each one.
 A crate with no metadata licence (the `license` of `ro-crate-metadata.json`)
 fails its index job unless `DEFAULT_METADATA_LICENSE` is set, and one with no
 content licence (the `license` of the root dataset) fails unless
-`DEFAULT_LICENSE` is set (see [Licences](#licences)). A crate whose root id
-isn't an absolute IRI fails too.
+`DEFAULT_LICENSE` is set (see [Licences](#licences)). `pnpm crates:import`
+rejects a crate whose root id isn't an absolute IRI, and indexing fails one
+that reached the repository some other way.
 
 ## Indexing
 

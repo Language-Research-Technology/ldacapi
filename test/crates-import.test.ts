@@ -385,6 +385,32 @@ describe('crates:import', () => {
     ]);
   });
 
+  it.each([
+    ['no id of its own', './'],
+    ['no scheme', 'dx.doi.org/10.25911/42ds-nh06'],
+    ['a blank node', '_:b0'],
+  ])('skips a crate whose root id is not an absolute IRI (%s), importing the rest, and fails', async (_, rootId) => {
+    await writeCrateAt(join(source, 'unnamed'), crate(collection(rootId)));
+
+    expect(await importCrates()).toBe(false);
+
+    expect(await importedAllBut(rootId)).toBe(true);
+    expect(logged('Crate root id is not an absolute IRI')).toEqual([expect.objectContaining({ level: ERROR, path: join(source, 'unnamed'), rootId })]);
+  });
+
+  it('names each crate with no id of its own, rather than calling them a shared root id', async () => {
+    await writeCrateAt(join(source, 'unnamed-1'), crate(collection('./')));
+    await writeCrateAt(join(source, 'unnamed-2'), crate(collection('./')));
+
+    expect(await importCrates()).toBe(false);
+
+    expect(logged('Crate root id is not an absolute IRI')).toEqual([
+      expect.objectContaining({ path: join(source, 'unnamed-1'), rootId: './' }),
+      expect.objectContaining({ path: join(source, 'unnamed-2'), rootId: './' }),
+    ]);
+    expect(logged('Crates share a root id')).toEqual([]);
+  });
+
   it('imports neither of two crates with the same root id, naming both folders, and fails', async () => {
     await cp(join(source, 'bundled'), join(source, 'bundled-copy'), { recursive: true });
 
