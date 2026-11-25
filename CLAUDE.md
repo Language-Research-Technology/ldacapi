@@ -16,7 +16,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 
 ## Tests and coverage
 
-`pnpm test` fails when coverage of `src/` drops below the thresholds in `vitest.config.ts`. Vitest raises them when a run beats them: commit that change. The aim is 100%.
+`pnpm test` fails unless every line and branch of `src/` is covered. Cover new code with a test of the behaviour it exists for, not one written to reach a line. Code no test can reach is either dead (delete it) or only satisfies the types (assert the type instead of guarding). A `/* v8 ignore */` is for the rare line that is neither, and says why.
 
 Entry points (`scripts/*.ts`, `src/index.ts`, `src/worker.ts`) only parse arguments and call code in `src/`. They run as their own process, which coverage can't see, so they are left out of it; logic put there is unmeasured.
 

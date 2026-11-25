@@ -22,21 +22,11 @@ export const createSignIn = (fastify: FastifyInstance, auth: AuthConfig, adminOr
     client.client_id,
     client.client_secret,
   );
-  configuration[customFetch] = async (url, { method, headers, body }) => {
+  // Only the token request, a form POST with no repeated response headers, comes through here
+  configuration[customFetch] = async (url, { headers, body }) => {
     const { pathname, search } = new URL(url);
-    const response = await fastify.inject({
-      method: method as 'POST',
-      url: `${pathname}${search}`,
-      headers,
-      ...(body === undefined ? {} : { payload: String(body) }),
-    });
-    const responseHeaders = new Headers();
-    for (const [name, value] of Object.entries(response.headers)) {
-      for (const each of [value ?? []].flat()) {
-        responseHeaders.append(name, String(each));
-      }
-    }
-    return new Response(response.body, { status: response.statusCode, headers: responseHeaders });
+    const response = await fastify.inject({ method: 'POST', url: `${pathname}${search}`, headers, payload: String(body) });
+    return new Response(response.body, { status: response.statusCode, headers: response.headers as Record<string, string> });
   };
   const flow = createUpstream({ configuration, redirectUri: adminRedirectUri(adminOrigin), scope: client.scope });
 

@@ -116,6 +116,29 @@ describe('signing in to the admin pages', () => {
     expect((await browser.get('/admin/')).statusCode).toBe(303);
   });
 
+  it('refuses a callback whose code our provider does not accept', async () => {
+    const browser = new Browser(app, ADMIN, ISSUER);
+    const toUpstream = await browser.follow('/admin/');
+    let toAdmin = new URL(testbed.upstream.signIn(toUpstream.headers.location as string, ALICE));
+    while (toAdmin.pathname !== '/admin/callback') {
+      toAdmin = new URL((await browser.get(toAdmin.toString())).headers.location as string, ISSUER);
+    }
+    toAdmin.searchParams.set('code', 'forged');
+
+    const refused = await browser.get(toAdmin.toString());
+
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.message).toBe('Sign-in failed');
+    expect((await browser.get('/admin/')).statusCode).toBe(303);
+  });
+
+  it('names an admin with no name by their sub', async () => {
+    const page = await signIn(new Browser(app, ADMIN, ISSUER), '/admin/', { sub: 'other@upstream' });
+
+    expect(page.statusCode).toBe(200);
+    expect(page.body).toContain('other@upstream');
+  });
+
   it('signs out of the admin pages and our provider, ending on a page that doesn’t sign in again', async () => {
     const browser = new Browser(app, ADMIN, ISSUER);
     await signIn(browser, '/admin/', ALICE);

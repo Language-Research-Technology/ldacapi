@@ -65,7 +65,7 @@ const requiredWithUpstream = (production: boolean) => {
     OIDC_UPSTREAM_CLIENT_ID: z.string(REQUIRED_WITH_UPSTREAM),
     OIDC_UPSTREAM_CLIENT_SECRET: z.string(REQUIRED_WITH_UPSTREAM),
     OIDC_SIGNING_KEYS: key<{ keys: Jwk[] }>(() => ({ keys: [generateSigningKey()] })),
-    OIDC_COOKIE_KEYS: key<string[]>(() => [generateCookieKey()]),
+    OIDC_COOKIE_KEYS: key<[string, ...string[]]>(() => [generateCookieKey()]),
   });
 };
 

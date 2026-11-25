@@ -100,11 +100,8 @@ export const createUpstream = (options: UpstreamOptions) => {
         expectedNonce: checks.nonce,
         idTokenExpected: true,
       });
-      const claims = tokens.claims();
-      if (!claims || !tokens.id_token) {
-        throw new Error('No ID token');
-      }
-      return { claims, idToken: tokens.id_token };
+      // idTokenExpected rejects a response without one
+      return { claims: tokens.claims() as IDToken, idToken: tokens.id_token as string };
     },
   };
 };

@@ -13,9 +13,16 @@ type FakeUpstreamOptions = {
   clientSecret: string;
   /** How the client must authenticate at the token endpoint */
   tokenEndpointAuthMethod?: 'client_secret_basic' | 'client_secret_post' | 'private_key_jwt';
+  /** Leaves the ID token out of token responses */
+  withoutIdToken?: boolean;
 };
 
-export const startFakeUpstream = async ({ clientId, clientSecret, tokenEndpointAuthMethod = 'client_secret_basic' }: FakeUpstreamOptions) => {
+export const startFakeUpstream = async ({
+  clientId,
+  clientSecret,
+  tokenEndpointAuthMethod = 'client_secret_basic',
+  withoutIdToken = false,
+}: FakeUpstreamOptions) => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = { ...(await exportJWK(publicKey)), kid: 'fake', alg: 'RS256', use: 'sig' };
   const codes = new Map<string, PendingCode>();
@@ -54,7 +61,10 @@ export const startFakeUpstream = async ({ clientId, clientSecret, tokenEndpointA
       .setIssuedAt()
       .setExpirationTime('5m')
       .sign(privateKey);
-    return { status: 200, json: { access_token: randomBytes(16).toString('hex'), token_type: 'Bearer', expires_in: 300, id_token: idToken } };
+    return {
+      status: 200,
+      json: { access_token: randomBytes(16).toString('hex'), token_type: 'Bearer', expires_in: 300, ...(withoutIdToken ? {} : { id_token: idToken }) },
+    };
   };
 
   const server = createServer(async (req, res) => {

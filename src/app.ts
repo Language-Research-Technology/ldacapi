@@ -33,7 +33,6 @@ export function buildApp({ search, storage, indexQueue }: AppDeps) {
     },
     trustProxy: true, // Runs behind a reverse proxy, which must set the X-Forwarded-* headers
   });
-  const prefix = config.prefix || '';
 
   fastify.setErrorHandler(errorHandler);
   fastify.setNotFoundHandler(notFoundHandler);
@@ -54,7 +53,7 @@ export function buildApp({ search, storage, indexQueue }: AppDeps) {
       });
       api.register(ldacapi);
     },
-    { prefix },
+    { prefix: config.prefix },
   );
   const { auth, adminOrigin } = config;
   if (auth) {

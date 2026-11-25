@@ -1,7 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildTestApp, type TestApp } from '../../test/app.ts';
 import { authorizationRequest, Browser } from '../../test/oidc.ts';
+import type { PrismaAdapter as Adapter } from './adapter.ts';
 import { generateSigningKey } from './keys.ts';
+
+const logs = vi.hoisted(() => [] as { msg: string }[]);
+vi.mock('../logger.ts', async () => (await import('../../test/logs.ts')).capturingLogger(logs, 'error'));
 
 const ISSUER = 'http://localhost:8080';
 const REDIRECT_URI = 'http://localhost:5173/callback';
@@ -11,6 +15,8 @@ const SIGNING_KEYS = [generateSigningKey(), generateSigningKey()];
 let app: TestApp;
 let build: () => TestApp;
 let prisma: Awaited<ReturnType<typeof buildTestApp>>['prisma'];
+// Imported once configuration has been read with sign-in on
+let PrismaAdapter: typeof Adapter;
 
 const get = (url: string, target = app) => target.inject({ method: 'GET', url, headers: { host: 'localhost:8080' } });
 
@@ -28,6 +34,19 @@ beforeAll(async () => {
     OIDC_UPSTREAM_CLIENT_SECRET: 'secret',
     OIDC_SIGNING_KEYS: JSON.stringify({ keys: SIGNING_KEYS }),
   }));
+  ({ PrismaAdapter } = await import('./adapter.ts'));
+});
+
+/** Makes storage fail whenever oidc-provider reads `model` */
+const failReading = (model: string) => {
+  const find = PrismaAdapter.prototype.find;
+  vi.spyOn(PrismaAdapter.prototype, 'find').mockImplementation(function (this: Adapter, id) {
+    return Reflect.get(this, 'model') === model ? Promise.reject(new Error('storage is down')) : find.call(this, id);
+  });
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 afterAll(async () => {
@@ -124,5 +143,61 @@ describe('OIDC provider', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toMatchObject({ error: { code: 'NOT_FOUND' } });
+  });
+
+  it('refuses the sign-in page to a browser that did not start the sign-in', async () => {
+    const interaction = (await authorize({})).headers.location as string;
+
+    const response = await get(interaction);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe('Sign-in has expired or was started elsewhere');
+  });
+
+  it('refuses the sign-in page once its upstream checks have expired', async () => {
+    const browser = new Browser(app, ISSUER);
+    const interaction = (await authorize({}, browser)).headers.location as string;
+    const uid = interaction.split('/').pop() ?? '';
+    await new PrismaAdapter('UpstreamChecks').upsert(uid, { checks: { state: uid, codeVerifier: 'v', nonce: 'n' } }, -1);
+
+    const response = await browser.get(interaction);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe('Sign-in has expired or was started elsewhere');
+  });
+
+  it('refuses an upstream callback with no state', async () => {
+    const response = await get('/oauth/callback?code=abc');
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.message).toBe('Missing state');
+  });
+
+  it('signs out a visitor who is not signed in without asking', async () => {
+    const browser = new Browser(app, ISSUER);
+    const page = await browser.get(`/oauth/session/end?${new URLSearchParams({ client_id: ONI.client_id })}`);
+    const xsrf = page.body.match(/name="xsrf" value="([^"]+)"/)?.[1] ?? '';
+
+    expect(page.body).toContain('.submit()');
+    const signedOut = await browser.post('/oauth/session/end/confirm', { xsrf, logout: 'yes' });
+    expect(signedOut.statusCode).toBe(303);
+    expect(new URL(signedOut.headers.location as string).pathname).toBe('/oauth/session/end/success');
+  });
+
+  it('fails the sign-in page when its storage fails', async () => {
+    const browser = new Browser(app, ISSUER);
+    const interaction = (await authorize({}, browser)).headers.location as string;
+    failReading('Interaction');
+
+    expect((await browser.get(interaction)).statusCode).toBe(500);
+  });
+
+  it('logs a failure inside the provider', async () => {
+    const browser = new Browser(app, ISSUER);
+    const uid = ((await authorize({}, browser)).headers.location as string).split('/').pop();
+    failReading('Interaction');
+
+    expect((await browser.get(`/oauth/authorize/${uid}`)).statusCode).toBe(500);
+    expect(logs).toContainEqual(expect.objectContaining({ msg: 'OIDC provider error', err: expect.objectContaining({ message: 'storage is down' }) }));
   });
 });

@@ -104,4 +104,17 @@ describe('Oni entity fields', () => {
       language: ['English'],
     });
   });
+
+  it('give an entity listed twice in a page its aggregates both times', async () => {
+    const { oniEntityTransformer } = await import('../src/oni.ts');
+    const transform = oniEntityTransformer(started.prisma) as (...args: unknown[]) => Promise<{ counts: unknown }>;
+    const request = {};
+
+    const page = await Promise.all([BUNDLED, BUNDLED].map((id) => transform({ id }, { request }, { meta: null })));
+
+    const [collections, objects, subCollections, files] = COUNTS[BUNDLED] ?? [];
+    for (const entity of page) {
+      expect(entity.counts).toEqual({ collections, objects, subCollections, files });
+    }
+  });
 });
