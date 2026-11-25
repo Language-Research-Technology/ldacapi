@@ -1,6 +1,7 @@
 import { chmod, cp, mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { openStorageRoot } from '@ocfl/ocfl-fs';
 import { Client } from '@opensearch-project/opensearch';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,9 +17,10 @@ import { collection, crate, file, object as objectEntity, writeCrateAt, writeCra
 
 const logs = vi.hoisted(() => [] as Record<string, unknown>[]);
 
-vi.mock('../src/logger.ts', async () => (await import('./logs.ts')).capturingLogger(logs, 'warn'));
+vi.mock('../src/logger.ts', async () => (await import('./logs.ts')).capturingLogger(logs, 'info'));
 
 const BUNDLED = 'arcp://name,bundled';
+const INFO = 30;
 const WARN = 40;
 const ERROR = 50;
 
@@ -40,11 +42,17 @@ describe('crates:import', () => {
   let storage: string;
   let source: string;
   const root = () => join(storage, 'ocfl');
-  const importCrates = async (mode: ImportMode = 'add', from = source) => importInto(await openOrCreateRepository(root()), from, { mode });
+  const importCrates = async (mode: ImportMode = 'add', from = source, heartbeatMilliseconds?: number) =>
+    importInto(await openOrCreateRepository(root()), from, { mode, heartbeatMilliseconds });
   const object = async (id: string) => (await openStorageRoot(root())).open(id);
   const head = async (id: string) => (await object(id)).head;
   /** The paths of the files a crate's head version holds, sorted */
   const files = async (id: string) => [...(await head(id)).files.keys()].sort();
+  /** Adds a `malformed` crate folder whose metadata isn't JSON */
+  const writeMalformedCrate = async () => {
+    await mkdir(join(source, 'malformed'));
+    await writeFile(join(source, 'malformed', 'ro-crate-metadata.json'), '{ not json');
+  };
   /** Whether the import left out `id` and wrote another of the crates beside it */
   const importedAllBut = async (id: string) => {
     const repository = await openStorageRoot(root());
@@ -69,6 +77,165 @@ describe('crates:import', () => {
       number: 1,
       message: `Imported from ${join(source, 'bundled')}`,
       user: { name: 'ldacapi crates:import', address: 'https://github.com/Language-Research-Technology/ldacapi' },
+    });
+  });
+
+  describe('progress', () => {
+    it('logs how many crates it found', async () => {
+      await importCrates();
+
+      expect(logged('Found crates')).toEqual([expect.objectContaining({ level: INFO, source, crates: 5, milliseconds: expect.any(Number) })]);
+    });
+
+    it("logs how many crates' metadata it read, and how many it could not", async () => {
+      await writeMalformedCrate();
+
+      await importCrates();
+
+      expect(logged('Read crate metadata')).toEqual([expect.objectContaining({ level: INFO, readable: 5, unreadable: 1 })]);
+    });
+
+    it('logs when each crate starts, with its place among those it writes', async () => {
+      await importCrates();
+
+      expect(logged('Importing crate').map(({ level, position, total, path }) => [level, position, total, path])).toEqual(
+        ['bundled', 'distributed_content_restricted', 'distributed_metadata_restricted', 'distributed_root', 'people'].map((folder, index) => [
+          INFO,
+          index + 1,
+          5,
+          join(source, folder),
+        ]),
+      );
+      expect(logged('Importing crate')[0]).toMatchObject({ crateId: BUNDLED });
+    });
+
+    /** What the last import logged when it finished `crateId` */
+    const finished = (crateId: string) => logs.filter((record) => record.crateId === crateId && record.msg === 'Imported crate');
+
+    it('logs a crate it writes for the first time as written, with its version, files and time taken', async () => {
+      await importCrates();
+
+      expect(finished(BUNDLED)).toEqual([
+        expect.objectContaining({ level: INFO, outcome: 'written', path: join(source, 'bundled'), version: 1, files: 7, milliseconds: expect.any(Number) }),
+      ]);
+    });
+
+    it.each(['add', 'sync'] as const)('logs a crate imported again with changes as written, with its new version, in %s mode', async (mode) => {
+      await importCrates(mode);
+      await writeFile(join(source, 'bundled', 'notes.txt'), 'added');
+      logs.length = 0;
+
+      await importCrates(mode);
+
+      expect(finished(BUNDLED)).toEqual([expect.objectContaining({ outcome: 'written', version: 2, files: 8 })]);
+    });
+
+    it.each(['add', 'sync'] as const)('logs a crate imported again unchanged as unchanged, in %s mode', async (mode) => {
+      await importCrates(mode);
+      logs.length = 0;
+
+      await importCrates(mode);
+
+      expect(finished(BUNDLED)).toEqual([
+        expect.objectContaining({ level: INFO, outcome: 'unchanged', path: join(source, 'bundled'), version: 1, files: 7, milliseconds: expect.any(Number) }),
+      ]);
+    });
+  });
+
+  describe('heartbeats', () => {
+    const FINDING = 'Still finding crates';
+    const COPYING = 'Still importing crate';
+    const beats = () => logs.filter(({ msg }) => msg === FINDING || msg === COPYING);
+
+    // Enough entries for each stage to outlast a 1ms heartbeat
+    const manyFolders = () => Promise.all(Array.from({ length: 300 }, (_, index) => mkdir(join(source, 'many', `folder-${index}`), { recursive: true })));
+    const manyFiles = () => Promise.all(Array.from({ length: 300 }, (_, index) => writeFile(join(source, 'bundled', `file-${index}.txt`), `${index}`)));
+
+    it('logs while it finds crates, with the folders listed and crates found so far', async () => {
+      await manyFolders();
+
+      await importCrates('add', source, 1);
+
+      expect(logged(FINDING).length).toBeGreaterThan(0);
+      expect(logged(FINDING)).toEqual(
+        logged(FINDING).map(() => expect.objectContaining({ level: INFO, source, folders: expect.any(Number), crates: expect.any(Number) })),
+      );
+    });
+
+    it('logs while a crate imports, with the files it has processed of its total', async () => {
+      await manyFiles();
+
+      await importCrates('add', source, 1);
+
+      const copying = logs.filter(({ msg, crateId }) => msg === COPYING && crateId === BUNDLED);
+      expect(copying.length).toBeGreaterThan(0);
+      expect(copying).toEqual(
+        copying.map(() =>
+          expect.objectContaining({ level: INFO, path: join(source, 'bundled'), importedFiles: expect.any(Number), totalFiles: expect.any(Number) }),
+        ),
+      );
+    });
+
+    it('logs no heartbeat when each stage finishes within the interval', async () => {
+      await importCrates();
+
+      expect(beats()).toEqual([]);
+    });
+
+    it('stops each heartbeat when its stage ends, even when the crate fails', async () => {
+      await Promise.all([manyFolders(), manyFiles()]);
+      await chmod(join(source, 'bundled', 'data.txt'), 0o000);
+
+      expect(await importCrates('add', source, 1)).toBe(false);
+      const after = beats().length;
+      await sleep(20);
+
+      expect(beats().length).toBe(after);
+      const messages = logs.map(({ msg }) => msg);
+      expect(messages.lastIndexOf(FINDING)).toBeLessThan(messages.indexOf('Found crates'));
+      expect(logs.findLastIndex(({ msg, crateId }) => msg === COPYING && crateId === BUNDLED)).toBeLessThan(
+        logs.findIndex(({ msg, crateId }) => msg === 'Cannot import crate' && crateId === BUNDLED),
+      );
+    });
+  });
+
+  describe('summary', () => {
+    const summary = () => logged('Import finished');
+
+    it('counts the crates found and written, and the files they hold', async () => {
+      await importCrates();
+
+      expect(summary()).toEqual([
+        expect.objectContaining({ level: INFO, source, found: 5, written: 5, unchanged: 0, failed: 0, files: 14, milliseconds: expect.any(Number) }),
+      ]);
+    });
+
+    it('counts crates imported again unchanged', async () => {
+      await importCrates('sync');
+      logs.length = 0;
+
+      await importCrates('sync');
+
+      expect(summary()).toEqual([expect.objectContaining({ found: 5, written: 0, unchanged: 5, failed: 0, files: 14 })]);
+    });
+
+    it('counts each crate it could not read or write once, leaving their files out', async () => {
+      await writeMalformedCrate();
+      await cp(join(source, 'people'), join(source, 'people-copy'), { recursive: true });
+      await chmod(join(source, 'bundled', 'data.txt'), 0o000);
+
+      expect(await importCrates()).toBe(false);
+
+      expect(summary()).toEqual([expect.objectContaining({ found: 7, written: 3, unchanged: 0, failed: 4, files: 6 })]);
+    });
+
+    it('logs a summary of nothing when it finds no crates', async () => {
+      await rm(source, { recursive: true });
+      await mkdir(source);
+
+      await importCrates();
+
+      expect(summary()).toEqual([expect.objectContaining({ found: 0, written: 0, unchanged: 0, failed: 0, files: 0 })]);
     });
   });
 
@@ -199,8 +366,7 @@ describe('crates:import', () => {
   });
 
   it('skips a crate whose metadata cannot be read, importing the rest, and fails', async () => {
-    await mkdir(join(source, 'malformed'));
-    await writeFile(join(source, 'malformed', 'ro-crate-metadata.json'), '{ not json');
+    await writeMalformedCrate();
     await mkdir(join(source, 'rootless'));
     await writeFile(
       join(source, 'rootless', 'ro-crate-metadata.json'),
@@ -252,6 +418,25 @@ describe('crates:import', () => {
     expect((await head(BUNDLED)).number).toBe(1);
     expect(logged('Cannot read folder')).toEqual([expect.objectContaining({ level: ERROR, path: locked })]);
     expect(logged('Folder holds no crate')).toEqual([]);
+    expect(logged('Import finished')).toEqual([expect.objectContaining({ failed: 0, unreadableFolders: 1 })]);
+  });
+
+  it('imports a crate again when its head is dated later than this clock', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60 * 60 * 1000 });
+    try {
+      await importCrates('sync');
+    } finally {
+      vi.useRealTimers();
+    }
+    await writeFile(join(source, 'bundled', 'notes.txt'), 'added');
+    logs.length = 0;
+
+    expect(await importCrates('sync')).toBe(true);
+
+    expect((await head(BUNDLED)).number).toBe(2);
+    expect(logs.filter(({ msg, crateId }) => msg === 'Imported crate' && crateId === 'arcp://name,people')).toEqual([
+      expect.objectContaining({ outcome: 'unchanged' }),
+    ]);
   });
 
   it('fails when the folder it is given does not exist', async () => {
@@ -288,6 +473,15 @@ describe('crates:import', () => {
       expect(imported).toBe(true);
       expect(await indexQueue.crate(BUNDLED)).toMatchObject({ state: 'indexed', version: 1 });
       expect(countStates(await indexQueue.crates())).toMatchObject({ indexed: (await indexQueue.crates()).length });
+    });
+
+    it("logs the import's summary before indexing's", async () => {
+      await importAndIndex();
+
+      expect(logs.map(({ msg }) => msg).filter((msg) => msg === 'Import finished' || msg === 'Indexing finished')).toEqual([
+        'Import finished',
+        'Indexing finished',
+      ]);
     });
 
     it('fails when a crate it imports fails to index, once the rest are indexed', async () => {
