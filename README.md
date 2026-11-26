@@ -364,10 +364,10 @@ production crates have no metadata licence, so production needs
 `OPEN_LICENSES` lists the open licences, comma-separated: anyone may read
 what they cover, signed in or not, and the indexer labels entities under them
 `Public` for Oni (`AuthorizationByApplication` otherwise). The API refuses to
-start without it. `.env.example` lists four Creative Commons licences:
+start without it. `.env.example` lists five Creative Commons licences:
 
 ```dotenv
-OPEN_LICENSES=https://creativecommons.org/licenses/by/3.0/au/,https://creativecommons.org/licenses/by/4.0/,https://creativecommons.org/licenses/by-nc/4.0/,https://creativecommons.org/licenses/by-nd/3.0/au/
+OPEN_LICENSES=https://creativecommons.org/licenses/by/3.0/au/,https://creativecommons.org/licenses/by/4.0/,https://creativecommons.org/licenses/by-nc/4.0/,https://creativecommons.org/licenses/by-nd/3.0/au/,https://creativecommons.org/licenses/by-nc-nd/4.0/
 ```
 
 The request-time check follows a change to the list at once, but stored labels
