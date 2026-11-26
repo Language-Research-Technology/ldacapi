@@ -452,6 +452,16 @@ Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 `api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
 `client_id` in `OIDC_CLIENTS`.
 
+Downloads and media players can't send a bearer token, so for restricted
+files to download and play in Oni, serve Oni and the API from the same origin
+and set Oni's `api.rocrate.usesTokenCookie` to `true`. Oni then keeps
+its access token in the `oni_access_token` cookie, and the API accepts it on
+`/api/file/:id`, except on requests from other sites. arocapi marks those
+responses `Cache-Control: private, no-cache`
+([Caching](https://arocapi.crate-works.org/configuration/access/#caching)), so
+shared caches don't keep restricted files. See
+`docs/adr/0010-file-requests-take-a-token-cookie.md`.
+
 ### Local sign-in
 
 Docker Compose runs a fake upstream provider,

@@ -188,6 +188,55 @@ describe('licence checks with our access tokens', () => {
     ['a token that is not an access token', () => token({}, signingKey, 'JWT')],
   ];
 
+  describe('with the token in the cookie Oni sets', () => {
+    const asCookie = async (claims?: JWTPayload) => `oni_access_token=${await token(claims)}`;
+    const withCookie = (path: string, cookie: string, headers: Record<string, string> = {}, method: 'GET' | 'HEAD' = 'GET') =>
+      app.inject({ method, url: `${prefix}${path}`, headers: { cookie, ...headers } });
+    const restrictedFile = `/file/${encodeURIComponent(RESTRICTED_FILE)}`;
+
+    it.each<[string, () => Promise<string>, Record<string, string>]>([
+      ['a request from Oni', asCookie, { 'sec-fetch-site': 'same-origin' }],
+      ['a request the user started, such as a reload', asCookie, { 'sec-fetch-site': 'none' }],
+      ['a browser too old to say where a request came from', async () => `theme=dark; ${await asCookie()}; lang=en`, {}],
+    ])('gives restricted content to %s', async (_name, cookie, headers) => {
+      const response = await withCookie(restrictedFile, await cookie(), headers);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe('content');
+      expect(response.headers['cache-control']).toBe('private, no-cache');
+    });
+
+    it('answers HEAD for restricted content', async () => {
+      const response = await withCookie(restrictedFile, await asCookie(), {}, 'HEAD');
+
+      expect(response.statusCode).toBe(200);
+    });
+
+    it.each<[string, () => Promise<string>, Record<string, string>]>([
+      ['on a same-site request', asCookie, { 'sec-fetch-site': 'same-site' }],
+      ['on a cross-site request', asCookie, { 'sec-fetch-site': 'cross-site' }],
+      ['when another host has planted a second one', async () => `${await asCookie({ sub: UNENTITLED })}; ${await asCookie()}`, {}],
+      ['when its token has expired', () => asCookie({ exp: Math.floor(Date.now() / 1000) - 60 }), {}],
+    ])('ignores the cookie %s', async (_name, cookie, headers) => {
+      const response = await withCookie(restrictedFile, await cookie(), headers);
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('ignores the cookie on routes other than the file route', async () => {
+      const response = await withCookie(`/entity/${encodeURIComponent(RESTRICTED_FILE)}`, await asCookie());
+
+      expect(response.json().access).toMatchObject({ content: false });
+      expect(remsRequests()).toEqual([]);
+    });
+
+    it('prefers a bearer token to the cookie', async () => {
+      const response = await withCookie(restrictedFile, await asCookie(), { authorization: `Bearer ${await token({ sub: UNENTITLED })}` });
+
+      expect(response.statusCode).toBe(403);
+    });
+  });
+
   describe.each(anonymousTokens)('with %s', (_name, bearer) => {
     it('still serves content under an open licence', async () => {
       const response = await file(OPEN_FILE, await bearer());
