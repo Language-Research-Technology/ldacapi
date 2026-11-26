@@ -94,6 +94,10 @@ _Avoid_: IdP, CILogon (one instance of it), login provider
 A person who has signed in at the upstream provider, identified by that provider's subject identifier. REMS knows the same person by the same identifier.
 _Avoid_: Account, member
 
+**Token cookie**:
+The `oni_access_token` cookie Oni keeps its access token in, so file downloads and media requests carry it. The API reads it only on the file route, and only for requests from Oni's own origin (ADR 0009).
+_Avoid_: Session cookie (the provider's own sign-in session)
+
 ### Access
 
 **Visibility**:

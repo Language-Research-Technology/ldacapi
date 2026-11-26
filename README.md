@@ -452,6 +452,13 @@ Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 `api.oidc.endpoint` is `OIDC_ISSUER` and its `api.oidc.clientId` is a
 `client_id` in `OIDC_CLIENTS`.
 
+Downloads and media players can't send a bearer token, so for restricted
+files to download and play in Oni, serve Oni and the API from the same origin
+and set Oni's `api.rocrate.tokenCookie` to `oni_access_token`. Oni then keeps
+its access token in that cookie, and the API accepts it on `/api/file/:id`,
+for requests from Oni's own pages only. See
+`docs/adr/0009-file-requests-take-a-token-cookie.md`.
+
 ### Local sign-in
 
 Docker Compose runs a fake upstream provider,

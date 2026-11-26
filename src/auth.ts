@@ -75,14 +75,41 @@ function authenticateUser(request: FastifyRequest): Promise<string | undefined> 
 
 const verificationKeys = config.auth && createLocalJWKSet(publicJwks(config.auth.signingKeys));
 
+/** The cookie Oni sets so that downloads and media elements, which can't send a bearer token, carry one (ADR 0009) */
+const TOKEN_COOKIE = 'oni_access_token';
+
+/** Whether the request is for a file from one of Oni's own pages, or from a browser too old to say where it came from */
+const acceptsTokenCookie = (request: FastifyRequest) =>
+  request.routeOptions.url === `${config.prefix}/file/:id` && [undefined, 'same-origin'].includes(request.headers['sec-fetch-site']);
+
+/** The token cookie's value, unless there is more than one, as when a sibling subdomain has planted its own */
+const tokenCookie = (header = '') => {
+  const [only, ...others] = header
+    .split(';')
+    .map((pair) => pair.trim())
+    .filter((pair) => pair.startsWith(`${TOKEN_COOKIE}=`));
+  if (only === undefined || others.length > 0) {
+    return;
+  }
+  return only.slice(TOKEN_COOKIE.length + 1);
+};
+
+const presentedToken = (request: FastifyRequest) => {
+  const header = request.headers.authorization;
+  if (header?.startsWith('Bearer ')) {
+    return header.slice('Bearer '.length);
+  }
+  return acceptsTokenCookie(request) ? tokenCookie(request.headers.cookie) : undefined;
+};
+
 async function verifyUserId(request: FastifyRequest): Promise<string | undefined> {
   const { auth } = config;
-  const authHeader = request.headers.authorization;
-  if (!auth || !verificationKeys || !authHeader?.startsWith('Bearer ')) {
+  const token = presentedToken(request);
+  if (!auth || !verificationKeys || !token) {
     return;
   }
   try {
-    const { payload } = await jwtVerify(authHeader.slice('Bearer '.length), verificationKeys, {
+    const { payload } = await jwtVerify(token, verificationKeys, {
       issuer: auth.issuer,
       audience: auth.audience,
       algorithms: [SIGNING_ALG],

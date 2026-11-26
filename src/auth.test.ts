@@ -20,7 +20,7 @@ const entity = (metadataLicenseId: string, contentLicenseId: string): EntityRow 
   updatedAt: new Date(),
 });
 
-const anonymous = () => ({ request: { headers: {} } as FastifyRequest }) as RequestContext;
+const anonymous = () => ({ request: { headers: {}, routeOptions: {} } as FastifyRequest }) as RequestContext;
 
 /** `access` as configured by `ENROLLMENT_URL`, read on first import */
 const accessWith = async (enrollmentUrl: string) => {

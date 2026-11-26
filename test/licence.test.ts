@@ -188,6 +188,65 @@ describe('licence checks with our access tokens', () => {
     ['a token that is not an access token', () => token({}, signingKey, 'JWT')],
   ];
 
+  describe('with the token in the cookie Oni sets', () => {
+    const withCookie = (path: string, cookie: string, headers: Record<string, string> = {}, method: 'GET' | 'HEAD' = 'GET') =>
+      app.inject({ method, url: `${prefix}${path}`, headers: { cookie, ...headers } });
+    const fileWithCookie = (id: string, cookie: string, headers?: Record<string, string>, method?: 'GET' | 'HEAD') =>
+      withCookie(`/file/${encodeURIComponent(id)}`, cookie, headers, method);
+
+    it('gives restricted content to a request from Oni', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token()}`, { 'sec-fetch-site': 'same-origin' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe('content');
+    });
+
+    it('answers HEAD for restricted content', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token()}`, {}, 'HEAD');
+
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('accepts the cookie from a browser too old to say where a request came from', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `theme=dark; oni_access_token=${await token()}; lang=en`);
+
+      expect(response.statusCode).toBe(200);
+    });
+
+    it.each(['same-site', 'cross-site', 'none'])('ignores the cookie on a request whose Sec-Fetch-Site is %s', async (site) => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token()}`, { 'sec-fetch-site': site });
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('ignores the cookie when another host has planted a second one of the same name', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token({ sub: UNENTITLED })}; oni_access_token=${await token()}`);
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('ignores an expired token in the cookie', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token({ exp: Math.floor(Date.now() / 1000) - 60 })}`);
+
+      expect(response.statusCode).toBe(401);
+    });
+
+    it('ignores the cookie on routes other than the file route', async () => {
+      const response = await withCookie(`/entity/${encodeURIComponent(RESTRICTED_FILE)}`, `oni_access_token=${await token()}`);
+
+      expect(response.json().access).toMatchObject({ content: false });
+      expect(remsRequests()).toEqual([]);
+    });
+
+    it('prefers a bearer token to the cookie', async () => {
+      const response = await fileWithCookie(RESTRICTED_FILE, `oni_access_token=${await token()}`, {
+        authorization: `Bearer ${await token({ sub: UNENTITLED })}`,
+      });
+
+      expect(response.statusCode).toBe(403);
+    });
+  });
+
   describe.each(anonymousTokens)('with %s', (_name, bearer) => {
     it('still serves content under an open licence', async () => {
       const response = await file(OPEN_FILE, await bearer());
