@@ -1,12 +1,17 @@
 import { Prisma, type PrismaClient } from '../generated/prisma/client.ts';
 import { fileStorageMeta } from '../repository/file-storage-meta.ts';
-import { chunks } from './chunks.ts';
+import { chunks, sizedChunks } from './chunks.ts';
 import type { Derivation, DerivedEntity, EntityRow } from './derive.ts';
 import { beats, ClashError, type Contender, type Copy, linksById, lockEntities, TRANSACTION, winner } from './links.ts';
 import type { Progress } from './progress.ts';
 
 /** Rows per transaction */
 const BATCH_SIZE = 1000;
+
+/** The most `meta` a write transaction takes as JSON text, unless one row alone is larger: writing holds several copies of it */
+const BATCH_BYTES = 32 * 1024 * 1024;
+
+const metaSize = ({ row }: DerivedEntity) => JSON.stringify(row.meta).length;
 
 const entityData = (row: EntityRow) => ({ ...row, meta: row.meta as Prisma.InputJsonValue });
 
@@ -33,7 +38,7 @@ export class RowsWriter {
   /** Fails on a clash, naming the entity */
   async write(derivation: Derivation, progress: Progress) {
     progress.start('database index', derivation.entities.length);
-    for (const batch of chunks(derivation.entities, BATCH_SIZE)) {
+    for (const batch of sizedChunks(derivation.entities, { count: BATCH_SIZE, bytes: BATCH_BYTES, sizeOf: metaSize })) {
       try {
         await this.writeBatch(derivation, batch);
       } catch (error) {
