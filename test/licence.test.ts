@@ -203,6 +203,7 @@ describe('licence checks with our access tokens', () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.body).toBe('content');
+      expect(response.headers['cache-control']).toBe('private, no-cache');
     });
 
     it('answers HEAD for restricted content', async () => {

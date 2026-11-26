@@ -18,6 +18,6 @@ The API streams files from the OCFL repository itself, through arocapi's file ro
 
 - Restricted files download, play, seek and preview in Oni, for every user who holds the licence, with arocapi's protective headers intact.
 - It works only when the API is on Oni's origin. With the API on another port of the same host, `<img>`, media and downloads work but `fetch`-based previews don't. Clients on other hosts keep using bearer tokens.
-- Cookie-authenticated responses aren't protected from shared caches the way bearer-authenticated ones are, so wherever the cookie is used, file responses must carry `Cache-Control: private` (crate-works/arocapi#151).
+- Cookie-authenticated responses aren't protected from shared caches the way bearer-authenticated ones are. arocapi sends `Cache-Control: private, no-cache` on file responses, so shared caches don't store them and browsers revalidate, rerunning the access check, before each use. Nothing in the API may relax that header.
 - A browser that doesn't send `Sec-Fetch-Site` relies on `SameSite=Strict` alone, so a page on a sibling subdomain could probe it. A sibling subdomain can also make a user's file requests fail by planting a second cookie, but can't act as another user.
 - A media element or download has no retry when the token lapses: if a silent renewal fails, a seek errors and a download shows the API's 401 until the user signs in again.

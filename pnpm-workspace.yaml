@@ -17,5 +17,5 @@ allowBuilds:
   # Transitive via @tailwindcss/cli; ships prebuilt binaries, its install script only builds from source.
   "@parcel/watcher": false
 minimumReleaseAgeExclude:
-  - arocapi@5.0.0-beta.13
+  - arocapi@5.0.0-beta.14
   - "@ocfl/ocfl-fs@1.0.0-beta.68"
