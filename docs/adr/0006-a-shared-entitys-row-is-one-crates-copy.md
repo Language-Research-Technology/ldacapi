@@ -12,7 +12,7 @@ arocapi's queries can't join to our tables, and its models have no column for th
 
 **Crate links.** A link table in our own models records each (crate, entity) pair, indexed both ways. It is the only record of which crates contain an entity; `Entity.meta` has no `crateId`. Indexing a crate writes its links; deleting a crate removes its links, then removes the entities left with none.
 
-**Collections, objects and files have one crate.** When a crate describes one that another crate already holds, or describes an id as a different kind of entity than the row has, the holder keeps the row and the second crate's index job fails, with an error naming both crates and the entity. That crate has no indexed version until its data is fixed.
+**Collections, objects and files have one crate.** When a crate describes one that another crate already holds, or describes an id as a different kind of entity than the row has, the holder keeps the row and the second crate's index job fails, with an error naming both crates and the entity. That crate has no indexed version until its data is fixed. A crate's copy of a collection above it is the exception: it is left out, not a clash (ADR 0009).
 
 **Shared entities have one winning copy.** For a person, organisation or software entity, each link keeps that crate's derived copy. The row and the search document are wholly the copy of one crate: a crate whose metadata licence is open before one whose licence isn't, then the lowest crate id. Copies are never merged. When the winning crate is deleted or stops containing the entity, the row and document are rebuilt from the next crate's stored copy, without reading the repository.
 

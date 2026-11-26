@@ -339,11 +339,22 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   }
   const idOf = (rawId: string) => entityId(crateId, rawId);
   const descriptorId = crate.descriptor['@id'];
+  const parentCrateIds = new Set(facts.parentCrates);
+  const warnings: Warning[] = [];
   const byId = new Map<string, Entity>();
   for (const entity of crate.entities()) {
-    if (entity['@id'] !== descriptorId) {
-      byId.set(idOf(entity['@id']), entity);
+    if (entity['@id'] === descriptorId) {
+      continue;
     }
+    const id = idOf(entity['@id']);
+    if (parentCrateIds.has(id)) {
+      const type = recordType(entity);
+      if (type) {
+        warnings.push({ msg: 'Describes a collection above it, which its own crate holds; left out', entityId: id, recordType: type });
+      }
+      continue;
+    }
+    byId.set(id, entity);
   }
 
   const contentLicense = (entity: Entity) => {
@@ -360,7 +371,6 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
 
   const topCollection = facts.parentCrates.at(-1) ?? crateId;
   const source = sourceOf(crate, crateLicense);
-  const warnings: Warning[] = [];
   const entities: DerivedEntity[] = [];
   const prefix = `${crateId}/`;
   const placed: Placed[] = [];

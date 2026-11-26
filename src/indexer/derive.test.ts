@@ -39,6 +39,12 @@ const entityOf = async (built: Crate, id: string, given: Partial<DeriveFacts> = 
 
 const ids = async (built: Crate) => (await derived(built)).entities.map(({ row }) => row.id).sort();
 
+const NOTHING = { collections: 0, objects: 0, subCollections: 0, files: 0, language: [], communicationMode: [], mediaType: [] };
+
+/** The crate's aggregates by entity id */
+const aggregates = async (built: Crate, given: Partial<DeriveFacts> = {}) =>
+  Object.fromEntries((await derived(built, given)).aggregates.map(({ entityId, ...aggregate }) => [entityId, aggregate]));
+
 const thing = (id: string, type: string | string[], profile?: string, properties: Record<string, unknown> = {}): Part => ({
   entity: { '@id': id, '@type': type, ...(profile && { conformsTo: { '@id': `https://w3id.org/ldac/profile#${profile}` } }), ...properties },
 });
@@ -401,12 +407,6 @@ describe('derivation', () => {
   });
 
   describe('rule 13, aggregates contribution', () => {
-    const NOTHING = { collections: 0, objects: 0, subCollections: 0, files: 0, language: [], communicationMode: [], mediaType: [] };
-
-    /** The crate's aggregates by entity id */
-    const aggregates = async (built: Crate, given: Partial<DeriveFacts> = {}) =>
-      Object.fromEntries((await derived(built, given)).aggregates.map(({ entityId, ...aggregate }) => [entityId, aggregate]));
-
     it('counts the collections, objects, direct sub-collections and files below each entity, not the entity itself', async () => {
       const built = crate(collection(ROOT, { hasMember: [`${ROOT}/sub`, `${ROOT}/loose`] }), [
         collection(`${ROOT}/sub`, { memberOf: ROOT }),
@@ -852,6 +852,63 @@ describe('derivation', () => {
         ['Dataset', 'RepositoryCollection'],
         ['File', 'Dataset'],
       ]);
+    });
+  });
+
+  describe('rule 16, a copy of a collection above the crate: left out, with a warning, as its own crate holds it', () => {
+    const FAMILY = 'arcp://name,top/family';
+    const TOP = 'arcp://name,top';
+    const LANGUAGE = `${FAMILY}/language`;
+    const parentCrates = [FAMILY, TOP];
+
+    it.each([
+      ['the top collection', collection(TOP), TOP, 'RepositoryCollection'],
+      ['the parent collection', collection(FAMILY), FAMILY, 'RepositoryCollection'],
+      ['the parent collection, as an object', object(FAMILY), FAMILY, 'RepositoryObject'],
+    ])('leaves out a copy of %s, naming its type', async (_, copy, copied, recordType) => {
+      const built = crate(object(LANGUAGE, { memberOf: FAMILY }), [copy]);
+
+      const derivation = await derived(built, { parentCrates });
+
+      expect(derivation.entities.map(({ row }) => [row.id, row.memberOf])).toEqual([[LANGUAGE, FAMILY]]);
+      expect(derivation.warnings).toEqual([{ msg: 'Describes a collection above it, which its own crate holds; left out', entityId: copied, recordType }]);
+    });
+
+    it.each([
+      ['a profiled', collection(FAMILY, { licence: CC_BY }), 1],
+      ['an unprofiled', thing(FAMILY, ['Dataset', 'RepositoryCollection'], undefined, { license: { '@id': CC_BY } }), 0],
+    ])('gives the crate’s records no licence from %s copy, warning only of a record', async (_, copy, warned) => {
+      const built = crate(object(LANGUAGE, { memberOf: FAMILY, licence: null }), [copy]);
+
+      const derivation = await derived(built, { parentCrates, defaultLicense: RESTRICTED });
+
+      expect(derivation.entities.map(({ row }) => [row.id, row.contentLicenseId, row.meta.accessControl])).toEqual([
+        [LANGUAGE, RESTRICTED, 'AuthorizationByApplication'],
+      ]);
+      expect(derivation.warnings).toHaveLength(warned);
+    });
+
+    it('adds nothing to aggregates, so the crate still counts below every ancestor', async () => {
+      const built = crate(object(LANGUAGE, { memberOf: FAMILY, hasPart: ['a.txt'] }), [
+        collection(FAMILY, { inLanguage: 'Copied' }),
+        fileDescribedButNotHeld('a.txt', { isPartOf: LANGUAGE }),
+      ]);
+
+      const found = await aggregates(built, { parentCrates });
+
+      const below = { ...NOTHING, objects: 1, files: 1 };
+      expect(found[FAMILY]).toEqual(below);
+      expect(found[TOP]).toEqual(below);
+    });
+
+    it('keeps a collection that isn’t above the crate, so a claim on another crate’s collection still clashes', async () => {
+      const SIBLING = `${TOP}/sibling`;
+      const built = crate(object(LANGUAGE, { memberOf: FAMILY }), [collection(SIBLING, { memberOf: TOP })]);
+
+      const derivation = await derived(built, { parentCrates });
+
+      expect(derivation.entities.map(({ row }) => row.id).sort()).toEqual([LANGUAGE, SIBLING].sort());
+      expect(derivation.warnings).toEqual([]);
     });
   });
 });
