@@ -20,6 +20,7 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      DOWNLOADER_DOMAIN: ${DOWNLOADER_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     ports:
       - "80:80"
@@ -30,6 +31,11 @@ services:
       - ./oni/configuration.json:/srv/oni/configuration.json:ro
       - ./data/caddy/data:/data
       - ./data/caddy/config:/config
+    # The downloader reaches the API's sign-in at DOMAIN through Caddy, without leaving the host
+    networks:
+      default:
+        aliases:
+          - ${DOMAIN}
     read_only: true
     tmpfs:
       - /tmp
@@ -50,6 +56,23 @@ services:
       - /var/cache/nginx
       - /var/run
 
+  # Users sign in through the API, pick files, and get a zip in S3 by email from SES
+  downloader:
+    <<: *hardening
+    image: ghcr.io/crate-works/downloader:1.15.2
+    env_file: downloader.env
+    environment:
+      NODE_ENV: production
+      ROCRATE_API_BASE_URL: http://api:8080/api
+      OIDC_ISSUER: https://${DOMAIN}
+      OIDC_CLIENT_ID: downloader
+      OIDC_CLIENT_SECRET: ${DOWNLOADER_CLIENT_SECRET:?Set DOWNLOADER_CLIENT_SECRET in .env}
+      OIDC_REDIRECT_URI: https://${DOWNLOADER_DOMAIN:?Set DOWNLOADER_DOMAIN in .env}/api/auth/callback
+    # Not read_only: the image writes its base path into its own files at start
+    depends_on:
+      api:
+        condition: service_healthy
+
   api:
     <<: *hardening
     image: ghcr.io/language-research-technology/ldacapi:main
@@ -61,7 +84,8 @@ services:
       OIDC_ISSUER: https://${DOMAIN:?Set DOMAIN in .env}
       ADMIN_ORIGIN: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
       OIDC_CLIENTS: >-
-        [{"client_id":"oni","redirect_uris":["https://${DOMAIN}/auth/callback"],"post_logout_redirect_uris":["https://${DOMAIN}/"]}]
+        [{"client_id":"oni","redirect_uris":["https://${DOMAIN}/auth/callback"],"post_logout_redirect_uris":["https://${DOMAIN}/"]},
+        {"client_id":"downloader","client_secret":"${DOWNLOADER_CLIENT_SECRET}","redirect_uris":["https://${DOWNLOADER_DOMAIN}/api/auth/callback"],"post_logout_redirect_uris":["https://${DOWNLOADER_DOMAIN}/"]}]
     # OCFL_DIR must already exist, owned by uid 1000, rather than Docker creating it as root
     volumes: &ocfl-volume
       - type: bind

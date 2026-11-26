@@ -90,6 +90,12 @@ describe('loadConfig', () => {
     expect(config.auth?.upstream.issuer).toBe('http://localhost:8090/default');
     expect(config.auth?.clients).toEqual([
       { client_id: 'oni', redirect_uris: ['http://localhost:3000/auth/callback'], post_logout_redirect_uris: ['http://localhost:3000/'] },
+      {
+        client_id: 'downloader',
+        client_secret: 'downloader',
+        redirect_uris: ['http://localhost:7000/api/auth/callback'],
+        post_logout_redirect_uris: ['http://localhost:7000/'],
+      },
     ]);
     expect(config.adminUsers).toEqual(['admin']);
   });

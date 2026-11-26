@@ -36,6 +36,14 @@
 	}
 }
 
+{$DOWNLOADER_DOMAIN} {
+	import security_headers
+	encode zstd gzip
+
+	header X-Frame-Options SAMEORIGIN
+	reverse_proxy downloader:7000
+}
+
 # The admin pages must be on their own origin (docs/adr/0002-server-rendered-admin-pages.md)
 {$ADMIN_DOMAIN} {
 	import security_headers
