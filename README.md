@@ -454,7 +454,7 @@ Discovery is at `<OIDC_ISSUER>/.well-known/openid-configuration`. Oni's
 
 Downloads and media players can't send a bearer token, so for restricted
 files to download and play in Oni, serve Oni and the API from the same origin
-and set Oni's `api.rocrate.tokenCookie` to `oni_access_token`. Oni then keeps
+and set Oni's `api.rocrate.usesTokenCookie` to `true`. Oni then keeps
 its access token in that cookie, and the API accepts it on `/api/file/:id`,
 except on requests from other sites. Put `Cache-Control: private` on file
 responses wherever the cookie is used, so shared caches don't keep restricted
