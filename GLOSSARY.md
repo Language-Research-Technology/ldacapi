@@ -65,7 +65,7 @@ The OCFL version of a crate that its indexes were built from.
 _Avoid_: Head version (the latest in the repository, which may be newer)
 
 **Virtual crate**:
-The Metadata served for one entity: an RO-Crate with that entity as its root and everything it reaches up to the records it links to, which are stubs (ADR 0004). Never the crate as deposited.
+The Metadata served for one entity: an RO-Crate with that entity as its root and everything it reaches up to the records it links to, which are stubs. Every id in it is absolute (ADR 0004). Never the crate as deposited.
 _Avoid_: Entity crate, exploded crate
 
 **Stub**:

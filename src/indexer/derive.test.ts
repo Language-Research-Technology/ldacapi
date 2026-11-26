@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { ROCrate } from 'ro-crate';
 import { describe, expect, it } from 'vitest';
 import { type Crate, collection, crate, fileDescribedButNotHeld, licence, object, type Part, person } from '../../test/crate-builder.ts';
+import { entityId, isAbsoluteIri } from '../repository/entity-id.ts';
 import { type DeriveFacts, derive } from './derive.ts';
 
 const ROOT = 'arcp://name,derive';
@@ -231,6 +232,94 @@ describe('derivation', () => {
 
     it('can’t be given for a crate whose root id isn’t absolute, which fails', async () => {
       await expect(derived(crate(collection('./')))).rejects.toThrow("The crate's root id, ./, isn't an absolute IRI");
+    });
+
+    it('gives a virtual crate’s links and linked records the ids of their rows', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { hasPart: ['a.eaf'], author: { '@id': '#alice' }, licence: null }),
+        fileDescribedButNotHeld('a.eaf', { name: 'Annotations', filename: 'a.eaf' }),
+        person('#alice', { name: 'Alice' }),
+      ]);
+
+      const entity = await entityOf(built, `${ROOT}/object`);
+      const held = graphOf(entity).filter(({ '@id': id }) => id !== entity.row.id && id !== 'ro-crate-metadata.json');
+
+      expect(virtualRoot(entity)).toMatchObject({ hasPart: [{ '@id': `${ROOT}/a.eaf` }], author: [{ '@id': `${ROOT}/#alice` }] });
+      expect(held).toEqual([
+        { '@id': `${ROOT}/a.eaf`, '@type': ['File'], name: ['Annotations'], filename: ['a.eaf'] },
+        { '@id': `${ROOT}/#alice`, '@type': ['Person'], name: ['Alice'] },
+      ]);
+      expect(await ids(built)).toEqual(expect.arrayContaining([`${ROOT}/a.eaf`, `${ROOT}/#alice`]));
+    });
+
+    it('gives a virtual crate’s links to a blank node, or to an entity the crate doesn’t describe, ids under the crate root’s', async () => {
+      const built = crate(collection(ROOT), [
+        object(`${ROOT}/object`, { author: { '@id': '_:b0' }, citation: { '@id': 'notes/missing.txt' }, licence: null }),
+        thing('_:b0', 'Person', undefined, { name: 'Anonymous' }),
+      ]);
+
+      const entity = await entityOf(built, `${ROOT}/object`);
+
+      expect(virtualRoot(entity)).toMatchObject({ author: [{ '@id': `${ROOT}/_:b0` }], citation: [{ '@id': `${ROOT}/notes/missing.txt` }] });
+      expect(graphOf(entity)).toContainEqual({ '@id': `${ROOT}/_:b0`, '@type': ['Person'], name: ['Anonymous'] });
+    });
+
+    it('gives the crate’s licence, taken by an entity with none of its own, its id under the crate root’s', async () => {
+      const built = crate(collection(ROOT, { licence: '#licence' }), [object(`${ROOT}/object`, { licence: null })]);
+
+      expect(virtualRoot(await entityOf(built, `${ROOT}/object`))).toMatchObject({ license: `${ROOT}/#licence` });
+    });
+
+    it('keeps an absolute IRI in a virtual crate as it is', async () => {
+      const OTHER = 'arcp://name,other';
+      const ORCID = 'https://orcid.org/0000-0002-1825-0097';
+      const built = crate(collection(ROOT, { memberOf: OTHER }), [
+        object(`${ROOT}/object`, { memberOf: ROOT, author: { '@id': ORCID }, licence: null }),
+        person(ORCID, { name: 'Josiah' }),
+      ]);
+
+      const [root, member] = await Promise.all([entityOf(built, ROOT, { parentCrates: [OTHER] }), entityOf(built, `${ROOT}/object`)]);
+
+      expect(virtualRoot(root)).toMatchObject({ 'pcdm:memberOf': [{ '@id': OTHER }] });
+      expect(virtualRoot(member)).toMatchObject({ 'pcdm:memberOf': [{ '@id': ROOT }], author: [{ '@id': ORCID }] });
+      expect(graphOf(member)).toContainEqual({ '@id': ORCID, '@type': ['Person'], name: ['Josiah'] });
+    });
+
+    it('gives every virtual crate only absolute ids, its links resolving to what it holds, and its own descriptor', async () => {
+      const built = crate(collection(ROOT, { hasMember: ['#object'], contentLocation: { '@id': '#place' } }), [
+        object('#object', { memberOf: ROOT, hasPart: ['a.eaf'], author: [{ '@id': '#alice' }, { '@id': '#bob' }], licence: RESTRICTED }),
+        fileDescribedButNotHeld('a.eaf', { isPartOf: '#object', filename: 'a.eaf' }),
+        person('#alice', { name: 'Alice', affiliation: { '@id': '_:org' } }),
+        thing('#bob', 'Person', undefined, { name: 'Bob', homeLocation: { '@id': '#place' } }),
+        thing('_:org', 'Organization', undefined, { name: 'Org' }),
+        thing('#place', 'Place', undefined, { name: 'Place', geo: { '@id': '#geo' } }),
+        thing('#geo', 'Geometry', undefined, { asWKT: 'POINT(153 -27)' }),
+        licence(RESTRICTED, { name: 'Restricted' }),
+      ]);
+      const described = new Set(built.metadata['@graph'].map(({ '@id': id }) => entityId(ROOT, id)));
+      const linksOf = (entity: Record<string, unknown>) =>
+        Object.entries(entity)
+          .filter(([key]) => key !== '@id')
+          .flatMap(([, values]) => [values].flat())
+          .map((value) => (value as { '@id'?: unknown } | null)?.['@id'])
+          .filter((id): id is string => typeof id === 'string');
+
+      for (const entity of (await derived(built)).entities) {
+        const descriptor = graphOf(entity).find(({ '@id': id }) => id === 'ro-crate-metadata.json');
+        const held = graphOf(entity).filter((node) => node !== descriptor);
+        const heldIds = new Set(held.map(({ '@id': id }) => id as string));
+        const links = held.flatMap(linksOf);
+
+        expect(descriptor).toMatchObject({ '@id': 'ro-crate-metadata.json', about: { '@id': entity.row.id } });
+        expect(
+          [...heldIds, ...links].filter((id) => !isAbsoluteIri(id)),
+          entity.row.id,
+        ).toEqual([]);
+        expect(
+          links.filter((id) => described.has(id) && !heldIds.has(id)),
+          entity.row.id,
+        ).toEqual([]);
+      }
     });
 
     it('names a parent by its id', async () => {
@@ -530,9 +619,9 @@ describe('derivation', () => {
       const rocrate = row.meta.rocrate as { '@context': unknown; '@graph': Record<string, unknown>[] };
       expect(rocrate['@context']).toEqual(built.metadata['@context']);
       expect(rocrate['@graph']).toContainEqual(
-        expect.objectContaining({ '@id': `${ROOT}/#alice`, '@type': ['Person', 'Dataset'], license: CC_BY, knows: [{ '@id': '#bob' }] }),
+        expect.objectContaining({ '@id': `${ROOT}/#alice`, '@type': ['Person', 'Dataset'], license: CC_BY, knows: [{ '@id': `${ROOT}/#bob` }] }),
       );
-      expect(rocrate['@graph']).toContainEqual(expect.objectContaining({ '@id': '#bob', name: ['Bob'] }));
+      expect(rocrate['@graph']).toContainEqual(expect.objectContaining({ '@id': `${ROOT}/#bob`, name: ['Bob'] }));
     });
 
     it('gives the virtual crate the crate root’s conformsTo when the entity has none', async () => {
@@ -717,9 +806,9 @@ describe('derivation', () => {
       ]);
 
       expect(await linked(built, `${ROOT}/object`)).toEqual({
-        '#alice': { '@id': '#alice', '@type': ['Person'], name: ['Alice'] },
-        '#bob': { '@id': '#bob', '@type': ['Person'], name: ['Bob'], email: ['bob@example.org'], homeLocation: [{ '@id': '#home' }] },
-        '#home': { '@id': '#home', '@type': ['Place'], name: ['Home'] },
+        [`${ROOT}/#alice`]: { '@id': `${ROOT}/#alice`, '@type': ['Person'], name: ['Alice'] },
+        [`${ROOT}/#bob`]: { '@id': `${ROOT}/#bob`, '@type': ['Person'], name: ['Bob'], email: ['bob@example.org'], homeLocation: [{ '@id': `${ROOT}/#home` }] },
+        [`${ROOT}/#home`]: { '@id': `${ROOT}/#home`, '@type': ['Place'], name: ['Home'] },
       });
     });
 
@@ -729,7 +818,12 @@ describe('derivation', () => {
         fileDescribedButNotHeld('a.eaf', { name: 'Annotations', filename: 'a.eaf', encodingFormat: 'application/xml' }),
       ]);
 
-      expect((await linked(built, `${ROOT}/object`))['a.eaf']).toEqual({ '@id': 'a.eaf', '@type': ['File'], name: ['Annotations'], filename: ['a.eaf'] });
+      expect((await linked(built, `${ROOT}/object`))[`${ROOT}/a.eaf`]).toEqual({
+        '@id': `${ROOT}/a.eaf`,
+        '@type': ['File'],
+        name: ['Annotations'],
+        filename: ['a.eaf'],
+      });
     });
 
     it('holds a linked language with its code, and a licence with its name and description', async () => {
@@ -741,8 +835,8 @@ describe('derivation', () => {
 
       const found = await linked(built, `${ROOT}/object`);
 
-      expect([found['#eng'], found[RESTRICTED]]).toEqual([
-        { '@id': '#eng', '@type': ['Language'], name: ['English'], code: ['eng'] },
+      expect([found[`${ROOT}/#eng`], found[RESTRICTED]]).toEqual([
+        { '@id': `${ROOT}/#eng`, '@type': ['Language'], name: ['English'], code: ['eng'] },
         { '@id': RESTRICTED, '@type': ['CreativeWork'], name: ['Restricted'], description: ['Ask first'] },
       ]);
     });
@@ -758,11 +852,21 @@ describe('derivation', () => {
       ]);
 
       expect(await linked(built, `${ROOT}/object`)).toEqual({
-        '#recorded': { '@id': '#recorded', '@type': ['Place'], name: ['Recorded'], geo: [{ '@id': '#point' }] },
-        '#point': { '@id': '#point', '@type': ['Geometry'], asWKT: ['POINT(153.02 -27.47)'], 'geo:hasSource': [{ '@id': '#survey' }] },
-        '#survey': { '@id': '#survey', '@type': ['CreativeWork'], name: ['Survey'], about: [{ '@id': '#covered' }] },
-        '#covered': { '@id': '#covered', '@type': ['Place'], name: ['Covered'], geo: [{ '@id': '#area' }] },
-        '#area': { '@id': '#area', '@type': ['Geometry'], asWKT: ['POLYGON((0 0, 1 0, 1 1, 0 0))'], 'geo:hasSource': [{ '@id': '#survey' }] },
+        [`${ROOT}/#recorded`]: { '@id': `${ROOT}/#recorded`, '@type': ['Place'], name: ['Recorded'], geo: [{ '@id': `${ROOT}/#point` }] },
+        [`${ROOT}/#point`]: {
+          '@id': `${ROOT}/#point`,
+          '@type': ['Geometry'],
+          asWKT: ['POINT(153.02 -27.47)'],
+          'geo:hasSource': [{ '@id': `${ROOT}/#survey` }],
+        },
+        [`${ROOT}/#survey`]: { '@id': `${ROOT}/#survey`, '@type': ['CreativeWork'], name: ['Survey'], about: [{ '@id': `${ROOT}/#covered` }] },
+        [`${ROOT}/#covered`]: { '@id': `${ROOT}/#covered`, '@type': ['Place'], name: ['Covered'], geo: [{ '@id': `${ROOT}/#area` }] },
+        [`${ROOT}/#area`]: {
+          '@id': `${ROOT}/#area`,
+          '@type': ['Geometry'],
+          asWKT: ['POLYGON((0 0, 1 0, 1 1, 0 0))'],
+          'geo:hasSource': [{ '@id': `${ROOT}/#survey` }],
+        },
       });
     });
 
@@ -774,7 +878,7 @@ describe('derivation', () => {
         thing('#hq', 'Place', undefined, { name: 'HQ' }),
       ]);
 
-      expect(Object.keys(await linked(built, `${ROOT}/object`)).sort()).toEqual(['#acme', '#bob']);
+      expect(Object.keys(await linked(built, `${ROOT}/object`)).sort()).toEqual([`${ROOT}/#acme`, `${ROOT}/#bob`]);
     });
 
     it('holds each object’s participants with their postcode polygons, and the collection only as a stub, in a survey-shaped crate', async () => {
@@ -802,8 +906,8 @@ describe('derivation', () => {
 
       for (const n of names) {
         const held = linkedIn(byId.get(`${ROOT}/${n}`) as Derived);
-        const reached = participants(n).flatMap((p) => [p, `${p}-postcode`, `${p}-polygon`]);
-        expect(Object.keys(held).sort()).toEqual([ROOT, `${n}.pdf`, ...reached].sort());
+        const reached = participants(n).flatMap((p) => [p, `${p}-postcode`, `${p}-polygon`].map((id) => `${ROOT}/${id}`));
+        expect(Object.keys(held).sort()).toEqual([ROOT, `${ROOT}/${n}.pdf`, ...reached].sort());
         expect(held[ROOT]).toEqual({ '@id': ROOT, '@type': ['Dataset', 'RepositoryCollection'], name: ['Survey'] });
         expect(Object.keys(linkedIn(byId.get(`${ROOT}/${n}.pdf`) as Derived))).toEqual([`${ROOT}/${n}`]);
       }
@@ -816,7 +920,7 @@ describe('derivation', () => {
 
       const entity = await entityOf(built, `${ROOT}/object`);
 
-      expect(virtualRoot(entity)).toMatchObject({ citation: [{ '@id': 'https://example.org/paper' }, { '@id': 'ro-crate-metadata.json' }] });
+      expect(virtualRoot(entity)).toMatchObject({ citation: [{ '@id': 'https://example.org/paper' }, { '@id': `${ROOT}/ro-crate-metadata.json` }] });
       expect(linkedIn(entity)).toEqual({});
     });
 
@@ -828,8 +932,8 @@ describe('derivation', () => {
 
       const entity = await entityOf(built, `${ROOT}/#alice`);
 
-      expect(virtualRoot(entity)).toMatchObject({ sameAs: [{ '@id': '#alice' }] });
-      expect(Object.keys(linkedIn(entity))).toEqual(['#topic']);
+      expect(virtualRoot(entity)).toMatchObject({ sameAs: [{ '@id': `${ROOT}/#alice` }] });
+      expect(Object.keys(linkedIn(entity))).toEqual([`${ROOT}/#topic`]);
     });
 
     it('takes the crate root’s conformsTo as references alone, holding nothing the profile links to', async () => {

@@ -238,36 +238,64 @@ function stub(entity: Entity) {
   return Object.fromEntries(keys.filter((key) => key in json).map((key) => [key, json[key]])) as RawEntity;
 }
 
+/** The id a JSON-LD value links to, if it is a reference */
+const linkId = (value: unknown) => (value as { '@id'?: unknown } | null | undefined)?.['@id'];
+
+/** `value` linking to the indexed id of what it links to */
+const indexedLink = (crateId: string, value: unknown) => {
+  const id = linkId(value);
+  return typeof id === 'string' ? { ...(value as object), '@id': entityId(crateId, id) } : value;
+};
+
+/** `entity` with its own id and every id it links to as the entity's indexed id */
+function withIndexedIds(crateId: string, entity: RawEntity): RawEntity {
+  return Object.fromEntries(
+    Object.entries(entity).map(([key, value]) => [
+      key,
+      key === '@id' ? entityId(crateId, value as string) : (value as unknown[]).map((v) => indexedLink(crateId, v)),
+    ]),
+  ) as RawEntity;
+}
+
+/** How a virtual crate holds an entity that is linked to: a stub if it's a record, else a copy */
+type LinkedForm = {
+  /** Under the crate's own ids, to follow its links by */
+  deposited: RawEntity;
+  /** Under indexed ids, as it is served */
+  served: RawEntity;
+};
+
 /** What every virtual crate of one crate draws on */
 type Source = {
   crate: ROCrate;
-  /** The crate root's `conformsTo`, as references */
+  /** The crate root's `conformsTo`, as references to indexed ids */
   conformsTo: unknown[];
-  /** The crate's content licence */
+  /** The crate's content licence, as an indexed id */
   license: string;
-  /** How an entity appears in the virtual crate of one that links to it: a stub if it's a record, else a copy */
-  linkedForm: (entity: Entity) => RawEntity;
+  linkedForm: (entity: Entity) => LinkedForm;
 };
 
 /** The source of a crate's virtual crates, each linked entity's form made once however many entities link to it */
 function sourceOf(crate: ROCrate, license: string): Source {
-  const made = new Map<string, RawEntity>();
+  const made = new Map<string, LinkedForm>();
   const linkedForm = (entity: Entity) => {
-    let form = made.get(entity['@id']);
-    if (!form) {
-      form = recordType(entity) ? stub(entity) : asArrays(entity);
-      made.set(entity['@id'], form);
+    let forms = made.get(entity['@id']);
+    if (!forms) {
+      const deposited = recordType(entity) ? stub(entity) : asArrays(entity);
+      forms = { deposited, served: withIndexedIds(crate.rootId, deposited) };
+      made.set(entity['@id'], forms);
     }
-    return form;
+    return forms;
   };
-  return { crate, conformsTo: Utils.asArray(crate.root.toJSON().conformsTo), license, linkedForm };
+  const conformsTo = Utils.asArray(crate.root.toJSON().conformsTo).map((value) => indexedLink(crate.rootId, value));
+  return { crate, conformsTo, license: entityId(crate.rootId, license), linkedForm };
 }
 
 /** The entities in the crate that `values` link to, other than `selfId` and the crate's descriptor */
 function linkedEntities(crate: ROCrate, selfId: string, values: unknown[]) {
   const found = new Map<string, Entity>();
   for (const value of values) {
-    const linkedId = (value as { '@id'?: unknown })?.['@id'];
+    const linkedId = linkId(value);
     const linked = typeof linkedId === 'string' && linkedId !== selfId && linkedId !== crate.descriptor['@id'] && crate.getEntity(linkedId);
     if (linked) {
       found.set(linkedId, linked);
@@ -277,8 +305,8 @@ function linkedEntities(crate: ROCrate, selfId: string, values: unknown[]) {
 }
 
 /**
- * What the virtual crate of `entity` holds besides it: everything it links to, directly or through entities that aren't
- * records. A record is held as a stub, and what it links to is left out
+ * What the virtual crate of `entity` holds besides it, as served: everything it links to, directly or through entities
+ * that aren't records. A record is held as a stub, and what it links to is left out
  */
 function reachable({ crate, linkedForm }: Source, entity: RawEntity) {
   const selfId = entity['@id'];
@@ -287,10 +315,10 @@ function reachable({ crate, linkedForm }: Source, entity: RawEntity) {
   for (const at of toFollow) {
     for (const linked of linkedEntities(crate, selfId, Object.values(at).flat())) {
       if (!held.has(linked['@id'])) {
-        const form = linkedForm(linked);
-        held.set(linked['@id'], form);
+        const { deposited, served } = linkedForm(linked);
+        held.set(linked['@id'], served);
         if (!recordType(linked)) {
-          toFollow.push(form);
+          toFollow.push(deposited);
         }
       }
     }
@@ -302,7 +330,7 @@ function reachable({ crate, linkedForm }: Source, entity: RawEntity) {
 function virtualCrate(source: Source, entity: Entity, id: string, hidden: boolean) {
   const newCrate = new ROCrate({ '@context': source.crate['@context'] }, { array: true, duplicate: true });
   const json = asArrays(entity);
-  for (const [key, value] of Object.entries(json)) {
+  for (const [key, value] of Object.entries(withIndexedIds(source.crate.rootId, json))) {
     if (key !== '@id') {
       newCrate.root[key] = value;
     }
