@@ -65,8 +65,12 @@ The OCFL version of a crate that its indexes were built from.
 _Avoid_: Head version (the latest in the repository, which may be newer)
 
 **Virtual crate**:
-The Metadata served for one entity: an RO-Crate with that entity as its root and everything it links to (ADR 0004). Never the crate as deposited.
+The Metadata served for one entity: an RO-Crate with that entity as its root and everything it reaches up to the records it links to, which are stubs (ADR 0004). Never the crate as deposited.
 _Avoid_: Entity crate, exploded crate
+
+**Stub**:
+A linked record in a virtual crate, reduced to its `@id`, `@type`, `name` and `description` (plus `filename` for a file). The rest is fetched from the API.
+_Avoid_: Summary, reference (a bare `{"@id"}`)
 
 **Metadata-only crate**:
 A crate that describes files the repository doesn't hold. Its File entities are indexed and visible, but have no Content.

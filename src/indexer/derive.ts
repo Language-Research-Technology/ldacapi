@@ -1,5 +1,5 @@
 import type { GeoPoint } from 'arocapi';
-import { type Entity, ROCrate } from 'ro-crate';
+import { type Entity, type RawEntity, ROCrate, Utils } from 'ro-crate';
 import type { AccessControl } from '../access/access-control.ts';
 import type { EntityMeta } from '../entity-meta.ts';
 import { entityId, isAbsoluteIri } from '../repository/entity-id.ts';
@@ -224,21 +224,101 @@ export function parentCollection(crate: ROCrate): string | undefined {
   return parent && parent !== crate.rootId ? parent : undefined;
 }
 
-/** The virtual crate: a new crate with the entity, under its indexed id, as its root */
-function virtualCrate(crate: ROCrate, entity: Entity, id: string, license: string, hidden: boolean) {
-  const newCrate = new ROCrate({ '@context': crate['@context'] }, { array: true, link: true });
-  for (const key in entity) {
-    if (key !== '@id') {
-      newCrate.root[key] = entity[key];
+/** An entity as plain JSON-LD, every value but its id an array */
+function asArrays(entity: Entity): RawEntity {
+  return Object.fromEntries(Object.entries(entity.toJSON()).map(([key, value]) => [key, key === '@id' ? value : Utils.asArray(value)])) as RawEntity;
+}
+
+const STUB_KEYS = ['@id', '@type', 'name', 'description'];
+
+/** A linked record as a virtual crate holds it: enough to show it, and the id to fetch the rest by */
+function stub(entity: Entity) {
+  const json = asArrays(entity);
+  const keys = isFile(entity) ? [...STUB_KEYS, 'filename'] : STUB_KEYS;
+  return Object.fromEntries(keys.filter((key) => key in json).map((key) => [key, json[key]])) as RawEntity;
+}
+
+/** What every virtual crate of one crate draws on */
+type Source = {
+  crate: ROCrate;
+  /** The crate root's `conformsTo`, as references */
+  conformsTo: unknown[];
+  /** The crate's content licence */
+  license: string;
+  /** How an entity appears in the virtual crate of one that links to it: a stub if it's a record, else a copy */
+  linkedForm: (entity: Entity) => RawEntity;
+};
+
+/** The source of a crate's virtual crates, each linked entity's form made once however many entities link to it */
+function sourceOf(crate: ROCrate, license: string): Source {
+  const made = new Map<string, RawEntity>();
+  const linkedForm = (entity: Entity) => {
+    let form = made.get(entity['@id']);
+    if (!form) {
+      form = recordType(entity) ? stub(entity) : asArrays(entity);
+      made.set(entity['@id'], form);
+    }
+    return form;
+  };
+  return { crate, conformsTo: Utils.asArray(crate.root.toJSON().conformsTo), license, linkedForm };
+}
+
+/** The entities in the crate that `values` link to, other than `selfId` and the crate's descriptor */
+function linkedEntities(crate: ROCrate, selfId: string, values: unknown[]) {
+  const found = new Map<string, Entity>();
+  for (const value of values) {
+    const linkedId = (value as { '@id'?: unknown })?.['@id'];
+    const linked = typeof linkedId === 'string' && linkedId !== selfId && linkedId !== crate.descriptor['@id'] && crate.getEntity(linkedId);
+    if (linked) {
+      found.set(linkedId, linked);
     }
   }
+  return [...found.values()];
+}
+
+/**
+ * What the virtual crate of `entity` holds besides it: everything it links to, directly or through entities that aren't
+ * records. A record is held as a stub, and what it links to is left out
+ */
+function reachable({ crate, linkedForm }: Source, entity: RawEntity) {
+  const selfId = entity['@id'];
+  const held = new Map<string, RawEntity>();
+  const toFollow = [entity];
+  for (const at of toFollow) {
+    for (const linked of linkedEntities(crate, selfId, Object.values(at).flat())) {
+      if (!held.has(linked['@id'])) {
+        const form = linkedForm(linked);
+        held.set(linked['@id'], form);
+        if (!recordType(linked)) {
+          toFollow.push(form);
+        }
+      }
+    }
+  }
+  return held.values();
+}
+
+/** The virtual crate: a new crate with the entity, under its indexed id, as its root, and what it reaches up to records */
+function virtualCrate(source: Source, entity: Entity, id: string, hidden: boolean) {
+  const newCrate = new ROCrate({ '@context': source.crate['@context'] }, { array: true, duplicate: true });
+  const json = asArrays(entity);
+  for (const [key, value] of Object.entries(json)) {
+    if (key !== '@id') {
+      newCrate.root[key] = value;
+    }
+  }
+  for (const linked of reachable(source, json)) {
+    newCrate.addEntity(linked);
+  }
   newCrate.rootId = id;
-  newCrate.root['@type'].push('Dataset');
+  if (!entity['@type'].includes('Dataset')) {
+    newCrate.root['@type'].push('Dataset');
+  }
   if (!entity.conformsTo) {
-    newCrate.root.conformsTo = crate.root.conformsTo;
+    newCrate.root.conformsTo = source.conformsTo;
   }
   if (!entity.license) {
-    newCrate.root.license = license;
+    newCrate.root.license = source.license;
   }
   if (hidden) {
     newCrate.root.display = false;
@@ -279,6 +359,7 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
   };
 
   const topCollection = facts.parentCrates.at(-1) ?? crateId;
+  const source = sourceOf(crate, crateLicense);
   const warnings: Warning[] = [];
   const entities: DerivedEntity[] = [];
   const prefix = `${crateId}/`;
@@ -324,7 +405,7 @@ export function derive(crate: ROCrate, facts: DeriveFacts): Derivation {
         rootCollection,
         metadataLicenseId: metadataLicense,
         contentLicenseId,
-        meta: { rocrate: virtualCrate(crate, entity, id, crateLicense, unheldFile), accessControl },
+        meta: { rocrate: virtualCrate(source, entity, id, unheldFile), accessControl },
       },
       shared: UNPLACED.has(type),
       ...(type === 'File' && {
