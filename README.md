@@ -268,6 +268,11 @@ two crates contain counts in both.
   kind of entity. The error names the entity and both crates, and the crate
   holding it keeps its row. The failed crate shows as failed until its data is
   fixed.
+- **A copy of a collection above the crate** (its parent, its parent's parent,
+  and so on, found through `pcdm:memberOf` in the repository) isn't a clash. The
+  crate's copy is left out, with a warning naming it, and the collection's own
+  crate holds it, whatever order the crates are indexed in
+  ([ADR 0009](docs/adr/0009-a-copy-of-an-ancestor-collection-is-left-out.md)).
 
 ### More than one worker
 

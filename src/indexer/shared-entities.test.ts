@@ -12,6 +12,7 @@ const CLAIMS_OBJECT = 'arcp://name,claims-object';
 const CLAIMS_FILE = 'arcp://name,claims-file';
 const CALLS_AN_ORGANISATION = 'arcp://name,calls-an-organisation';
 const DROPS = 'arcp://name,drops';
+const COPIES_ITS_PARENT = `${FIRST}/copies-its-parent`;
 
 const organisation = (id: string, properties: Record<string, unknown> = {}): Part => ({
   entity: { '@id': id, '@type': 'Organization', conformsTo: { '@id': 'https://w3id.org/ldac/profile#Organization' }, ...properties },
@@ -30,6 +31,7 @@ const testbed = ocflTestbed(
   crate(collection(CLAIMS_FILE), [fileDescribedButNotHeld(`${FIRST}/data.txt`, { name: 'Claimed' })]),
   crate(collection(CALLS_AN_ORGANISATION), [organisation(PERSON, { name: 'Ada Inc' })]),
   crate(collection(DROPS), [person(PERSON, { name: 'Ada (drops)' })]),
+  crate(object(COPIES_ITS_PARENT, { memberOf: FIRST }), [collection(FIRST, { name: 'Copied' })]),
 );
 
 const details = { message: 'Changed by a test', user: { name: 'Test' } };
@@ -201,6 +203,18 @@ describe('a crate describing what another crate holds', () => {
     });
     expect((await rows()).filter(({ id }) => id !== claimant)).toEqual(before);
     expect(await state(FIRST)).toMatchObject({ state: 'indexed' });
+  });
+
+  it.each([
+    ['after', [FIRST, COPIES_ITS_PARENT]],
+    ['before', [COPIES_ITS_PARENT, FIRST]],
+  ])('indexes a crate copying its parent collection %s the parent’s crate, which keeps its own row', async (_, order) => {
+    await index(...order);
+
+    expect(await state(COPIES_ITS_PARENT)).toMatchObject({ state: 'indexed' });
+    expect(await state(FIRST)).toMatchObject({ state: 'indexed' });
+    expect(await served(FIRST)).toMatchObject({ name: FIRST });
+    expect(await served(COPIES_ITS_PARENT)).toMatchObject({ memberOf: { id: FIRST } });
   });
 
   it('fails its job when it describes a person as an organisation, naming both crates', async () => {
