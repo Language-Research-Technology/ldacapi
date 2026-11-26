@@ -75,26 +75,24 @@ function authenticateUser(request: FastifyRequest): Promise<string | undefined> 
 
 const verificationKeys = config.auth && createLocalJWKSet(publicJwks(config.auth.signingKeys));
 
-/** Oni's token cookie, for downloads and media elements, which can't send a bearer token (ADR 0010) */
-const TOKEN_COOKIE = 'oni_access_token=';
+/** Oni's token cookie (ADR 0010) */
+const TOKEN_COOKIE = 'oni_access_token';
 const FILE_ROUTE = `${config.prefix}/file/:id`;
+/** Every Sec-Fetch-Site but those another site's page can cause; absent from old browsers */
+const COOKIE_SITES = new Set([undefined, 'same-origin', 'none']);
 
-/** Oni's own pages, or a browser that sends no Sec-Fetch-Site */
-const acceptsTokenCookie = (request: FastifyRequest) => {
-  const site = request.headers['sec-fetch-site'];
-  return request.routeOptions.url === FILE_ROUTE && (site === undefined || site === 'same-origin');
-};
+const isFileRequestFromOni = (request: FastifyRequest) => request.routeOptions.url === FILE_ROUTE && COOKIE_SITES.has(request.headers['sec-fetch-site']);
 
 /** None when there is more than one, as when a sibling subdomain has planted its own */
-const tokenCookie = (header = '') => {
+const tokenFromCookie = (header = '') => {
   const [only, ...others] = header
     .split(';')
     .map((pair) => pair.trim())
-    .filter((pair) => pair.startsWith(TOKEN_COOKIE));
+    .filter((pair) => pair.startsWith(`${TOKEN_COOKIE}=`));
   if (only === undefined || others.length > 0) {
     return;
   }
-  return only.slice(TOKEN_COOKIE.length);
+  return only.slice(TOKEN_COOKIE.length + 1);
 };
 
 const presentedToken = (request: FastifyRequest) => {
@@ -102,7 +100,7 @@ const presentedToken = (request: FastifyRequest) => {
   if (header?.startsWith('Bearer ')) {
     return header.slice('Bearer '.length);
   }
-  return acceptsTokenCookie(request) ? tokenCookie(request.headers.cookie) : undefined;
+  return isFileRequestFromOni(request) ? tokenFromCookie(request.headers.cookie) : undefined;
 };
 
 async function verifyUserId(request: FastifyRequest): Promise<string | undefined> {

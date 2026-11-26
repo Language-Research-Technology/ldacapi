@@ -190,12 +190,13 @@ describe('licence checks with our access tokens', () => {
 
   describe('with the token in the cookie Oni sets', () => {
     const asCookie = async (claims?: JWTPayload) => `oni_access_token=${await token(claims)}`;
-    const withCookie = (path: string, cookie: string, headers: Record<string, string> = {}) =>
-      app.inject({ method: 'GET', url: `${prefix}${path}`, headers: { cookie, ...headers } });
+    const withCookie = (path: string, cookie: string, headers: Record<string, string> = {}, method: 'GET' | 'HEAD' = 'GET') =>
+      app.inject({ method, url: `${prefix}${path}`, headers: { cookie, ...headers } });
     const restrictedFile = `/file/${encodeURIComponent(RESTRICTED_FILE)}`;
 
     it.each<[string, () => Promise<string>, Record<string, string>]>([
       ['a request from Oni', asCookie, { 'sec-fetch-site': 'same-origin' }],
+      ['a request the user started, such as a reload', asCookie, { 'sec-fetch-site': 'none' }],
       ['a browser too old to say where a request came from', async () => `theme=dark; ${await asCookie()}; lang=en`, {}],
     ])('gives restricted content to %s', async (_name, cookie, headers) => {
       const response = await withCookie(restrictedFile, await cookie(), headers);
@@ -205,7 +206,7 @@ describe('licence checks with our access tokens', () => {
     });
 
     it('answers HEAD for restricted content', async () => {
-      const response = await app.inject({ method: 'HEAD', url: `${prefix}${restrictedFile}`, headers: { cookie: await asCookie() } });
+      const response = await withCookie(restrictedFile, await asCookie(), {}, 'HEAD');
 
       expect(response.statusCode).toBe(200);
     });
@@ -213,7 +214,6 @@ describe('licence checks with our access tokens', () => {
     it.each<[string, () => Promise<string>, Record<string, string>]>([
       ['on a same-site request', asCookie, { 'sec-fetch-site': 'same-site' }],
       ['on a cross-site request', asCookie, { 'sec-fetch-site': 'cross-site' }],
-      ['on a request the user started', asCookie, { 'sec-fetch-site': 'none' }],
       ['when another host has planted a second one', async () => `${await asCookie({ sub: UNENTITLED })}; ${await asCookie()}`, {}],
       ['when its token has expired', () => asCookie({ exp: Math.floor(Date.now() / 1000) - 60 }), {}],
     ])('ignores the cookie %s', async (_name, cookie, headers) => {

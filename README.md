@@ -456,8 +456,9 @@ Downloads and media players can't send a bearer token, so for restricted
 files to download and play in Oni, serve Oni and the API from the same origin
 and set Oni's `api.rocrate.tokenCookie` to `oni_access_token`. Oni then keeps
 its access token in that cookie, and the API accepts it on `/api/file/:id`,
-for requests from Oni's own pages only. See
-`docs/adr/0010-file-requests-take-a-token-cookie.md`.
+except on requests from other sites. Put `Cache-Control: private` on file
+responses wherever the cookie is used, so shared caches don't keep restricted
+files. See `docs/adr/0010-file-requests-take-a-token-cookie.md`.
 
 ### Local sign-in
 

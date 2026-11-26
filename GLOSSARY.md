@@ -95,8 +95,8 @@ A person who has signed in at the upstream provider, identified by that provider
 _Avoid_: Account, member
 
 **Token cookie**:
-The `oni_access_token` cookie Oni keeps its access token in, so file downloads and media requests carry it. The API reads it only on the file route, and only for requests from Oni's own origin (ADR 0010).
-_Avoid_: Session cookie (the provider's own sign-in session)
+The `oni_access_token` cookie Oni keeps its access token in, so file downloads and media requests carry it. The API reads it only on the file route, and only for requests another site can't cause (ADR 0010).
+_Avoid_: Session cookie (the provider's sign-in session, a different cookie)
 
 ### Access
 
