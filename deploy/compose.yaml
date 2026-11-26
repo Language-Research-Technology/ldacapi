@@ -20,7 +20,6 @@ services:
     environment:
       DOMAIN: ${DOMAIN}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN}
-      DOWNLOADER_DOMAIN: ${DOWNLOADER_DOMAIN}
       ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
     ports:
       - "80:80"
@@ -31,11 +30,12 @@ services:
       - ./oni/configuration.json:/srv/oni/configuration.json:ro
       - ./data/caddy/data:/data
       - ./data/caddy/config:/config
-    # The downloader reaches the API's sign-in at DOMAIN through Caddy, without leaving the host
+    # The downloader reaches the API's sign-in and its zips' bucket through Caddy, without leaving the host
     networks:
       default:
         aliases:
           - ${DOMAIN}
+          - downloader.${DOMAIN}
     read_only: true
     tmpfs:
       - /tmp
@@ -56,22 +56,98 @@ services:
       - /var/cache/nginx
       - /var/run
 
-  # Users sign in through the API, pick files, and get a zip in S3 by email from SES
+  # At downloader.DOMAIN: users sign in through the API, pick files, and get a zip by email
   downloader:
     <<: *hardening
     image: ghcr.io/crate-works/downloader:1.15.2
     env_file: downloader.env
-    environment:
+    environment: &downloader-environment
       NODE_ENV: production
       ROCRATE_API_BASE_URL: http://api:8080/api
       OIDC_ISSUER: https://${DOMAIN}
       OIDC_CLIENT_ID: downloader
       OIDC_CLIENT_SECRET: ${DOWNLOADER_CLIENT_SECRET:?Set DOWNLOADER_CLIENT_SECRET in .env}
-      OIDC_REDIRECT_URI: https://${DOWNLOADER_DOMAIN:?Set DOWNLOADER_DOMAIN in .env}/api/auth/callback
+      OIDC_REDIRECT_URI: https://downloader.${DOMAIN}/api/auth/callback
+      # The bucket `downloader` on DOMAIN makes its links https://downloader.DOMAIN/exports/…
+      S3_BUCKET: downloader
+      AWS_ENDPOINT_URL_S3: https://${DOMAIN}
+      AWS_REGION: ap-southeast-2
+      AWS_ACCESS_KEY_ID: downloader
+      AWS_SECRET_ACCESS_KEY: ${DOWNLOADER_S3_SECRET:?Set DOWNLOADER_S3_SECRET in .env}
     # Not read_only: the image writes its base path into its own files at start
     depends_on:
       api:
         condition: service_healthy
+      downloader-setup:
+        condition: service_completed_successfully
+
+  # Creates the zips' bucket unless it exists
+  downloader-setup:
+    <<: *hardening
+    image: ghcr.io/crate-works/downloader:1.15.2
+    restart: "no"
+    env_file: downloader.env
+    environment: *downloader-environment
+    working_dir: /app
+    entrypoint: ["node", "--input-type=module", "-e"]
+    command:
+      - |
+        import { BucketAlreadyOwnedByYou, CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
+        const s3 = new S3Client({ endpoint: 'http://s3:7070', forcePathStyle: true });
+        await s3.send(new CreateBucketCommand({ Bucket: process.env.S3_BUCKET })).catch((err) => {
+          if (!(err instanceof BucketAlreadyOwnedByYou)) throw err;
+        });
+    healthcheck:
+      disable: true
+    depends_on:
+      s3:
+        condition: service_healthy
+
+  # versitygw serves the zips from DOWNLOADS_DIR; only the downloader holds its key
+  s3:
+    <<: *hardening
+    image: versity/versitygw:v1.11.0
+    user: "1000:1000"
+    environment:
+      ROOT_ACCESS_KEY: downloader
+      ROOT_SECRET_KEY: ${DOWNLOADER_S3_SECRET}
+      VGW_BACKEND: posix
+      VGW_BACKEND_ARG: /downloads/buckets
+      # Metadata in files rather than extended attributes, which NFS may lack
+      VGW_META_SIDECAR: /downloads/meta
+      VGW_REGION: ap-southeast-2
+      VGW_VIRTUAL_DOMAIN: ${DOMAIN}
+      VGW_HEALTH: /health
+    # DOWNLOADS_DIR must hold `buckets` and `meta`, owned by uid 1000
+    volumes: &downloads-volume
+      - type: bind
+        source: ${DOWNLOADS_DIR:?Set DOWNLOADS_DIR in .env}
+        target: /downloads
+        bind:
+          create_host_path: false
+    read_only: true
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7070/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Deletes zips two days old, a day after their links expire
+  downloads-cleanup:
+    <<: *hardening
+    image: busybox:1.37
+    user: "1000:1000"
+    volumes: *downloads-volume
+    read_only: true
+    command:
+      - sh
+      - -c
+      - |
+        while true; do
+          find /downloads/buckets/downloader -mindepth 2 -type f -mmin +2880 -delete
+          find /downloads/meta/downloader/exports -mindepth 1 -maxdepth 1 -mmin +2880 -exec rm -rf {} +
+          sleep 3600
+        done
 
   api:
     <<: *hardening
@@ -85,7 +161,7 @@ services:
       ADMIN_ORIGIN: https://${ADMIN_DOMAIN:?Set ADMIN_DOMAIN in .env}
       OIDC_CLIENTS: >-
         [{"client_id":"oni","redirect_uris":["https://${DOMAIN}/auth/callback"],"post_logout_redirect_uris":["https://${DOMAIN}/"]},
-        {"client_id":"downloader","client_secret":"${DOWNLOADER_CLIENT_SECRET}","redirect_uris":["https://${DOWNLOADER_DOMAIN}/api/auth/callback"],"post_logout_redirect_uris":["https://${DOWNLOADER_DOMAIN}/"]}]
+        {"client_id":"downloader","client_secret":"${DOWNLOADER_CLIENT_SECRET}","redirect_uris":["https://downloader.${DOMAIN}/api/auth/callback"],"post_logout_redirect_uris":["https://downloader.${DOMAIN}/"]}]
     # OCFL_DIR must already exist, owned by uid 1000, rather than Docker creating it as root
     volumes: &ocfl-volume
       - type: bind

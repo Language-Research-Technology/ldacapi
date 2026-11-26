@@ -36,12 +36,21 @@
 	}
 }
 
-{$DOWNLOADER_DOMAIN} {
+downloader.{$DOMAIN} {
 	import security_headers
-	encode zstd gzip
 
-	header X-Frame-Options SAMEORIGIN
-	reverse_proxy downloader:7000
+	# The zips' bucket, which versitygw addresses by this host; links are signed over the host only
+	handle /exports/* {
+		reverse_proxy s3:7070 {
+			header_up -Cookie
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		header X-Frame-Options SAMEORIGIN
+		reverse_proxy downloader:7000
+	}
 }
 
 # The admin pages must be on their own origin (docs/adr/0002-server-rendered-admin-pages.md)

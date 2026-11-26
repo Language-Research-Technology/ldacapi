@@ -480,8 +480,9 @@ username to `ADMIN_USERS` in `.env`. Anyone else sees "Not an admin".
 
 To try the [Downloader](#the-downloader) against `pnpm dev`, run
 `docker compose --profile downloader up -d` and open `http://localhost:7000`.
-[moto](https://github.com/getmoto/moto) stands in for S3 and SES. The zip's
-link works from the export page, and the emails sent are under `ses` in
+versitygw holds the zips, as in production, and
+[moto](https://github.com/getmoto/moto) stands in for SES. The zip's link works
+from the export page, and the emails sent are under `ses` in
 `http://localhost:5000/moto-api/data.json`.
 
 ### Admin pages
@@ -611,7 +612,8 @@ from Let's Encrypt on its own. It serves three hostnames:
 | `DOMAIN`            | `/configuration.json`                                     | Oni's configuration, served by Caddy with `DOMAIN` filled in |
 | `DOMAIN`            | everything else                                           | Oni                                                          |
 | `ADMIN_DOMAIN`      | `/admin/*`                                                | The API's admin pages                                        |
-| `DOWNLOADER_DOMAIN` | everything                                                | The [Downloader](#the-downloader)                            |
+| `downloader.DOMAIN` | `/exports/*`                                              | The Downloader's zips, in versitygw                          |
+| `downloader.DOMAIN` | everything else                                           | The [Downloader](#the-downloader)                            |
 
 The admin pages need their own hostname (see [Admin pages](#admin-pages)).
 Caddy sets no Content-Security-Policy on the API's responses: arocapi sends
@@ -632,9 +634,8 @@ filesystems.
 
 ### Setting it up
 
-You need Docker with Compose, ports 80 and 443 open, DNS for `ADMIN_DOMAIN` and
-`DOWNLOADER_DOMAIN` pointing at the host, and the Downloader's
-[AWS resources](#the-downloader). `DOMAIN`'s DNS follows once the crates are indexed
+You need Docker with Compose, ports 80 and 443 open, and DNS for `ADMIN_DOMAIN`
+and `downloader.<DOMAIN>` pointing at the host. `DOMAIN`'s DNS follows once the crates are indexed
 (step 5 of [Installing](#installing)). OpenSearch also needs a larger mmap
 limit on the host:
 
@@ -664,9 +665,10 @@ Copy `deploy/` to the host, then, in it, set it up:
 ```sh
 sudo install -d -o 1000 -g 1000 data/opensearch
 sudo install -d -o 1000 -g 1000 /mnt/ldacapi/ocfl   # OCFL_DIR, unless it exists already
+sudo install -d -o 1000 -g 1000 /mnt/ldacapi/downloads/{buckets,meta}   # DOWNLOADS_DIR
 cp .env.example .env                  # the hostnames, ACME_EMAIL, the secrets and OCFL_DIR
 cp ldacapi.env.example ldacapi.env    # sign-in, admins, open licences and the API's other settings
-cp downloader.env.example downloader.env  # the Downloader's session secret and AWS settings
+cp downloader.env.example downloader.env  # the Downloader's session secret and sender
 chmod 600 .env ldacapi.env downloader.env
 docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
 ```
@@ -773,24 +775,30 @@ To restore the database from a backup, stop the API and run
 
 ### The Downloader
 
-The [Downloader](https://github.com/crate-works/downloader) lets a signed-in
-user pick files across collections and get them as one zip: it streams them
-from the API with the user's access token, uploads the zip to S3 and emails a
-link to it, valid for 24 hours, through SES. It signs in through the API as the
-`downloader` client, with `DOWNLOADER_CLIENT_SECRET` from `.env`, and calls the
-API inside the stack rather than through Caddy. Its image rewrites its own
-files at start, so it is the one container whose root filesystem isn't
+The [Downloader](https://github.com/crate-works/downloader), at
+`downloader.<DOMAIN>`, lets a signed-in user pick files across collections and
+get them as one zip: it streams them from the API with the user's access token,
+stores the zip, and emails a link to it, valid for 24 hours. It signs in through
+the API as the `downloader` client, with `DOWNLOADER_CLIENT_SECRET` from `.env`,
+and calls the API inside the stack rather than through Caddy. Its image rewrites
+its own files at start, so it is the one container whose root filesystem isn't
 read-only.
 
-It needs, in the region set by `AWS_REGION` in `downloader.env`:
+The zips are kept in [versitygw](https://github.com/versity/versitygw), an S3
+server over the files in `DOWNLOADS_DIR`. It keeps their metadata in
+`DOWNLOADS_DIR/meta` rather than in extended attributes, so `DOWNLOADS_DIR` can
+be on NFS. The Downloader addresses the bucket `downloader` on `DOMAIN`, so its
+links are `https://downloader.<DOMAIN>/exports/…`, which Caddy sends to
+versitygw without the Downloader's cookies. Only the Downloader holds the key,
+`DOWNLOADER_S3_SECRET`: a link works only as signed, for the one zip, for `GET`,
+until it expires; anything unsigned, altered or expired is refused. A bucket is
+created on start, and `downloads-cleanup` deletes zips two days old, as
+versitygw doesn't expire them.
 
-- An S3 bucket, `S3_BUCKET`, with a lifecycle rule that deletes objects after
-  2 days, as nothing else deletes the zips.
-- SES out of the sandbox, with `EMAIL_FROM`'s domain verified, so it can email
-  any user.
-- An IAM user for `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, allowed only
-  `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject` and
-  `s3:AbortMultipartUpload` on the bucket's objects, and `ses:SendEmail`.
+The Downloader sends its emails only through AWS SES, so it can't email the
+link yet without AWS; sending by SMTP is
+[crate-works/downloader#16](https://github.com/crate-works/downloader/issues/16).
+Until then an export fails at its last step, sending the email.
 
 Its sign-in lasts as long as one access token, 15 minutes, as it doesn't
 refresh tokens. Past that the user signs in again, which the API's session
@@ -798,8 +806,8 @@ makes a click. An export keeps the token it started with, so one still
 running after 15 minutes gets the files anyone may read but lists the rest as
 missing in its email.
 
-The Downloader's image is pinned to a version in `compose.yaml` and in the
-development `docker-compose.yml`; bump the two together.
+The Downloader's and versitygw's images are pinned to versions in
+`compose.yaml` and in the development `docker-compose.yml`; bump each in both.
 
 ## Release notes
 
