@@ -457,7 +457,7 @@ files to download and play in Oni, serve Oni and the API from the same origin
 and set Oni's `api.rocrate.tokenCookie` to `oni_access_token`. Oni then keeps
 its access token in that cookie, and the API accepts it on `/api/file/:id`,
 for requests from Oni's own pages only. See
-`docs/adr/0009-file-requests-take-a-token-cookie.md`.
+`docs/adr/0010-file-requests-take-a-token-cookie.md`.
 
 ### Local sign-in
 

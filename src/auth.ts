@@ -75,23 +75,26 @@ function authenticateUser(request: FastifyRequest): Promise<string | undefined> 
 
 const verificationKeys = config.auth && createLocalJWKSet(publicJwks(config.auth.signingKeys));
 
-/** The cookie Oni sets so that downloads and media elements, which can't send a bearer token, carry one (ADR 0009) */
-const TOKEN_COOKIE = 'oni_access_token';
+/** Oni's token cookie, for downloads and media elements, which can't send a bearer token (ADR 0010) */
+const TOKEN_COOKIE = 'oni_access_token=';
+const FILE_ROUTE = `${config.prefix}/file/:id`;
 
-/** Whether the request is for a file from one of Oni's own pages, or from a browser too old to say where it came from */
-const acceptsTokenCookie = (request: FastifyRequest) =>
-  request.routeOptions.url === `${config.prefix}/file/:id` && [undefined, 'same-origin'].includes(request.headers['sec-fetch-site']);
+/** Oni's own pages, or a browser that sends no Sec-Fetch-Site */
+const acceptsTokenCookie = (request: FastifyRequest) => {
+  const site = request.headers['sec-fetch-site'];
+  return request.routeOptions.url === FILE_ROUTE && (site === undefined || site === 'same-origin');
+};
 
-/** The token cookie's value, unless there is more than one, as when a sibling subdomain has planted its own */
+/** None when there is more than one, as when a sibling subdomain has planted its own */
 const tokenCookie = (header = '') => {
   const [only, ...others] = header
     .split(';')
     .map((pair) => pair.trim())
-    .filter((pair) => pair.startsWith(`${TOKEN_COOKIE}=`));
+    .filter((pair) => pair.startsWith(TOKEN_COOKIE));
   if (only === undefined || others.length > 0) {
     return;
   }
-  return only.slice(TOKEN_COOKIE.length + 1);
+  return only.slice(TOKEN_COOKIE.length);
 };
 
 const presentedToken = (request: FastifyRequest) => {
