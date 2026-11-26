@@ -22,6 +22,7 @@ The virtual crate differs from what the depositor wrote in these ways only:
 
 - The root gets the `Dataset` type, the crate root's `conformsTo` if it has none, and the crate's content licence as its `license` if it has none.
 - A File entity whose content the repository doesn't hold gets `display: false`, which Oni reads to offer no preview or download.
+- Every `@id`, of an entity or of a link, that isn't an absolute IRI is put under the crate root's id, as a row's id is (`#alice` in `arcp://name,example` is `arcp://name,example/#alice`). This includes blank nodes and links to ids the crate doesn't describe. Absolute IRIs are kept as they are.
 
 Property names are served as deposited. Crates are assumed to use the prefixed spelling: the indexer reads LDaC and PCDM properties only in that form, and the virtual crate does not rename the older one. Bringing an older crate up to date is its owner's job.
 
@@ -33,6 +34,8 @@ Property names are served as deposited. Crates are assumed to use the prefixed s
 - Serving Metadata reads only the database, never the OCFL repository.
 - The virtual crate isn't a file in the crate, so it has no checksum or version of its own, and it is not a faithful copy of what the depositor wrote. The deposited crate is only in the repository.
 - `display` is Oni's convention, not a vocabulary term; a different reader won't know it.
-- Property names, values and `@type`s are served as deposited, including any mistakes in them.
+- Property names, values other than ids, and `@type`s are served as deposited, including any mistakes in them.
+- A stub's `@id` is its record's row id, so a client can fetch any linked record by the id it is given. Other entities and links get absolute ids too but have no row: a place, a blank node or an undescribed id can't be fetched.
+- A crate that uses relative ids, as RO-Crate expects for files, is served with absolute ids instead, so the ids served differ from those in the deposited crate.
 - A row's size follows what its entity reaches before records. An entity that reaches large contextual entities, such as a participant's postcode polygons, holds a copy of each, so a crate with many of them gives large rows: an object of the Australian Slang Survey Data crate reaches about 100 MB. Making such entities smaller is the crate owner's job.
 - A linked record's other properties are absent: a client that needs them fetches the record from the API. Oni's expanded panels (`ui.main.expand`, such as `author`, `speaker` and `citation`) show only a record's stub.
