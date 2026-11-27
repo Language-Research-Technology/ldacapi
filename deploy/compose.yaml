@@ -59,7 +59,7 @@ services:
   # At downloader.DOMAIN: users sign in through the API, pick files, and get a zip by email
   downloader:
     <<: *hardening
-    image: ghcr.io/crate-works/downloader:1.15.2
+    image: ghcr.io/crate-works/downloader:1
     env_file: downloader.env
     environment: &downloader-environment
       NODE_ENV: production
@@ -84,7 +84,7 @@ services:
   # Creates the zips' bucket unless it exists
   downloader-setup:
     <<: *hardening
-    image: ghcr.io/crate-works/downloader:1.15.2
+    image: ghcr.io/crate-works/downloader:1
     restart: "no"
     env_file: downloader.env
     environment: *downloader-environment

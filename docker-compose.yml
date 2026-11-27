@@ -47,7 +47,7 @@ services:
 
   # On the host's network, as the browser and the downloader must both reach the API at localhost:8080
   downloader:
-    image: ghcr.io/crate-works/downloader:1.15.2
+    image: ghcr.io/crate-works/downloader:1
     network_mode: host
     environment:
       - HOST=127.0.0.1
@@ -59,14 +59,16 @@ services:
       - SESSION_SECRET=downloader-development-session-secret
       - S3_BUCKET=downloads
       - EMAIL_FROM=downloads@example.org
+      - SMTP_URL=smtp://localhost:1025
       - AWS_REGION=ap-southeast-2
       - AWS_ENDPOINT_URL_S3=http://localhost:7080
-      - AWS_ENDPOINT_URL_SES=http://localhost:5000
       - AWS_ACCESS_KEY_ID=downloader
       - AWS_SECRET_ACCESS_KEY=downloader-development-secret
     depends_on:
       downloader-setup:
         condition: service_completed_successfully
+      mail:
+        condition: service_healthy
     profiles: [downloader]
 
   # Holds the zips, as in production; the downloader addresses the bucket as downloads.localhost
@@ -93,37 +95,34 @@ services:
       retries: 15
     profiles: [downloader]
 
-  # Stands in for SES; the emails sent are under "ses" in http://localhost:5000/moto-api/data.json
-  ses:
-    image: motoserver/moto:5.2.6
+  # Catches the downloader's emails; read them at http://localhost:8025
+  mail:
+    image: axllent/mailpit:v1
     ports:
-      - "127.0.0.1:5000:5000"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/')"]
-      interval: 2s
-      retries: 15
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     profiles: [downloader]
 
-  # Creates the bucket and verifies the sender, as SES needs before the downloader can send
+  # Creates the bucket unless it exists, as in production
   downloader-setup:
-    image: motoserver/moto:5.2.6
-    entrypoint: ["python", "-c"]
+    image: ghcr.io/crate-works/downloader:1
+    working_dir: /app
+    environment:
+      - AWS_REGION=ap-southeast-2
+      - AWS_ACCESS_KEY_ID=downloader
+      - AWS_SECRET_ACCESS_KEY=downloader-development-secret
+    entrypoint: ["node", "--input-type=module", "-e"]
     command:
       - |
-        import boto3
-        from botocore.config import Config
-        s3 = boto3.client("s3", endpoint_url="http://s3:7070", region_name="ap-southeast-2", aws_access_key_id="downloader",
-                          aws_secret_access_key="downloader-development-secret", config=Config(s3={"addressing_style": "path"}))
-        try:
-            s3.create_bucket(Bucket="downloads", CreateBucketConfiguration={"LocationConstraint": "ap-southeast-2"})
-        except s3.exceptions.BucketAlreadyOwnedByYou:
-            pass
-        boto3.client("ses", endpoint_url="http://ses:5000", region_name="ap-southeast-2", aws_access_key_id="test",
-                     aws_secret_access_key="test").verify_email_identity(EmailAddress="downloads@example.org")
+        import { BucketAlreadyOwnedByYou, CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
+        const s3 = new S3Client({ endpoint: 'http://s3:7070', forcePathStyle: true });
+        await s3.send(new CreateBucketCommand({ Bucket: 'downloads' })).catch((err) => {
+          if (!(err instanceof BucketAlreadyOwnedByYou)) throw err;
+        });
+    healthcheck:
+      disable: true
     depends_on:
       s3:
-        condition: service_healthy
-      ses:
         condition: service_healthy
     profiles: [downloader]
 

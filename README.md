@@ -481,9 +481,8 @@ username to `ADMIN_USERS` in `.env`. Anyone else sees "Not an admin".
 To try the [Downloader](#the-downloader) against `pnpm dev`, run
 `docker compose --profile downloader up -d` and open `http://localhost:7000`.
 versitygw holds the zips, as in production, and
-[moto](https://github.com/getmoto/moto) stands in for SES. The zip's link works
-from the export page, and the emails sent are under `ses` in
-`http://localhost:5000/moto-api/data.json`.
+[Mailpit](https://mailpit.axllent.org/) catches the emails, at
+`http://localhost:8025`.
 
 ### Admin pages
 
@@ -668,7 +667,7 @@ sudo install -d -o 1000 -g 1000 /mnt/ldacapi/ocfl   # OCFL_DIR, unless it exists
 sudo install -d -o 1000 -g 1000 /mnt/ldacapi/downloads/{buckets,meta}   # DOWNLOADS_DIR
 cp .env.example .env                  # the hostnames, ACME_EMAIL, the secrets and OCFL_DIR
 cp ldacapi.env.example ldacapi.env    # sign-in, admins, open licences and the API's other settings
-cp downloader.env.example downloader.env  # the Downloader's session secret and sender
+cp downloader.env.example downloader.env  # the Downloader's session secret, sender and SMTP server
 chmod 600 .env ldacapi.env downloader.env
 docker compose run --rm --no-deps api pnpm -s generate-keys >> ldacapi.env
 ```
@@ -795,10 +794,7 @@ until it expires; anything unsigned, altered or expired is refused. A bucket is
 created on start, and `downloads-cleanup` deletes zips two days old, as
 versitygw doesn't expire them.
 
-The Downloader sends its emails only through AWS SES, so it can't email the
-link yet without AWS; sending by SMTP is
-[crate-works/downloader#16](https://github.com/crate-works/downloader/issues/16).
-Until then an export fails at its last step, sending the email.
+It sends the emails through the SMTP server in `SMTP_URL`, in `downloader.env`.
 
 Its sign-in lasts as long as one access token, 15 minutes, as it doesn't
 refresh tokens. Past that the user signs in again, which the API's session
@@ -806,8 +802,10 @@ makes a click. An export keeps the token it started with, so one still
 running after 15 minutes gets the files anyone may read but lists the rest as
 missing in its email.
 
-The Downloader's and versitygw's images are pinned to versions in
-`compose.yaml` and in the development `docker-compose.yml`; bump each in both.
+The Downloader's image follows its major version, `1`, so `docker compose pull`
+takes its minor and patch releases. versitygw's is pinned to a version. Both
+are set in `compose.yaml` and in the development `docker-compose.yml`; change
+each in both.
 
 ## Release notes
 
