@@ -17,6 +17,12 @@ const AUDIENCE = `${ISSUER}/api`;
 const REDIRECT_URI = 'http://localhost:5173/callback';
 const POST_LOGOUT_REDIRECT_URI = 'http://localhost:5173/';
 const ONI = { client_id: 'oni', redirect_uris: [REDIRECT_URI], post_logout_redirect_uris: [POST_LOGOUT_REDIRECT_URI] };
+// Like the Downloader, which posts its secret in the token request and sends no PKCE
+const DOWNLOADER = {
+  client_id: 'downloader',
+  client_secret: 'downloader-secret',
+  redirect_uris: ['http://localhost:7000/api/auth/callback'],
+} as const;
 const RESTRICTED = 'https://example.org/licenses/restricted';
 const RESTRICTED_FILE = 'http://test/sign-in/restricted.txt';
 const UPSTREAM_CLIENT = { clientId: 'ldacapi', clientSecret: 'upstream-secret' };
@@ -91,7 +97,7 @@ beforeAll(async () => {
   ({ app, prisma, config } = await buildTestApp(
     {
       OIDC_ISSUER: ISSUER,
-      OIDC_CLIENTS: JSON.stringify([ONI]),
+      OIDC_CLIENTS: JSON.stringify([ONI, DOWNLOADER]),
       OIDC_UPSTREAM_ISSUER: upstream.issuer,
       OIDC_UPSTREAM_CLIENT_ID: UPSTREAM_CLIENT.clientId,
       OIDC_UPSTREAM_CLIENT_SECRET: UPSTREAM_CLIENT.clientSecret,
@@ -176,6 +182,31 @@ describe('signing in at the upstream provider', () => {
     expect(refreshed.statusCode).toBe(200);
     expect(refreshed.json().refresh_token).not.toBe(refresh_token);
     expect((await fetchRestricted(refreshed.json().access_token)).statusCode).toBe(200);
+  });
+
+  it('signs a confidential client in that posts its secret, without PKCE', async () => {
+    const [redirectUri] = DOWNLOADER.redirect_uris;
+    const browser = new Browser(app, ISSUER);
+    const authorize = `/oauth/authorize?${new URLSearchParams({
+      client_id: DOWNLOADER.client_id,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'public openid profile email',
+      state: 'downloader-state',
+    })}`;
+    const toUpstream = await browser.follow(authorize);
+    const redirect = new URL((await browser.follow(upstream.signIn(toUpstream.headers.location as string, ALICE))).headers.location as string);
+    expect(redirect.searchParams.get('error')).toBeNull();
+
+    const code = redirect.searchParams.get('code') ?? '';
+    const exchange = (secret: string) =>
+      tokenRequest({ grant_type: 'authorization_code', code, redirect_uri: redirectUri, client_id: DOWNLOADER.client_id, client_secret: secret });
+    expect((await exchange('wrong')).statusCode).toBe(401);
+    const tokens = await exchange(DOWNLOADER.client_secret);
+
+    expect(tokens.statusCode).toBe(200);
+    expect(await verify(tokens.json().id_token, DOWNLOADER.client_id)).toMatchObject({ sub: ALICE.sub, email: ALICE.email });
+    expect((await fetchRestricted(tokens.json().access_token)).statusCode).toBe(200);
   });
 
   it('signs in after the sign-in page is loaded twice', async () => {

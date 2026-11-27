@@ -9,6 +9,7 @@ import { ADMIN_PATH, adminClient } from './admin/client.ts';
 import { adminPages } from './admin/plugin.ts';
 import { access, isAuthenticated } from './auth.ts';
 import { config } from './configuration.ts';
+import { memberOfFileTransformer } from './files.ts';
 import type { IndexQueue } from './index-queue/index-queue.ts';
 import { logger } from './logger.ts';
 import { oidcProvider } from './oidc/provider.ts';
@@ -49,6 +50,7 @@ export function buildApp({ search, storage, indexQueue }: AppDeps) {
         entityVisibilityFilter: AllVisibleEntityFilter,
         searchVisibilityFilter: AllVisibleSearchFilter,
         entityTransformers: [oniEntityTransformer(prisma)],
+        fileTransformers: [memberOfFileTransformer(prisma)],
         storage: { metadata: EntityMetaMetadata(), content: storage },
       });
       api.register(ldacapi);

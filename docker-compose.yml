@@ -45,6 +45,87 @@ services:
     ports:
       - "127.0.0.1:3000:80"
 
+  # On the host's network, as the browser and the downloader must both reach the API at localhost:8080
+  downloader:
+    image: ghcr.io/crate-works/downloader:1
+    network_mode: host
+    environment:
+      - HOST=127.0.0.1
+      - ROCRATE_API_BASE_URL=http://localhost:8080/api
+      - OIDC_ISSUER=http://localhost:8080
+      - OIDC_CLIENT_ID=downloader
+      - OIDC_CLIENT_SECRET=downloader
+      - OIDC_REDIRECT_URI=http://localhost:7000/api/auth/callback
+      - SESSION_SECRET=downloader-development-session-secret
+      - S3_BUCKET=downloads
+      - EMAIL_FROM=downloads@example.org
+      - SMTP_URL=smtp://localhost:1025
+      - AWS_REGION=ap-southeast-2
+      - AWS_ENDPOINT_URL_S3=http://localhost:7080
+      - AWS_ACCESS_KEY_ID=downloader
+      - AWS_SECRET_ACCESS_KEY=downloader-development-secret
+    depends_on:
+      downloader-setup:
+        condition: service_completed_successfully
+      mail:
+        condition: service_healthy
+    profiles: [downloader]
+
+  # Holds the zips, as in production; the downloader addresses the bucket as downloads.localhost
+  s3:
+    image: versity/versitygw:v1.11.0
+    user: "1000:1000"
+    entrypoint: ["sh", "-c", "mkdir -p /downloads/buckets /downloads/meta && exec docker-entrypoint.sh"]
+    environment:
+      - ROOT_ACCESS_KEY=downloader
+      - ROOT_SECRET_KEY=downloader-development-secret
+      - VGW_BACKEND=posix
+      - VGW_BACKEND_ARG=/downloads/buckets
+      - VGW_META_SIDECAR=/downloads/meta
+      - VGW_REGION=ap-southeast-2
+      - VGW_VIRTUAL_DOMAIN=localhost
+      - VGW_HEALTH=/health
+    tmpfs:
+      - /downloads:uid=1000,gid=1000
+    ports:
+      - "127.0.0.1:7080:7070"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:7070/health"]
+      interval: 2s
+      retries: 15
+    profiles: [downloader]
+
+  # Catches the downloader's emails; read them at http://localhost:8025
+  mail:
+    image: axllent/mailpit:v1
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    profiles: [downloader]
+
+  # Creates the bucket unless it exists, as in production
+  downloader-setup:
+    image: ghcr.io/crate-works/downloader:1
+    working_dir: /app
+    environment:
+      - AWS_REGION=ap-southeast-2
+      - AWS_ACCESS_KEY_ID=downloader
+      - AWS_SECRET_ACCESS_KEY=downloader-development-secret
+    entrypoint: ["node", "--input-type=module", "-e"]
+    command:
+      - |
+        import { BucketAlreadyOwnedByYou, CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
+        const s3 = new S3Client({ endpoint: 'http://s3:7070', forcePathStyle: true });
+        await s3.send(new CreateBucketCommand({ Bucket: 'downloads' })).catch((err) => {
+          if (!(err instanceof BucketAlreadyOwnedByYou)) throw err;
+        });
+    healthcheck:
+      disable: true
+    depends_on:
+      s3:
+        condition: service_healthy
+    profiles: [downloader]
+
   upstream:
     image: ghcr.io/navikt/mock-oauth2-server:6
     environment:
